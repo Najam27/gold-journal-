@@ -3,6 +3,7 @@
 import { getSupabase, humanError } from "./supabaseClient.js";
 import { SCREENSHOTS_BUCKET } from "./config.js";
 import { DEFAULT_OPTIONS } from "./defaults.js";
+import { saveSnapshot, loadSnapshot, getQueue, enqueue, flushQueue } from "./offline.js";
 
 const listeners = new Set(); // data-changed listeners
 const syncListeners = new Set(); // sync-status listeners
@@ -40,15 +41,103 @@ function setSync(status) {
 }
 
 // ---------- network ----------
-window.addEventListener("online", () => {
+window.addEventListener("online", async () => {
   state.online = true;
-  setSync("synced");
-  refreshAll().catch(() => {});
+  if (!state.user) { setSync("synced"); return; }
+  setSync("syncing");
+  try {
+    const res = await flushQueue(state.user.id, applyQueuedOp);
+    await refreshAll();
+    if (res.synced) {
+      window.dispatchEvent(new CustomEvent("gj:synced", { detail: { count: res.synced } }));
+    }
+  } catch {
+    setSync(navigator.onLine ? "synced" : "offline");
+  }
 });
 window.addEventListener("offline", () => {
   state.online = false;
   setSync("offline");
 });
+
+// Map DB tables to the in-memory state arrays for optimistic offline updates.
+const TABLE_STATE = {
+  trades: "trades",
+  cash_transactions: "cash",
+  skipped_trades: "skipped",
+  weekly_reviews: "reviews",
+};
+
+function persistSnapshot() {
+  saveSnapshot(state.user?.id, state.currentAccountId, {
+    trades: state.trades,
+    cash: state.cash,
+    skipped: state.skipped,
+    reviews: state.reviews,
+  });
+}
+
+function applyOptimistic(table, op, payload, id) {
+  const key = TABLE_STATE[table];
+  if (!key) return;
+  const arr = state[key];
+  if (op === "delete") {
+    state[key] = arr.filter((r) => r.id !== id);
+    return;
+  }
+  if (op === "update") {
+    const r = arr.find((x) => x.id === id);
+    if (r) Object.assign(r, payload);
+    return;
+  }
+  arr.push({
+    id,
+    user_id: state.user?.id,
+    account_id: state.currentAccountId,
+    created_at: new Date().toISOString(),
+    ...payload,
+    __pending: true,
+  });
+}
+
+// Queue a write made while offline and reflect it locally right away.
+function offlineMutate(table, op, payload, id) {
+  if (op === "insert" && !id) id = "tmp-" + (crypto.randomUUID?.() || Date.now());
+  enqueue(state.user.id, { table, op, payload: payload || null, rowId: id || null, accountId: state.currentAccountId });
+  applyOptimistic(table, op, payload, id);
+  persistSnapshot();
+  setSync("offline");
+  emit();
+  return { offline: true, id };
+}
+
+// Replay one queued op against Supabase (used on reconnect).
+async function applyQueuedOp(op) {
+  const c = sb();
+  if (op.op === "insert") {
+    const { error } = await c.from(op.table).insert({ ...op.payload, user_id: state.user.id, account_id: op.accountId });
+    if (error) throw error;
+  } else if (op.op === "update") {
+    const { error } = await c.from(op.table).update(op.payload).eq("id", op.rowId);
+    if (error) throw error;
+  } else if (op.op === "delete") {
+    const { error } = await c.from(op.table).delete().eq("id", op.rowId);
+    if (error) throw error;
+  }
+}
+
+// Populate state from the cached snapshot + replay pending ops (offline boot / reads).
+function hydrateOffline() {
+  const snap = loadSnapshot(state.user?.id, state.currentAccountId);
+  state.trades = snap?.trades || [];
+  state.cash = snap?.cash || [];
+  state.skipped = snap?.skipped || [];
+  state.reviews = snap?.reviews || [];
+  for (const op of getQueue(state.user?.id)) {
+    if (op.accountId === state.currentAccountId) applyOptimistic(op.table, op.op, op.payload, op.rowId);
+  }
+  emit();
+}
 
 export function setUser(user) {
   state.user = user;
@@ -170,6 +259,7 @@ export async function resetOptions() {
 export async function refreshAll() {
   if (!state.user) return;
   if (!navigator.onLine) {
+    hydrateOffline();
     setSync("offline");
     return;
   }
@@ -187,6 +277,7 @@ export async function refreshAll() {
     state.cash = cash.data || [];
     state.skipped = skipped.data || [];
     state.reviews = reviews.data || [];
+    persistSnapshot();
     setSync("synced");
     emit();
   } catch (err) {
@@ -228,6 +319,7 @@ export function tradeRunningBalance(tradeId) {
 
 // ---------- trades CRUD ----------
 export async function saveTrade(payload, id = null) {
+  if (!navigator.onLine) return offlineMutate("trades", id ? "update" : "insert", payload, id);
   const row = { ...payload, user_id: state.user.id, account_id: state.currentAccountId };
   let res;
   if (id) res = await sb().from("trades").update(row).eq("id", id).select().single();
@@ -238,6 +330,7 @@ export async function saveTrade(payload, id = null) {
 }
 
 export async function deleteTrade(id) {
+  if (!navigator.onLine) return offlineMutate("trades", "delete", null, id);
   const t = state.trades.find((x) => x.id === id);
   if (t?.screenshot_path) {
     await sb().storage.from(SCREENSHOTS_BUCKET).remove([t.screenshot_path]).catch(() => {});
@@ -255,6 +348,7 @@ export async function clearAllTrades() {
 
 // ---------- cash CRUD ----------
 export async function saveCash(payload, id = null) {
+  if (!navigator.onLine) return offlineMutate("cash_transactions", id ? "update" : "insert", payload, id);
   const row = { ...payload, user_id: state.user.id, account_id: state.currentAccountId };
   let res;
   if (id) res = await sb().from("cash_transactions").update(row).eq("id", id).select().single();
@@ -265,6 +359,7 @@ export async function saveCash(payload, id = null) {
 }
 
 export async function deleteCash(id) {
+  if (!navigator.onLine) return offlineMutate("cash_transactions", "delete", null, id);
   const { error } = await sb().from("cash_transactions").delete().eq("id", id);
   if (error) throw new Error(humanError(error));
   await refreshAll();
@@ -272,6 +367,7 @@ export async function deleteCash(id) {
 
 // ---------- skipped CRUD ----------
 export async function saveSkipped(payload, id = null) {
+  if (!navigator.onLine) return offlineMutate("skipped_trades", id ? "update" : "insert", payload, id);
   const row = { ...payload, user_id: state.user.id, account_id: state.currentAccountId };
   let res;
   if (id) res = await sb().from("skipped_trades").update(row).eq("id", id).select().single();
@@ -282,6 +378,7 @@ export async function saveSkipped(payload, id = null) {
 }
 
 export async function deleteSkipped(id) {
+  if (!navigator.onLine) return offlineMutate("skipped_trades", "delete", null, id);
   const { error } = await sb().from("skipped_trades").delete().eq("id", id);
   if (error) throw new Error(humanError(error));
   await refreshAll();
@@ -289,6 +386,7 @@ export async function deleteSkipped(id) {
 
 // ---------- weekly reviews CRUD ----------
 export async function saveReview(payload, id = null) {
+  if (!navigator.onLine) return offlineMutate("weekly_reviews", id ? "update" : "insert", payload, id);
   const row = { ...payload, user_id: state.user.id, account_id: state.currentAccountId };
   let res;
   if (id) res = await sb().from("weekly_reviews").update(row).eq("id", id).select().single();
@@ -299,6 +397,7 @@ export async function saveReview(payload, id = null) {
 }
 
 export async function deleteReview(id) {
+  if (!navigator.onLine) return offlineMutate("weekly_reviews", "delete", null, id);
   const { error } = await sb().from("weekly_reviews").delete().eq("id", id);
   if (error) throw new Error(humanError(error));
   await refreshAll();

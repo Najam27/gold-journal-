@@ -348,7 +348,9 @@ export function openTradeModal(trade, onDone, { duplicate = false } = {}) {
     btn.disabled = true; btn.classList.add("loading");
     try {
       let screenshot_path = existingPath;
-      if (pendingFile) {
+      if (pendingFile && !navigator.onLine) {
+        toast("Offline: trade will sync on reconnect. Add the screenshot again once online.", "warning");
+      } else if (pendingFile) {
         const prog = form.querySelector("#dz-progress");
         prog.classList.remove("hidden");
         screenshot_path = await uploadScreenshot(pendingFile, (p) => { prog.querySelector("span").style.width = p + "%"; });

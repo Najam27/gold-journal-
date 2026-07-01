@@ -7,6 +7,7 @@ import {
 } from "./store.js";
 import { toast, confirmDialog, fmtMoney, fmtPct, escapeHtml } from "./ui.js";
 import { exportCSV, exportExcel, exportTradesPDF, tradesToRows } from "./export.js";
+import { initPWA, promptInstall, applyUpdate, isIOS, isStandalone, canPromptInstall } from "./pwa.js";
 
 import * as tradelog from "./pages/tradelog.js";
 import * as missed from "./pages/missed.js";
@@ -31,6 +32,7 @@ const root = () => document.getElementById("app-root");
 
 // ---------------- boot ----------------
 async function boot() {
+  initPWA();
   wireSplash();
   const c = getSupabase();
   if (!c) {
@@ -120,6 +122,9 @@ function renderShell() {
         <button class="ic-btn" id="sb-signout" title="Sign out"><i data-lucide="log-out"></i></button>
       </div>
 
+      <button class="sb-install" id="btn-install" hidden><i data-lucide="download"></i> Install App</button>
+      <div class="ios-tip" id="ios-tip" hidden>Tap the <b>Share</b> button, then <b>"Add to Home Screen"</b>.</div>
+
       <div class="sb-account">
         <label>Account</label>
         <div class="acct-switch">
@@ -172,6 +177,7 @@ function renderShell() {
   renderSidebarStats();
   updateSync(state.sync);
   renderDiagnostics();
+  refreshInstallUI();
 }
 
 function wireShell() {
@@ -211,7 +217,54 @@ function wireShell() {
     root().querySelector("#diag-toggle .chev").classList.toggle("up");
     renderDiagnostics();
   });
+
+  root().querySelector("#btn-install")?.addEventListener("click", onInstallClick);
 }
+
+// ---------------- PWA install + update ----------------
+let installAvailable = false;
+
+function refreshInstallUI() {
+  const btn = root().querySelector("#btn-install");
+  if (!btn) return;
+  const show = !isStandalone() && (installAvailable || isIOS());
+  btn.hidden = !show;
+  if (!show) root().querySelector("#ios-tip")?.setAttribute("hidden", "");
+}
+
+async function onInstallClick() {
+  if (canPromptInstall()) {
+    const outcome = await promptInstall();
+    if (outcome === "accepted") { installAvailable = false; refreshInstallUI(); }
+  } else if (isIOS()) {
+    const tip = root().querySelector("#ios-tip");
+    if (tip) tip.toggleAttribute("hidden");
+  }
+}
+
+function showUpdateBanner() {
+  if (document.getElementById("update-banner")) return;
+  const bar = document.createElement("div");
+  bar.id = "update-banner";
+  bar.className = "update-banner";
+  bar.innerHTML = `<span class="ub-text"><i data-lucide="rocket"></i> A new version is available</span><button class="btn btn-gold btn-sm" id="update-now">Update Now</button>`;
+  document.body.appendChild(bar);
+  window.lucide?.createIcons({ nameAttr: "data-lucide" });
+  requestAnimationFrame(() => bar.classList.add("show"));
+  bar.querySelector("#update-now").addEventListener("click", (e) => {
+    e.currentTarget.textContent = "Updating…";
+    e.currentTarget.disabled = true;
+    applyUpdate();
+  });
+}
+
+window.addEventListener("gj:installable", () => { installAvailable = true; refreshInstallUI(); });
+window.addEventListener("gj:installed", () => { installAvailable = false; refreshInstallUI(); toast("App installed successfully", "success"); });
+window.addEventListener("gj:update-ready", showUpdateBanner);
+window.addEventListener("gj:synced", (e) => {
+  const n = e.detail?.count || 0;
+  if (n) toast(`${n} change${n === 1 ? "" : "s"} synced`, "success");
+});
 
 function openDrawer() { root().querySelector("#sidebar").classList.add("open"); root().querySelector("#sb-backdrop").classList.add("show"); }
 function closeDrawer() { root().querySelector("#sidebar").classList.remove("open"); root().querySelector("#sb-backdrop").classList.remove("show"); }
