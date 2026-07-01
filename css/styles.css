@@ -379,6 +379,19 @@ body.gj-modal-open { overflow: hidden; }
 .offline-banner.show { bottom: 18px; }
 .offline-banner i { width: 16px; height: 16px; }
 
+/* PWA install button (sidebar) */
+.sb-install { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin: 10px 0 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--gold-glow); background: rgba(212, 175, 55, 0.10); color: var(--gold-2); font-weight: 600; font-size: 13px; cursor: pointer; transition: 0.2s; }
+.sb-install:hover { background: rgba(212, 175, 55, 0.18); }
+.sb-install i { width: 16px; height: 16px; }
+.ios-tip { margin: 8px 0 0; padding: 10px 12px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); font-size: 12px; line-height: 1.5; }
+.ios-tip b { color: var(--text, #fff); }
+
+/* PWA update banner (top) */
+.update-banner { position: fixed; top: -70px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; background: var(--panel); border: 1px solid var(--gold-glow); color: #fff; padding: 10px 12px 10px 16px; border-radius: 12px; font-size: 13px; z-index: 9998; box-shadow: var(--shadow); transition: top 0.35s cubic-bezier(0.22, 1, 0.36, 1); max-width: calc(100vw - 24px); }
+.update-banner.show { top: 16px; }
+.update-banner .ub-text { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.update-banner .ub-text i { width: 16px; height: 16px; color: var(--gold-2); }
+
 /* =====================================================================
    Charts / Analysis
    ===================================================================== */
