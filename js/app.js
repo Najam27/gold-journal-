@@ -34,9 +34,13 @@ const root = () => document.getElementById("app-root");
 async function boot() {
   initPWA();
   wireSplash();
+  if (!isConfigured()) {
+    finishSplash(() => renderConfigError(root()));
+    return;
+  }
   const c = getSupabase();
   if (!c) {
-    finishSplash(() => renderAuth(root()));
+    finishSplash(() => renderConfigError(root()));
     return;
   }
   const { data } = await c.auth.getSession();
@@ -100,6 +104,20 @@ function finishSplash(then) {
     splash.classList.add("hide");
     setTimeout(() => { splash.style.display = "none"; then?.(); }, 500);
   }, 300);
+}
+
+// ---------------- config error ----------------
+// Shown when Supabase env vars weren't injected at build time. Renders a
+// clear, visible screen instead of silently failing or only logging.
+function renderConfigError(container) {
+  container.innerHTML = `
+  <div class="config-error" role="alert">
+    <div class="config-error-card glass">
+      <div class="config-error-icon"><i data-lucide="alert-triangle"></i></div>
+      <h1 class="config-error-title">App configuration missing. Please contact support.</h1>
+    </div>
+  </div>`;
+  window.lucide?.createIcons({ nameAttr: "data-lucide" });
 }
 
 // ---------------- shell ----------------

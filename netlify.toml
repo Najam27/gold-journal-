@@ -1,0 +1,12 @@
+[build]
+  publish = "."
+  # Injects SUPABASE_URL / SUPABASE_ANON_KEY (from Netlify env vars) into
+  # js/env.js at build time. No bundler/build step is otherwise required.
+  command = "node build.js"
+
+# Single-page app fallback: any path that is not an existing static file
+# is served index.html so client-side routing / OAuth callbacks work.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

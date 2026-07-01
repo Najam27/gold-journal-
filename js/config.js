@@ -1,16 +1,19 @@
 // =====================================================================
 // Gold Journal — configuration
 // ---------------------------------------------------------------------
-// Fill in your Supabase project credentials below. Both values are
-// public / safe to ship in a static site (the anon key is protected by
-// Row Level Security). NEVER put your service_role key here.
+// Credentials are NEVER hardcoded here. They are injected at build time
+// from environment variables (Netlify env vars in production, a local
+// .env file in development) by build.js, which writes js/env.js. That
+// file sets window.__GJ_SUPABASE_URL__ / window.__GJ_SUPABASE_ANON_KEY__
+// before this module runs.
 //
-// Find them in: Supabase Dashboard -> Project Settings -> API
+// Both values are public / safe to ship in a static site (the anon key
+// is protected by Row Level Security). The service_role key must NEVER
+// be used in frontend code.
 // =====================================================================
 
-export const SUPABASE_URL = window.__GJ_SUPABASE_URL__ || "YOUR_SUPABASE_URL";
-export const SUPABASE_ANON_KEY =
-  window.__GJ_SUPABASE_ANON_KEY__ || "YOUR_SUPABASE_ANON_KEY";
+export const SUPABASE_URL = (window.__GJ_SUPABASE_URL__ || "").trim();
+export const SUPABASE_ANON_KEY = (window.__GJ_SUPABASE_ANON_KEY__ || "").trim();
 
 // Storage bucket used for trade screenshots (created by schema.sql).
 export const SCREENSHOTS_BUCKET = "screenshots";
@@ -19,7 +22,6 @@ export const SCREENSHOTS_BUCKET = "screenshots";
 export const AI_MODEL = "openai/gpt-4o-mini";
 
 export const isConfigured = () =>
-  SUPABASE_URL &&
-  SUPABASE_ANON_KEY &&
-  !SUPABASE_URL.startsWith("YOUR_") &&
-  !SUPABASE_ANON_KEY.startsWith("YOUR_");
+  Boolean(SUPABASE_URL) &&
+  Boolean(SUPABASE_ANON_KEY) &&
+  /^https?:\/\//.test(SUPABASE_URL);

@@ -503,3 +503,22 @@ body.gj-modal-open { overflow: hidden; }
   .stat-strip { grid-template-columns: 1fr; }
   .view-grid { grid-template-columns: 1fr; }
 }
+
+/* ---------------- config error screen ---------------- */
+.config-error {
+  min-height: 100vh; min-height: 100dvh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px; text-align: center;
+}
+.config-error-card {
+  max-width: 440px; width: 100%;
+  padding: 32px 28px; border-radius: 16px;
+  border: 1px solid rgba(255, 92, 108, 0.35);
+}
+.config-error-icon {
+  width: 56px; height: 56px; margin: 0 auto 16px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: rgba(255, 92, 108, 0.12); color: #ff5c6c;
+}
+.config-error-icon i { width: 30px; height: 30px; }
+.config-error-title { font-size: 18px; font-weight: 700; line-height: 1.4; margin: 0; }

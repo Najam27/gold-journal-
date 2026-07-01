@@ -4,3 +4,6 @@ node_modules/
 .env
 .env.local
 js/config.local.js
+
+# Generated at build time from environment variables (see build.js)
+js/env.js

@@ -26,7 +26,7 @@ export function renderAuth(container) {
 
       ${
         !isConfigured()
-          ? `<div class="config-warn"><i data-lucide="alert-triangle"></i> Supabase isn't configured yet. Add your project URL &amp; anon key in <code>js/config.js</code>.</div>`
+          ? `<div class="config-warn"><i data-lucide="alert-triangle"></i> App configuration missing. Please contact support.</div>`
           : ""
       }
 
