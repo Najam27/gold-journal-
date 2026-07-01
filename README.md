@@ -47,22 +47,35 @@ and full CSV / Excel / PDF export.
    `weekly_reviews`, `journal_meta`), Row Level Security policies, the private
    `screenshots` storage bucket, and enables Realtime.
 
-### 2. Add your credentials
+### 2. Add your credentials (environment variables)
 
-Open [`js/config.js`](js/config.js) and set:
+Credentials are **never hardcoded** in the source. They are injected at build
+time from environment variables into `js/env.js` (git-ignored) by
+[`build.js`](build.js).
 
-```js
-export const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
-export const SUPABASE_ANON_KEY = "YOUR_ANON_KEY";
+Find both values under **Project Settings → API**. The **anon** key is safe to
+ship in a static site — it is protected by Row Level Security. **Never** put the
+`service_role` key anywhere in frontend code.
+
+**Local development** — copy `.env.example` to `.env` and fill it in:
+
+```bash
+cp .env.example .env
+# edit .env:
+#   SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+#   SUPABASE_ANON_KEY=YOUR_ANON_KEY
+node build.js   # writes js/env.js from your .env
 ```
 
-Find both under **Project Settings → API**. The **anon** key is safe to ship in
-a static site — it is protected by Row Level Security. **Never** put the
-`service_role` key here.
+`.env` and `js/env.js` are both git-ignored and must never be committed.
 
-> Alternatively, define `window.__GJ_SUPABASE_URL__` and
-> `window.__GJ_SUPABASE_ANON_KEY__` before `app.js` loads (e.g. injected at
-> deploy time) and leave `config.js` untouched.
+**Netlify** — set `SUPABASE_URL` and `SUPABASE_ANON_KEY` under **Site Settings →
+Environment Variables**. The build command (`node build.js`, configured in
+[`netlify.toml`](netlify.toml)) injects them into `js/env.js` at deploy time.
+
+If either variable is missing, the app shows a visible error screen
+("App configuration missing. Please contact support.") instead of failing
+silently.
 
 ### 3. (Optional) Enable Google sign-in
 
@@ -72,18 +85,29 @@ dev) to **Authentication → URL Configuration → Redirect URLs**.
 
 ### 4. Run locally
 
-It's a static site — serve the folder with anything:
+It's a static site. Generate `js/env.js` from your `.env`, then serve the folder:
 
 ```bash
+node build.js               # writes js/env.js
 python3 -m http.server 8080
 # then open http://localhost:8080
 ```
 
-### 5. Deploy
+### 5. Deploy (Netlify)
 
-Deploy the repository root as a static site (Netlify, Vercel, Cloudflare Pages,
-GitHub Pages, …). No build command is required — just publish the root
-directory. Make sure your deployed URL is added to Supabase's redirect URLs.
+The repo ships with [`netlify.toml`](netlify.toml):
+
+- `publish = "."` — the repository root is served as-is.
+- `command = "node build.js"` — injects `SUPABASE_URL` / `SUPABASE_ANON_KEY`
+  (from **Site Settings → Environment Variables**) into `js/env.js` at build
+  time.
+- A `/* → /index.html` (200) redirect provides the single-page-app fallback so
+  deep links and the OAuth callback resolve instead of 404ing.
+
+Add your Netlify URL (and `http://localhost:8080` for local dev) to Supabase's
+**Authentication → URL Configuration → Redirect URLs**. Other static hosts
+(Vercel, Cloudflare Pages, …) work too — just run `node build.js` as the build
+command and publish the root.
 
 ---
 
@@ -92,8 +116,11 @@ directory. Make sure your deployed URL is added to Supabase's redirect URLs.
 ```
 index.html            App shell + splash + CDN deps
 css/styles.css        Theme
+build.js              Injects env vars -> js/env.js at build time
+netlify.toml          Netlify build command + SPA redirect
 js/
-  config.js           Supabase URL / anon key
+  env.js              Generated at build time (git-ignored); sets config globals
+  config.js           Reads Supabase URL / anon key from env globals
   supabaseClient.js   Client singleton + error mapping
   store.js            Data layer (CRUD, balances, realtime, offline)
   auth.js             Auth screen + flows
