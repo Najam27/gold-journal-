@@ -149,6 +149,26 @@ begin
 end $$;
 
 -- =====================================================================
+-- Grants — the API roles need table privileges in addition to RLS.
+-- RLS decides *which rows* a user sees; GRANT decides whether the role
+-- may touch the table at all. Without these, the client gets
+-- "permission denied for table ...". Running the schema in the Supabase
+-- SQL editor covers this via default privileges, but we grant explicitly
+-- so the schema is self-contained and portable (local CLI, psql, etc.).
+-- =====================================================================
+grant usage on schema public to anon, authenticated;
+do $$
+declare t text;
+begin
+  foreach t in array array['accounts','trades','cash_transactions','skipped_trades','weekly_reviews','journal_meta']
+  loop
+    execute format('grant select, insert, update, delete on public.%I to anon, authenticated;', t);
+  end loop;
+end $$;
+alter default privileges in schema public
+  grant select, insert, update, delete on tables to anon, authenticated;
+
+-- =====================================================================
 -- Row Level Security — users can only see/modify their own rows
 -- =====================================================================
 do $$
