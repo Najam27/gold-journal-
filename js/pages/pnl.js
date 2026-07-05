@@ -1,4 +1,4 @@
-import { state } from "../store.js";
+import { state, currentAccount } from "../store.js";
 import { fmtMoney } from "../ui.js";
 
 let cursor = new Date();
@@ -9,14 +9,11 @@ export function render(container) {
   const month = cursor.getMonth();
   const monthName = cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 
-  const daily = dailyPnl(year, month);
-  const monthTotal = Object.values(daily).reduce((s, v) => s + v, 0);
-  const green = Object.values(daily).filter((v) => v > 0).length;
-  const red = Object.values(daily).filter((v) => v < 0).length;
+  const daily = dailyStats(year, month);
 
   container.innerHTML = `
-  <div class="page-head">
-    <div><h1 class="page-title">P&amp;L Calendar</h1><p class="page-sub">Daily profit / loss heatmap</p></div>
+  <div class="page-head pnl-head">
+    <div><h1 class="page-title">${monthName}</h1></div>
     <div class="page-actions">
       <button class="btn btn-ghost" id="prev"><i data-lucide="chevron-left"></i></button>
       <button class="btn btn-ghost" id="today">This Month</button>
@@ -24,18 +21,12 @@ export function render(container) {
     </div>
   </div>
 
-  <div class="stat-strip">
-    ${stat("Month", monthName, "calendar")}
-    ${stat("Net P&L", fmtMoney(monthTotal), "sigma", true)}
-    ${stat("Green Days", green, "trending-up")}
-    ${stat("Red Days", red, "trending-down")}
-  </div>
-
-  <div class="calendar glass" id="calendar">
-    <div class="cal-grid cal-head">
+  <div class="calendar weekly-calendar glass" id="calendar">
+    <div class="weekly-dow">
+      <div></div>
       ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => `<div class="cal-dow">${d}</div>`).join("")}
     </div>
-    <div class="cal-grid" id="cal-body">${cellsHtml(year, month, daily)}</div>
+    <div id="cal-body">${weeksHtml(year, month, daily)}</div>
   </div>`;
 
   window.lucide?.createIcons({ nameAttr: "data-lucide" });
@@ -47,46 +38,76 @@ export function render(container) {
   container.querySelector("#today").addEventListener("click", () => { const n = new Date(); cursor = new Date(n.getFullYear(), n.getMonth(), 1); render(container); });
 }
 
-function stat(label, value, icon, money) {
-  return `<div class="stat-card glass"><div class="stat-glow"></div><div class="stat-icon"><i data-lucide="${icon}"></i></div>
-    <div class="stat-meta"><div class="stat-label">${label}</div><div class="stat-value ${money ? "money" : ""}">${value}</div></div></div>`;
-}
-
-function dailyPnl(year, month) {
+function dailyStats(year, month) {
   const map = {};
   for (const t of state.trades) {
     const d = new Date(t.trade_date + "T00:00:00");
     if (d.getFullYear() === year && d.getMonth() === month) {
       const key = t.trade_date;
-      map[key] = (map[key] || 0) + Number(t.pnl || 0);
+      if (!map[key]) map[key] = { pnl: 0, trades: 0, wins: 0, losses: 0 };
+      map[key].pnl += Number(t.pnl || 0);
+      map[key].trades++;
+      if (t.result === "Win") map[key].wins++;
+      if (t.result === "Loss") map[key].losses++;
     }
   }
   return map;
 }
 
-function cellsHtml(year, month, daily) {
+function weeksHtml(year, month, daily) {
   const first = new Date(year, month, 1);
   const startDow = first.getDay();
   const days = new Date(year, month + 1, 0).getDate();
-  const vals = Object.values(daily).map(Math.abs);
-  const max = Math.max(1, ...vals);
-  let html = "";
-  for (let i = 0; i < startDow; i++) html += `<div class="cal-cell empty"></div>`;
+  const weeks = [];
+  let week = Array(7).fill(null);
+  for (let i = 0; i < startDow; i++) week[i] = null;
   for (let d = 1; d <= days; d++) {
-    const key = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    const pnl = daily[key];
-    let cls = "cal-cell", style = "";
-    if (pnl !== undefined) {
-      const intensity = Math.min(1, Math.abs(pnl) / max);
-      const alpha = 0.18 + intensity * 0.6;
-      if (pnl > 0) { cls += " pos"; style = `background:rgba(62,207,142,${alpha})`; }
-      else if (pnl < 0) { cls += " neg"; style = `background:rgba(255,92,108,${alpha})`; }
-      else { cls += " be"; }
+    const dow = new Date(year, month, d).getDay();
+    week[dow] = d;
+    if (dow === 6 || d === days) {
+      weeks.push(week);
+      week = Array(7).fill(null);
     }
-    html += `<div class="${cls}" style="${style}">
-      <span class="cal-day">${d}</span>
-      ${pnl !== undefined ? `<span class="cal-pnl">${fmtMoney(pnl)}</span>` : ""}
-    </div>`;
   }
+  const base = Number(currentAccount()?.starting_balance || 0);
+  const max = Math.max(1, ...Object.values(daily).map((v) => Math.abs(v.pnl)));
+  let html = "";
+  weeks.forEach((daysInWeek, i) => {
+    const weekTotal = daysInWeek.reduce((sum, d) => {
+      if (!d) return sum;
+      const key = keyFor(year, month, d);
+      return sum + Number(daily[key]?.pnl || 0);
+    }, 0);
+    const pct = base ? (weekTotal / base) * 100 : 0;
+    html += `<div class="week-row">
+      <div class="week-summary ${weekTotal > 0 ? "pos-bg" : weekTotal < 0 ? "neg-bg" : ""}">
+        <div class="week-label">Week ${i + 1} <span class="${pct >= 0 ? "pos" : "neg"}">${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%</span></div>
+        <div class="week-pnl">${fmtMoney(weekTotal)}</div>
+      </div>
+      <div class="week-days">${daysInWeek.map((d) => dayCell(year, month, d, daily, max)).join("")}</div>
+    </div>`;
+  });
   return html;
+}
+
+function keyFor(year, month, day) {
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function dayCell(year, month, day, daily, max) {
+  if (!day) return `<div class="cal-cell empty"></div>`;
+  const stats = daily[keyFor(year, month, day)];
+  let cls = "cal-cell", style = "";
+  if (stats) {
+    const intensity = Math.min(1, Math.abs(stats.pnl) / max);
+    const alpha = 0.16 + intensity * 0.45;
+    if (stats.pnl > 0) { cls += " pos"; style = `background:rgba(62,207,142,${alpha})`; }
+    else if (stats.pnl < 0) { cls += " neg"; style = `background:rgba(255,92,108,${alpha})`; }
+  }
+  const decided = stats ? stats.wins + stats.losses : 0;
+  const winRate = decided ? Math.round((stats.wins / decided) * 100) : 0;
+  return `<div class="${cls}" style="${style}">
+    <span class="cal-day">${day}</span>
+    ${stats ? `<div class="cal-cell-data"><span class="cal-pnl">${fmtMoney(stats.pnl)}</span><span class="cal-detail">${stats.trades} trades | ${winRate}%</span></div>` : ""}
+  </div>`;
 }

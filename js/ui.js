@@ -94,13 +94,22 @@ export const fmtPct = (n, d = 1) => `${Number(n || 0).toFixed(d)}%`;
 
 export const fmtDate = (d) => {
   if (!d) return "";
-  const date = typeof d === "string" ? new Date(d + "T00:00:00") : new Date(d);
+  if (typeof d === "string") {
+    const m = d.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  }
+  const date = new Date(d);
   if (Number.isNaN(date.getTime())) return String(d);
-  return date.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  });
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${day}/${month}/${date.getFullYear()}`;
+};
+
+export const fmtRR = (risk, reward) => {
+  const r = Number(risk);
+  if (!Number.isFinite(r) || r === 0) return "—";
+  const w = Number(reward || 0);
+  return `1 : ${(w / r).toFixed(2)}`;
 };
 
 export const todayISO = () => new Date().toISOString().slice(0, 10);

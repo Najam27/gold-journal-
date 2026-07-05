@@ -4,7 +4,7 @@
 // A screenshot that fails or times out is replaced by a placeholder and never
 // aborts the run.
 import { openModal } from "./modal.js";
-import { toast, fmtMoney, fmtDate } from "./ui.js";
+import { toast, fmtMoney, fmtDate, fmtRR } from "./ui.js";
 import { state, tradeRunningBalance, currentAccount, signedUrl } from "./store.js";
 
 const JSPDF_CDN = "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js";
@@ -253,7 +253,7 @@ function drawTradePage(doc, t, index) {
 
   // ----- LEFT COLUMN -----
   let y = top;
-  const rr = t.risk_amount ? (Number(t.reward_amount) / Number(t.risk_amount)).toFixed(2) : "—";
+  const rr = fmtRR(t.risk_amount, t.reward_amount);
   const section = (title) => {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);

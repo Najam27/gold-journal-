@@ -1,6 +1,6 @@
 // Export helpers: CSV, Excel (SheetJS), PDF (jsPDF + autotable).
 // Libraries are loaded on demand from CDN to keep initial load light.
-import { toast, fmtMoney, fmtDate } from "./ui.js";
+import { toast, fmtMoney, fmtDate, fmtRR } from "./ui.js";
 import { state, ledger, tradeRunningBalance } from "./store.js";
 
 async function loadScript(src) {
@@ -23,7 +23,7 @@ const CDN = {
 export function tradesToRows() {
   return state.trades.map((t, i) => ({
     "#": i + 1,
-    Date: t.trade_date,
+    Date: fmtDate(t.trade_date),
     Session: t.session || "",
     Side: t.side || "",
     Level: t.level || "",
@@ -39,7 +39,7 @@ export function tradesToRows() {
     "Patience Score": t.patience_score ?? "",
     "Risk $": Number(t.risk_amount || 0),
     "Reward $": Number(t.reward_amount || 0),
-    "R:R": t.risk_amount ? (Number(t.reward_amount) / Number(t.risk_amount)).toFixed(2) : "",
+    "R:R": fmtRR(t.risk_amount, t.reward_amount),
     Result: t.result || "",
     "P&L": Number(t.pnl || 0),
     "Running Balance": Number(tradeRunningBalance(t.id) || 0).toFixed(2),
@@ -49,7 +49,7 @@ export function tradesToRows() {
 
 export function skippedToRows() {
   return state.skipped.map((s) => ({
-    Date: s.trade_date,
+    Date: fmtDate(s.trade_date),
     Session: s.session || "",
     Level: s.level || "",
     Timeframe: s.timeframe || "",
@@ -127,14 +127,14 @@ export async function exportTradesPDF({ from, to, title = "Gold Journal — Trad
     const acct = state.accounts.find((a) => a.id === state.currentAccountId);
     doc.text(
       [
-        `Account: ${acct?.name || "-"}    Range: ${from || "All"} → ${to || "All"}`,
+        `Account: ${acct?.name || "-"}    Range: ${from ? fmtDate(from) : "All"} → ${to ? fmtDate(to) : "All"}`,
         `Balance: ${fmtMoney(l.balance)}    Total P&L: ${fmtMoney(totalPnl)}    Win rate: ${decided ? ((wins / decided) * 100).toFixed(1) : 0}%    Trades: ${trades.length}`,
       ],
       14,
       24
     );
 
-    const head = [["#", "Date", "Session", "Side", "Setup", "Result", "Risk $", "Reward $", "P&L", "Balance"]];
+    const head = [["#", "Date", "Session", "Side", "Setup", "Result", "Risk $", "Reward $", "R:R", "P&L", "Balance"]];
     const body = trades.map((t, i) => [
       i + 1,
       fmtDate(t.trade_date),
@@ -144,6 +144,7 @@ export async function exportTradesPDF({ from, to, title = "Gold Journal — Trad
       t.result || "",
       Number(t.risk_amount || 0).toFixed(2),
       Number(t.reward_amount || 0).toFixed(2),
+      fmtRR(t.risk_amount, t.reward_amount),
       Number(t.pnl || 0).toFixed(2),
       Number(tradeRunningBalance(t.id) || 0).toFixed(2),
     ]);

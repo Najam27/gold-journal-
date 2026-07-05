@@ -1,5 +1,5 @@
 import { state, ledger, tradeRunningBalance, currentAccount, saveTrade, deleteTrade, clearAllTrades, saveCash, uploadScreenshot, signedUrl } from "../store.js";
-import { toast, confirmDialog, fmtMoney, fmtNum, fmtDate, todayISO, escapeHtml, countUp, optionsHtml, skeletonRows } from "../ui.js";
+import { toast, confirmDialog, fmtMoney, fmtNum, fmtDate, fmtRR, todayISO, escapeHtml, countUp, optionsHtml, skeletonRows } from "../ui.js";
 import { openModal } from "../modal.js";
 import { exportTradesPDF } from "../export.js";
 import { openFullReport } from "../fullReport.js";
@@ -137,7 +137,7 @@ function rowsHtml(trades, l) {
   const idxOf = new Map(state.trades.map((t, i) => [t.id, i + 1]));
   return trades
     .map((t) => {
-      const rr = t.risk_amount ? (Number(t.reward_amount) / Number(t.risk_amount)).toFixed(2) : "—";
+      const rr = fmtRR(t.risk_amount, t.reward_amount);
       const cells = {
         idx: idxOf.get(t.id),
         date: fmtDate(t.trade_date),
@@ -268,11 +268,12 @@ export function openTradeModal(trade, onDone, { duplicate = false } = {}) {
   const t = trade || {};
   const isEdit = !!(trade && trade.id);
   const o = state.options;
+  const sessionValue = !isEdit && !duplicate && !t.session ? detectCurrentSession(o.sessions) : t.session;
   const bodyHtml = `
   <form id="trade-form" class="modal-form">
     <div class="form-section"><h6>Trade Details</h6><div class="grid-2">
       ${field("Date", `<input type="date" name="trade_date" value="${t.trade_date || todayISO()}" required>`)}
-      ${field("Session", sel("session", o.sessions, t.session))}
+      ${field("Session", sel("session", o.sessions, sessionValue))}
       ${field("Direction", sel("side", o.sides, t.side))}
       ${field("Result", sel("result", o.results, t.result))}
     </div></div>
@@ -389,11 +390,30 @@ export function openTradeModal(trade, onDone, { duplicate = false } = {}) {
   });
 }
 
+function detectCurrentSession(sessions = []) {
+  const now = new Date();
+  const pktHour = (now.getUTCHours() + 5) % 24;
+  const ranges = [
+    ["Pre-Asian", 3, 4],
+    ["Asian", 5, 7],
+    ["Post-Asian", 8, 9],
+    ["Pre-London", 10, 11],
+    ["London", 12, 13],
+    ["Post-London", 14, 15],
+    ["Pre-NY", 16, 16],
+    ["New York", 17, 19],
+    ["Post-NY", 20, 23],
+    ["Post-NY", 0, 2],
+  ];
+  const label = ranges.find(([, start, end]) => pktHour >= start && pktHour <= end)?.[0];
+  return sessions.find((s) => String(s).toLowerCase().startsWith(label?.toLowerCase() || "")) || "";
+}
+
 // ---------------- View modal ----------------
 async function openViewModal(id) {
   const t = state.trades.find((x) => x.id === id);
   if (!t) return;
-  const rr = t.risk_amount ? (Number(t.reward_amount) / Number(t.risk_amount)).toFixed(2) : "—";
+  const rr = fmtRR(t.risk_amount, t.reward_amount);
   const rows = [
     ["Date", fmtDate(t.trade_date)], ["Session", t.session], ["Side", t.side], ["Level", t.level],
     ["Timeframe", t.timeframe], ["Setup", t.setup_quality], ["Confirmation", t.confirmation_type],
