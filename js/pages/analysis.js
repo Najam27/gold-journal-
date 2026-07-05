@@ -64,10 +64,10 @@ export function render(container) {
     <div class="heatmap-head">
       <h6>Performance Heatmap</h6>
       <div class="heatmap-tabs">
-        ${["hour", "session", "level", "tf", "setup"].map((tab) => `<button class="heatmap-tab ${tab === "hour" ? "active" : ""}" data-heatmap="${tab}">${heatmapTabLabel(tab)}</button>`).join("")}
+        ${["edge", "hour", "session", "level", "tf", "setup"].map((tab) => `<button class="heatmap-tab ${tab === "edge" ? "active" : ""}" data-heatmap="${tab}">${heatmapTabLabel(tab)}</button>`).join("")}
       </div>
     </div>
-    <div id="heatmap-body">${heatmapHtml("hour")}</div>
+    <div id="heatmap-body">${heatmapHtml("edge")}</div>
   </div>`}`;
 
   window.lucide?.createIcons({ nameAttr: "data-lucide" });
@@ -90,7 +90,7 @@ const GRID = "rgba(255,255,255,0.06)";
 const TICK = "#8b93a7";
 
 function heatmapTabLabel(tab) {
-  return { hour: "By Hour", session: "By Session", level: "By Level", tf: "By TF", setup: "By Setup" }[tab];
+  return { edge: "Level Edge", hour: "By Hour", session: "By Session", level: "By Level", tf: "By TF", setup: "By Setup" }[tab];
 }
 
 function wireHeatmap(container) {
@@ -105,6 +105,7 @@ function wireHeatmap(container) {
 }
 
 function heatmapHtml(tab) {
+  if (tab === "edge") return levelEdgeHtml();
   if (tab === "hour") return hourHeatmapHtml();
   const configs = {
     session: ["Session", (t) => t.session, state.options.sessions],
@@ -120,7 +121,8 @@ function resultCounts(trades) {
   const wins = trades.filter((t) => t.result === "Win").length;
   const losses = trades.filter((t) => t.result === "Loss").length;
   const decided = wins + losses;
-  return { total: trades.length, wins, losses, winRate: decided ? (wins / decided) * 100 : 0 };
+  const pnl = trades.reduce((sum, t) => sum + Number(t.pnl || 0), 0);
+  return { total: trades.length, wins, losses, pnl, avgPnl: trades.length ? pnl / trades.length : 0, winRate: decided ? (wins / decided) * 100 : 0 };
 }
 
 function heatClass(stats) {
@@ -181,6 +183,69 @@ function dimensionHeatmapHtml(label, keyFn, defaults = []) {
         <div class="hm-metric ${heatClass(stats)}">${stats.total ? stats.winRate.toFixed(1) : "0.0"}%</div>`;
     }).join("")}
   </div>`;
+}
+
+function levelEdgeHtml() {
+  const combos = new Map();
+  for (const t of state.trades) {
+    const level = t.level || "-";
+    const tf = t.timeframe || "-";
+    const session = t.session || "-";
+    const key = `${level}|||${tf}|||${session}`;
+    if (!combos.has(key)) combos.set(key, { level, tf, session, trades: [] });
+    combos.get(key).trades.push(t);
+  }
+  const rows = [...combos.values()]
+    .map((row) => ({ ...row, stats: resultCounts(row.trades) }))
+    .sort((a, b) => b.stats.winRate - a.stats.winRate || b.stats.pnl - a.stats.pnl || b.stats.total - a.stats.total);
+  if (!rows.length) return `<div class="empty-state">No level data yet.</div>`;
+
+  const topRows = rows.filter((row) => row.stats.total > 0 && row.stats.pnl > 0).slice(0, 4);
+  return `
+    <div class="edge-summary">
+      ${topRows.length ? topRows.map((row) => edgeCard(row)).join("") : `<div class="edge-empty">No profitable level combinations yet.</div>`}
+    </div>
+    <div class="edge-grid">
+      <div class="hm-col-head">Level</div>
+      <div class="hm-col-head">TF</div>
+      <div class="hm-col-head">Session</div>
+      <div class="hm-col-head">Trades</div>
+      <div class="hm-col-head">W / L</div>
+      <div class="hm-col-head">Win Rate</div>
+      <div class="hm-col-head">Net P&L</div>
+      <div class="hm-col-head">Avg P&L</div>
+      ${rows.map((row) => {
+        const cls = edgeClass(row.stats);
+        return `<div class="edge-cell edge-main ${cls}">${escapeHtml(row.level)}</div>
+          <div class="edge-cell ${cls}">${escapeHtml(row.tf)}</div>
+          <div class="edge-cell ${cls}">${escapeHtml(row.session)}</div>
+          <div class="edge-cell ${cls}">${row.stats.total}</div>
+          <div class="edge-cell ${cls}">${row.stats.wins}W / ${row.stats.losses}L</div>
+          <div class="edge-cell ${cls}">${row.stats.winRate.toFixed(1)}%</div>
+          <div class="edge-cell ${cls}">${fmtMoney(row.stats.pnl)}</div>
+          <div class="edge-cell ${cls}">${fmtMoney(row.stats.avgPnl)}</div>`;
+      }).join("")}
+    </div>`;
+}
+
+function edgeCard(row) {
+  return `<div class="edge-card ${edgeClass(row.stats)}">
+    <div class="edge-card-title">${escapeHtml(row.level)}</div>
+    <div class="edge-card-sub">${escapeHtml(row.tf)} &middot; ${escapeHtml(row.session)}</div>
+    <div class="edge-card-metrics">
+      <span>${row.stats.total} trades</span>
+      <span>${row.stats.wins}W / ${row.stats.losses}L</span>
+      <span>${row.stats.winRate.toFixed(1)}%</span>
+      <span>${fmtMoney(row.stats.pnl)}</span>
+    </div>
+  </div>`;
+}
+
+function edgeClass(stats) {
+  if (!stats.total) return "";
+  if (stats.pnl > 0 && stats.winRate >= 60) return "hm-pos";
+  if (stats.pnl < 0 || stats.winRate < 40) return "hm-neg";
+  return "hm-mid";
 }
 
 async function drawCharts() {

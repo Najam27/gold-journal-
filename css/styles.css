@@ -421,6 +421,18 @@ body.gj-modal-open { overflow: hidden; }
 .hm-pos { background: rgba(62, 207, 142, 0.28); color: #d8fff0; }
 .hm-neg { background: rgba(255, 92, 108, 0.25); color: #ffe0e4; }
 .hm-mid { background: rgba(139, 147, 167, 0.14); color: var(--text); }
+.edge-summary { display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 8px; min-width: 760px; margin-bottom: 12px; }
+.edge-card, .edge-empty { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: rgba(255, 255, 255, 0.025); }
+.edge-empty { grid-column: 1 / -1; color: var(--muted); font-size: 13px; }
+.edge-card-title { font-weight: 800; color: #fff; font-size: 14px; }
+.edge-card-sub { margin-top: 3px; color: #b9cff2; font-size: 11px; }
+.edge-card-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; margin-top: 9px; font-size: 11px; color: rgba(255, 255, 255, 0.84); }
+.edge-grid { display: grid; grid-template-columns: minmax(130px, 1.2fr) minmax(70px, 0.7fr) minmax(150px, 1.4fr) repeat(5, minmax(86px, 0.85fr)); gap: 4px; min-width: 940px; }
+.edge-cell {
+  min-height: 38px; border: 1px solid var(--line); border-radius: 6px; background: rgba(255, 255, 255, 0.015);
+  display: flex; align-items: center; justify-content: center; padding: 6px 8px; color: var(--muted); font-size: 11px; text-align: center;
+}
+.edge-main { justify-content: flex-start; color: var(--text); font-weight: 700; text-align: left; }
 
 /* =====================================================================
    Calendar
@@ -430,19 +442,24 @@ body.gj-modal-open { overflow: hidden; }
 .weekly-dow { display: grid; grid-template-columns: 180px repeat(7, minmax(84px, 1fr)); gap: 8px; min-width: 820px; margin-bottom: 8px; }
 .cal-dow { text-align: center; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #9fb0d0; }
 .week-row { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 8px; min-width: 820px; margin-bottom: 8px; }
-.week-summary { min-height: 72px; border-radius: 8px; border: 1px solid var(--line); padding: 13px 12px; background: rgba(255, 255, 255, 0.025); }
-.week-summary.pos-bg { background: rgba(62, 207, 142, 0.08); }
-.week-summary.neg-bg { background: rgba(255, 92, 108, 0.08); }
+.week-summary { min-height: 82px; border-radius: 8px; border: 1px solid #2a2f38; padding: 13px 12px; background: #1a1d22; }
+.week-summary.week-win { background: linear-gradient(180deg, rgba(18, 64, 39, 0.92), rgba(22, 31, 29, 0.96)); border-color: rgba(62, 207, 142, 0.55); }
+.week-summary.week-loss { background: linear-gradient(180deg, rgba(92, 24, 28, 0.92), rgba(34, 23, 25, 0.96)); border-color: rgba(255, 92, 108, 0.55); }
 .week-label { display: flex; align-items: baseline; gap: 7px; color: #b9cff2; font-size: 13px; }
 .week-label span { font-size: 11px; font-weight: 800; }
 .week-pnl { margin-top: 8px; font-family: var(--mono); font-size: 22px; font-weight: 800; color: #fff; }
+.week-wl { margin-top: 5px; font-size: 10px; font-weight: 800; color: rgba(255, 255, 255, 0.75); }
 .week-days { display: grid; grid-template-columns: repeat(7, minmax(84px, 1fr)); gap: 8px; }
-.cal-cell { height: 72px; border-radius: 8px; border: 1px solid var(--line); padding: 8px; display: flex; flex-direction: column; justify-content: space-between; background: rgba(255, 255, 255, 0.02); }
-.cal-cell.empty { background: rgba(255, 255, 255, 0.015); }
-.cal-day { font-size: 12px; color: #dce8ff; font-weight: 700; }
+.cal-cell { height: 82px; border-radius: 8px; border: 1px solid #2a2f38; padding: 8px; display: flex; flex-direction: column; justify-content: space-between; background: #1a1d22; }
+.cal-cell.empty { background: #1a1d22; }
+.cal-cell.pos { border-color: rgba(62, 207, 142, 0.72); }
+.cal-cell.neg { border-color: rgba(255, 92, 108, 0.72); }
+.cal-day { align-self: flex-end; font-size: 12px; color: #dce8ff; font-weight: 700; }
 .cal-cell-data { text-align: right; }
 .cal-pnl { display: block; font-family: var(--mono); font-size: 12px; font-weight: 800; color: #fff; }
-.cal-detail { display: block; margin-top: 2px; font-size: 9px; color: rgba(255, 255, 255, 0.82); }
+.cal-detail { display: block; margin-top: 2px; font-size: 9px; font-weight: 800; color: rgba(255, 255, 255, 0.82); }
+.cal-cell.pos .cal-detail { color: #31f59a; }
+.cal-cell.neg .cal-detail { color: #ff6978; }
 .cal-in { animation: fadeUp 0.35s cubic-bezier(0.22, 1, 0.36, 1); }
 
 /* =====================================================================

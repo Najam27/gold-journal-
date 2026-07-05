@@ -73,16 +73,25 @@ function weeksHtml(year, month, daily) {
   const max = Math.max(1, ...Object.values(daily).map((v) => Math.abs(v.pnl)));
   let html = "";
   weeks.forEach((daysInWeek, i) => {
-    const weekTotal = daysInWeek.reduce((sum, d) => {
-      if (!d) return sum;
+    const weekStats = daysInWeek.reduce((acc, d) => {
+      if (!d) return acc;
       const key = keyFor(year, month, d);
-      return sum + Number(daily[key]?.pnl || 0);
-    }, 0);
+      const stats = daily[key];
+      if (!stats) return acc;
+      acc.pnl += Number(stats.pnl || 0);
+      acc.trades += stats.trades;
+      acc.wins += stats.wins;
+      acc.losses += stats.losses;
+      return acc;
+    }, { pnl: 0, trades: 0, wins: 0, losses: 0 });
+    const weekTotal = weekStats.pnl;
     const pct = base ? (weekTotal / base) * 100 : 0;
+    const weekMood = weekStats.wins > weekStats.losses ? "week-win" : weekStats.losses > weekStats.wins ? "week-loss" : "";
     html += `<div class="week-row">
-      <div class="week-summary ${weekTotal > 0 ? "pos-bg" : weekTotal < 0 ? "neg-bg" : ""}">
+      <div class="week-summary ${weekMood}">
         <div class="week-label">Week ${i + 1} <span class="${pct >= 0 ? "pos" : "neg"}">${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%</span></div>
         <div class="week-pnl">${fmtMoney(weekTotal)}</div>
+        <div class="week-wl">${weekStats.trades ? `${weekStats.wins}W / ${weekStats.losses}L` : "0W / 0L"}</div>
       </div>
       <div class="week-days">${daysInWeek.map((d) => dayCell(year, month, d, daily, max)).join("")}</div>
     </div>`;
@@ -100,9 +109,9 @@ function dayCell(year, month, day, daily, max) {
   let cls = "cal-cell", style = "";
   if (stats) {
     const intensity = Math.min(1, Math.abs(stats.pnl) / max);
-    const alpha = 0.16 + intensity * 0.45;
-    if (stats.pnl > 0) { cls += " pos"; style = `background:rgba(62,207,142,${alpha})`; }
-    else if (stats.pnl < 0) { cls += " neg"; style = `background:rgba(255,92,108,${alpha})`; }
+    const alpha = 0.46 + intensity * 0.28;
+    if (stats.pnl > 0) { cls += " pos"; style = `background:rgba(14,83,48,${alpha})`; }
+    else if (stats.pnl < 0) { cls += " neg"; style = `background:rgba(103,25,30,${alpha})`; }
   }
   const decided = stats ? stats.wins + stats.losses : 0;
   const winRate = decided ? Math.round((stats.wins / decided) * 100) : 0;
