@@ -3,10 +3,7 @@
 import { getSupabase, humanError } from "./supabaseClient.js";
 import { SCREENSHOTS_BUCKET } from "./config.js";
 import { DEFAULT_OPTIONS } from "./defaults.js";
-import {
-  saveSnapshot, loadSnapshot, getQueue, enqueue, flushQueue,
-  saveAccountsCache, loadAccountsCache, saveOptionsCache, loadOptionsCache,
-} from "./offline.js";
+import { DEFAULT_GOALS } from "./goalsEngine.js";
 
 const listeners = new Set(); // data-changed listeners
 const syncListeners = new Set(); // sync-status listeners
@@ -19,6 +16,7 @@ export const state = {
   cash: [],
   skipped: [],
   reviews: [],
+  goals: [],
   options: structuredClone(DEFAULT_OPTIONS),
   online: navigator.onLine,
   sync: "idle", // idle | syncing | synced | offline | signed-out
@@ -69,6 +67,7 @@ const TABLE_STATE = {
   cash_transactions: "cash",
   skipped_trades: "skipped",
   weekly_reviews: "reviews",
+  goals: "goals",
 };
 
 function persistSnapshot() {
@@ -77,6 +76,7 @@ function persistSnapshot() {
     cash: state.cash,
     skipped: state.skipped,
     reviews: state.reviews,
+    goals: state.goals,
   });
 }
 
@@ -136,6 +136,7 @@ function hydrateOffline() {
   state.cash = snap?.cash || [];
   state.skipped = snap?.skipped || [];
   state.reviews = snap?.reviews || [];
+  state.goals = snap?.goals || [];
   for (const op of getQueue(state.user?.id)) {
     if (op.accountId === state.currentAccountId) applyOptimistic(op.table, op.op, op.payload, op.rowId);
   }
@@ -147,7 +148,7 @@ export function setUser(user) {
   if (!user) {
     state.accounts = [];
     state.currentAccountId = null;
-    state.trades = state.cash = state.skipped = state.reviews = [];
+    state.trades = state.cash = state.skipped = state.reviews = state.goals = [];
     state.options = structuredClone(DEFAULT_OPTIONS);
     unsubscribeRealtime();
     setSync("signed-out");
@@ -188,6 +189,7 @@ export async function ensureAccount() {
       .single();
     if (e2) throw e2;
     accounts = [created];
+    await seedDefaultGoals(created.id);
   }
   state.accounts = accounts;
   const saved = localStorage.getItem("gj-account-" + state.user.id);
@@ -218,6 +220,7 @@ export async function addAccount(name, startingBalance = 0) {
     .single();
   if (error) throw error;
   state.accounts.push(data);
+  await seedDefaultGoals(data.id);
   await switchAccount(data.id);
   return data;
 }
@@ -286,17 +289,24 @@ export async function refreshAll() {
   setSync("syncing");
   try {
     const acc = state.currentAccountId;
-    const [trades, cash, skipped, reviews] = await Promise.all([
+    const [trades, cash, skipped, reviews, goals] = await Promise.all([
       sb().from("trades").select("*").eq("account_id", acc).order("trade_date", { ascending: true }).order("created_at", { ascending: true }),
       sb().from("cash_transactions").select("*").eq("account_id", acc).order("tx_date", { ascending: true }).order("created_at", { ascending: true }),
       sb().from("skipped_trades").select("*").eq("account_id", acc).order("trade_date", { ascending: false }),
       sb().from("weekly_reviews").select("*").eq("account_id", acc).order("week_of", { ascending: false }),
+      sb().from("goals").select("*").eq("account_id", acc).order("created_at", { ascending: true }),
     ]);
-    for (const r of [trades, cash, skipped, reviews]) if (r.error) throw r.error;
+    for (const r of [trades, cash, skipped, reviews, goals]) if (r.error) throw r.error;
     state.trades = trades.data || [];
     state.cash = cash.data || [];
     state.skipped = skipped.data || [];
     state.reviews = reviews.data || [];
+    state.goals = goals.data || [];
+    if (!state.goals.length) {
+      await ensureGoalsForAccount(acc);
+      const g2 = await sb().from("goals").select("*").eq("account_id", acc).order("created_at", { ascending: true });
+      if (!g2.error) state.goals = g2.data || [];
+    }
     persistSnapshot();
     setSync("synced");
     emit();
@@ -423,6 +433,57 @@ export async function deleteReview(id) {
   await refreshAll();
 }
 
+// ---------- goals CRUD ----------
+async function seedDefaultGoals(accountId) {
+  if (!state.user || !navigator.onLine) return;
+  const rows = DEFAULT_GOALS.map((g) => ({
+    user_id: state.user.id,
+    account_id: accountId,
+    title: g.title,
+    type: g.type,
+    period: g.period,
+    target_value: g.target_value,
+    comparison: g.comparison,
+    is_active: true,
+    is_default: true,
+    notify_on_breach: true,
+  }));
+  const { error } = await sb().from("goals").insert(rows);
+  if (error) throw error;
+}
+
+async function ensureGoalsForAccount(accountId) {
+  if (!state.user || !navigator.onLine || !accountId) return;
+  const { count, error } = await sb()
+    .from("goals")
+    .select("id", { count: "exact", head: true })
+    .eq("account_id", accountId);
+  if (error) throw error;
+  if (!count) await seedDefaultGoals(accountId);
+}
+
+export async function saveGoal(payload, id = null) {
+  if (!navigator.onLine) return offlineMutate("goals", id ? "update" : "insert", payload, id);
+  const row = { ...payload, user_id: state.user.id, account_id: state.currentAccountId };
+  let res;
+  if (id) res = await sb().from("goals").update(row).eq("id", id).select().single();
+  else res = await sb().from("goals").insert(row).select().single();
+  if (res.error) throw new Error(humanError(res.error));
+  await refreshAll();
+  return res.data;
+}
+
+export async function deleteGoal(id) {
+  if (!navigator.onLine) return offlineMutate("goals", "delete", null, id);
+  const { error } = await sb().from("goals").delete().eq("id", id);
+  if (error) throw new Error(humanError(error));
+  await refreshAll();
+}
+
+export async function toggleGoalActive(id, isActive) {
+  return saveGoal({ is_active: isActive }, id);
+}
+
 // ---------- storage: screenshots ----------
 export async function uploadScreenshot(file, onProgress) {
   const ext = (file.name.split(".").pop() || "png").toLowerCase();
@@ -452,7 +513,7 @@ export function subscribeRealtime() {
   const c = getSupabase();
   if (!c || !state.user) return;
   channel = c.channel("gj-" + state.user.id);
-  const tables = ["trades", "cash_transactions", "skipped_trades", "weekly_reviews", "accounts", "journal_meta"];
+  const tables = ["trades", "cash_transactions", "skipped_trades", "weekly_reviews", "goals", "accounts", "journal_meta"];
   for (const table of tables) {
     channel.on("postgres_changes", { event: "*", schema: "public", table, filter: `user_id=eq.${state.user.id}` }, () => {
       refreshAll().catch(() => {});

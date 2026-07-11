@@ -12,6 +12,7 @@ import { initPWA, promptInstall, applyUpdate, isIOS, isStandalone, canPromptInst
 import * as tradelog from "./pages/tradelog.js";
 import * as missed from "./pages/missed.js";
 import * as analysis from "./pages/analysis.js";
+import * as goals from "./pages/goals.js";
 import * as pnl from "./pages/pnl.js";
 import * as weekly from "./pages/weekly.js";
 import * as ai from "./pages/ai.js";
@@ -21,6 +22,7 @@ const PAGES = {
   tradelog: { title: "Trade Log", icon: "candlestick-chart", mod: tradelog },
   missed: { title: "Missed", icon: "eye-off", mod: missed },
   analysis: { title: "Analysis", icon: "bar-chart-3", mod: analysis },
+  goals: { title: "Goals", icon: "target", mod: goals },
   pnl: { title: "PnL", icon: "calendar-days", mod: pnl },
   weekly: { title: "Weekly Review", icon: "notebook-pen", mod: weekly },
   ai: { title: "AI Mentor", icon: "brain", mod: ai },
@@ -377,5 +379,9 @@ async function promptNewPassword() {
   if (error) toast(error.message, "error");
   else toast("Password updated — you're signed in.", "success");
 }
+
+window.addEventListener("gj:navigate", (e) => {
+  if (e.detail?.page) navigate(e.detail.page);
+});
 
 document.addEventListener("DOMContentLoaded", boot);

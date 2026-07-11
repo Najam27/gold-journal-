@@ -1,4 +1,5 @@
 import { state, ledger, tradeRunningBalance, currentAccount, saveTrade, deleteTrade, clearAllTrades, saveCash, uploadScreenshot, signedUrl } from "../store.js";
+import { breachBannersHtml, goalsStatusStripHtml, wireGoalsTradeLog, processGoalNotifications } from "../goalsAlerts.js";
 import { toast, confirmDialog, fmtMoney, fmtNum, fmtDate, fmtRR, todayISO, escapeHtml, countUp, optionsHtml, skeletonRows } from "../ui.js";
 import { openModal } from "../modal.js";
 import { exportTradesPDF } from "../export.js";
@@ -20,6 +21,7 @@ let loading = false;
 export function setLoading(v) { loading = v; }
 
 export function render(container) {
+  processGoalNotifications();
   const acc = currentAccount();
   const l = ledger();
   const trades = filtered();
@@ -44,12 +46,16 @@ export function render(container) {
     </div>
   </div>
 
+  <div class="goal-breach-stack" id="goal-breach-stack">${breachBannersHtml()}</div>
+
   <div class="stat-strip">
     ${statCard("Balance", "balance", fmtMoney(l.balance), "wallet", true)}
     ${statCard("Win Rate", "winrate", "", "target", false, winRate)}
     ${statCard("Total P&L", "pnl", "", "trending-up", true, totalPnl)}
     ${statCard("Trades", "count", "", "list", false, state.trades.length, true)}
   </div>
+
+  ${goalsStatusStripHtml()}
 
   <div class="toolbar glass">
     <div class="toolbar-left">
@@ -98,6 +104,7 @@ export function render(container) {
   countUp(container.querySelector('[data-stat="count"]'), state.trades.length);
 
   wire(container);
+  wireGoalsTradeLog(container);
 }
 
 function statCard(label, key, value, icon, money, num, plain) {

@@ -124,6 +124,27 @@ create index if not exists reviews_user_id_idx on public.weekly_reviews(user_id)
 create index if not exists reviews_account_id_idx on public.weekly_reviews(account_id);
 
 -- =====================================================================
+-- goals — per-account trading discipline targets
+-- =====================================================================
+create table if not exists public.goals (
+  id                uuid primary key default gen_random_uuid(),
+  user_id           uuid not null references auth.users(id) on delete cascade,
+  account_id        uuid not null references public.accounts(id) on delete cascade,
+  title             text not null,
+  type              text not null,
+  period            text not null default 'daily',
+  target_value      numeric not null default 0,
+  comparison        text not null default 'gte',
+  is_active         boolean not null default true,
+  is_default        boolean not null default false,
+  notify_on_breach  boolean not null default true,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+create index if not exists goals_user_id_idx on public.goals(user_id);
+create index if not exists goals_account_id_idx on public.goals(account_id);
+
+-- =====================================================================
 -- journal_meta — key/value store per user (custom option lists, prefs)
 -- =====================================================================
 create table if not exists public.journal_meta (
@@ -141,7 +162,7 @@ create index if not exists meta_user_id_idx on public.journal_meta(user_id);
 do $$
 declare t text;
 begin
-  foreach t in array array['accounts','trades','cash_transactions','skipped_trades','weekly_reviews','journal_meta']
+  foreach t in array array['accounts','trades','cash_transactions','skipped_trades','weekly_reviews','goals','journal_meta']
   loop
     execute format('drop trigger if exists set_updated_at on public.%I;', t);
     execute format('create trigger set_updated_at before update on public.%I for each row execute function public.set_updated_at();', t);
@@ -160,7 +181,7 @@ grant usage on schema public to anon, authenticated;
 do $$
 declare t text;
 begin
-  foreach t in array array['accounts','trades','cash_transactions','skipped_trades','weekly_reviews','journal_meta']
+  foreach t in array array['accounts','trades','cash_transactions','skipped_trades','weekly_reviews','goals','journal_meta']
   loop
     execute format('grant select, insert, update, delete on public.%I to anon, authenticated;', t);
   end loop;
@@ -174,7 +195,7 @@ alter default privileges in schema public
 do $$
 declare t text;
 begin
-  foreach t in array array['accounts','trades','cash_transactions','skipped_trades','weekly_reviews','journal_meta']
+  foreach t in array array['accounts','trades','cash_transactions','skipped_trades','weekly_reviews','goals','journal_meta']
   loop
     execute format('alter table public.%I enable row level security;', t);
     execute format('drop policy if exists "own_select" on public.%I;', t);
@@ -225,7 +246,7 @@ create policy "screenshots_delete" on storage.objects
 do $$
 declare t text;
 begin
-  foreach t in array array['accounts','trades','cash_transactions','skipped_trades','weekly_reviews','journal_meta']
+  foreach t in array array['accounts','trades','cash_transactions','skipped_trades','weekly_reviews','goals','journal_meta']
   loop
     begin
       execute format('alter publication supabase_realtime add table public.%I;', t);
