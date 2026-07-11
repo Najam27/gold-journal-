@@ -4,6 +4,10 @@ import { getSupabase, humanError } from "./supabaseClient.js";
 import { SCREENSHOTS_BUCKET } from "./config.js";
 import { DEFAULT_OPTIONS } from "./defaults.js";
 import { DEFAULT_GOALS } from "./goalsEngine.js";
+import {
+  saveSnapshot, loadSnapshot, getQueue, enqueue, flushQueue,
+  saveAccountsCache, loadAccountsCache, saveOptionsCache, loadOptionsCache,
+} from "./offline.js";
 
 const listeners = new Set(); // data-changed listeners
 const syncListeners = new Set(); // sync-status listeners
