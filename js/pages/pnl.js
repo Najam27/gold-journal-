@@ -87,10 +87,11 @@ function weeksHtml(year, month, daily) {
     const weekTotal = weekStats.pnl;
     const pct = base ? (weekTotal / base) * 100 : 0;
     const weekMood = weekStats.wins > weekStats.losses ? "week-win" : weekStats.losses > weekStats.wins ? "week-loss" : "";
+    const weekPnlClass = weekTotal >= 0 ? "week-pnl pos" : "week-pnl neg";
     html += `<div class="week-row">
       <div class="week-summary ${weekMood}">
         <div class="week-label">Week ${i + 1} <span class="${pct >= 0 ? "pos" : "neg"}">${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%</span></div>
-        <div class="week-pnl">${fmtMoney(weekTotal)}</div>
+        <div class="${weekPnlClass}">${fmtMoney(weekTotal)}</div>
         <div class="week-wl">${weekStats.trades ? `${weekStats.wins}W / ${weekStats.losses}L` : "0W / 0L"}</div>
       </div>
       <div class="week-days">${daysInWeek.map((d) => dayCell(year, month, d, daily, max)).join("")}</div>
