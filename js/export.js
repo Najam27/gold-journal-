@@ -29,6 +29,7 @@ export function tradesToRows() {
     Level: t.level || "",
     Timeframe: t.timeframe || "",
     Setup: t.setup_quality || "",
+    "Execution Type": t.execution_type || "",
     Mistake: t.mistake || "",
     "Hold Quality": t.hold_quality || "",
     "Market Condition": t.market_condition || "",
@@ -134,12 +135,15 @@ export async function exportTradesPDF({ from, to, title = "Gold Journal — Trad
       24
     );
 
-    const head = [["#", "Date", "Session", "Side", "Setup", "Result", "Risk $", "Reward $", "R:R", "P&L", "Balance"]];
+    const head = [["#", "Date", "Session", "Side", "Level", "Timeframe", "Execution Type", "Setup", "Result", "Risk $", "Reward $", "R:R", "P&L", "Balance"]];
     const body = trades.map((t, i) => [
       i + 1,
       fmtDate(t.trade_date),
       t.session || "",
       t.side || "",
+      t.level || "",
+      t.timeframe || "",
+      t.execution_type || "",
       t.setup_quality || "",
       t.result || "",
       Number(t.risk_amount || 0).toFixed(2),

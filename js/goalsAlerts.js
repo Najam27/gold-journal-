@@ -3,12 +3,162 @@
 import { state } from "./store.js";
 import { evaluateAllGoals, evaluateAllGoalsIncludingInactive } from "./goalsEngine.js";
 
-const SESSION_NOTIFIED = new Set();
 let flashIds = new Set();
 
+// ═══════════════════════════════════════════════════════════════
+// BREACH LOG MANAGEMENT
+// ═══════════════════════════════════════════════════════════════
+
+const BREACH_LOG_KEY = "gj_breach_log";
+const MAX_BREACH_LOG_SIZE = 30;
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getBreachLog() {
+  try {
+    const data = localStorage.getItem(BREACH_LOG_KEY);
+    return data ? JSON.parse(data) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveBreachLog(log) {
+  try {
+    localStorage.setItem(BREACH_LOG_KEY, JSON.stringify(log));
+  } catch { /* ignore */ }
+}
+
+function getWeekStart(date = new Date()) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  return new Date(d.setDate(diff)).toISOString().slice(0, 10);
+}
+
+function getMonthKey(date = new Date()) {
+  return date.toISOString().slice(0, 7);
+}
+
+function breachIdKey(goalId, dateKey) {
+  return `${goalId}_${dateKey}`;
+}
+
+function getPeriodKey(period) {
+  if (period === "weekly") return getWeekStart();
+  if (period === "monthly") return getMonthKey();
+  return today();
+}
+
+function isDateInCurrentPeriod(dateKey, period) {
+  if (period === "daily") return dateKey === today();
+  if (period === "weekly") {
+    const weekStart = getWeekStart();
+    const weekEnd = new Date(new Date(weekStart).getTime() + 6 * 24 * 60 * 60 * 1000)
+      .toISOString().slice(0, 10);
+    return dateKey >= weekStart && dateKey <= weekEnd;
+  }
+  if (period === "monthly") {
+    const currentMonth = getMonthKey();
+    return dateKey.slice(0, 7) === currentMonth;
+  }
+  return false;
+}
+
+function addToBreachLog(goalId, goalName, period, status, displayCurrent, displayTarget) {
+  const dateKey = getPeriodKey(period);
+  const id = breachIdKey(goalId, dateKey);
+  const log = getBreachLog();
+  
+  // Check if already logged
+  if (log.some((e) => e.id === id)) {
+    return null; // Already logged
+  }
+  
+  const entry = {
+    id,
+    goal_id: goalId,
+    goal_name: goalName,
+    breached_at: new Date().toISOString(),
+    date_key: dateKey,
+    period,
+    value_at_breach: displayCurrent,
+    target: displayTarget,
+    notified: false,
+    dismissed: false,
+    read: false,
+  };
+  
+  log.unshift(entry);
+  if (log.length > MAX_BREACH_LOG_SIZE) {
+    log.pop();
+  }
+  
+  saveBreachLog(log);
+  return entry;
+}
+
+function updateBreachLogEntry(id, updates) {
+  const log = getBreachLog();
+  const entry = log.find((e) => e.id === id);
+  if (entry) {
+    Object.assign(entry, updates);
+    saveBreachLog(log);
+  }
+}
+
+function dismissNotification(id) {
+  updateBreachLogEntry(id, { dismissed: true });
+}
+
+function markNotificationAsRead(id) {
+  updateBreachLogEntry(id, { read: true });
+}
+
+export function clearAllNotifications() {
+  localStorage.removeItem(BREACH_LOG_KEY);
+}
+
+export function getBreachLogForExport() {
+  return getBreachLog();
+}
+
+export function updateBreachLog(updatedLog) {
+  saveBreachLog(updatedLog);
+}
+
+export function getNotificationCenter() {
+  const log = getBreachLog().filter((e) => !e.dismissed);
+  
+  const todayNotif = log.filter((e) => isDateInCurrentPeriod(e.date_key, e.period));
+  const olderNotif = log.filter((e) => !isDateInCurrentPeriod(e.date_key, e.period));
+  
+  const unreadCount = log.filter((e) => !e.read).length;
+  
+  return {
+    todayNotif,
+    olderNotif,
+    unreadCount,
+    totalCount: log.length,
+  };
+}
+
+export function markAllNotificationsRead() {
+  const log = getBreachLog();
+  log.forEach((e) => {
+    e.read = true;
+  });
+  saveBreachLog(log);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LEGACY DISMISS FUNCTIONS (kept for compatibility)
+// ═══════════════════════════════════════════════════════════════
+
 function dismissKey(goalId) {
-  const today = new Date().toISOString().slice(0, 10);
-  return `gj-goal-dismiss-${state.user?.id}-${state.currentAccountId}-${goalId}-${today}`;
+  return `gj-goal-dismiss-${state.user?.id}-${state.currentAccountId}-${goalId}-${today()}`;
 }
 
 export function isDismissed(goalId) {
@@ -22,6 +172,10 @@ export function dismissBreach(goalId) {
 export function clearDismissIfResolved(goalId) {
   localStorage.removeItem(dismissKey(goalId));
 }
+
+// ═══════════════════════════════════════════════════════════════
+// EVALUATION & FILTERING
+// ═══════════════════════════════════════════════════════════════
 
 function activeEvaluations() {
   return evaluateAllGoals(state.goals.filter((g) => g.is_active));
@@ -47,9 +201,18 @@ export function getStatusStripGoals() {
 }
 
 export function breachBannersHtml() {
-  const breached = getBreachedGoals().filter((e) => !isDismissed(e.goal.id));
-  if (!breached.length) return "";
-  return breached.map((e) => `
+  const todayStr = today();
+  const log = getBreachLog();
+  const breached = getBreachedGoals();
+  
+  // Only show banners for today's breaches that aren't dismissed
+  const bannersToShow = breached.filter((e) => {
+    const entry = log.find((le) => le.goal_id === e.goal.id && isDateInCurrentPeriod(le.date_key, le.period) && !le.dismissed);
+    return entry !== undefined;
+  });
+  
+  if (!bannersToShow.length) return "";
+  return bannersToShow.map((e) => `
     <div class="goal-breach-banner" data-goal-id="${e.goal.id}">
       <span class="gbb-icon"><i data-lucide="alert-triangle"></i></span>
       <span class="gbb-text">⚠️ GOAL BREACHED: ${escapeBanner(e.goal.title)} (${e.displayCurrent}/${e.displayTarget}). Consider stopping for today.</span>
@@ -79,11 +242,24 @@ export function wireGoalsTradeLog(container) {
   container.querySelectorAll("[data-dismiss-goal]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      dismissBreach(btn.dataset.dismissGoal);
+      const goalId = btn.dataset.dismissGoal;
+      
+      // Find and update the breach log entry for the current period
+      const log = getBreachLog();
+      const entry = log.find((le) => le.goal_id === goalId && isDateInCurrentPeriod(le.date_key, le.period));
+      if (entry) {
+        entry.dismissed = true;
+        updateBreachLog(log);
+      }
+      
+      // Also keep legacy flag for compatibility
+      dismissBreach(goalId);
+      
       const banner = btn.closest(".goal-breach-banner");
       banner?.remove();
     });
   });
+  
   container.querySelectorAll("[data-go-goals]").forEach((btn) => {
     btn.addEventListener("click", () => {
       window.dispatchEvent(new CustomEvent("gj:navigate", { detail: { page: "goals" } }));
@@ -93,23 +269,38 @@ export function wireGoalsTradeLog(container) {
 
 export function processGoalNotifications() {
   const breached = getBreachedGoals().filter((e) => e.goal.notify_on_breach);
+  
   for (const e of breached) {
-    const id = e.goal.id;
-    if (!SESSION_NOTIFIED.has(id) && Notification?.permission === "granted") {
+    const goalId = e.goal.id;
+    const periodKey = getPeriodKey(e.goal.period);
+    const brId = breachIdKey(goalId, periodKey);
+    
+    // Add to log if not already there
+    let logEntry = getBreachLog().find((le) => le.id === brId);
+    if (!logEntry) {
+      logEntry = addToBreachLog(goalId, e.goal.title, e.goal.period, "BREACHED", e.displayCurrent, e.displayTarget);
+    }
+    
+    // Fire browser notification only if not yet notified
+    if (logEntry && !logEntry.notified && Notification?.permission === "granted") {
       try {
         new Notification(`${e.goal.title} breached — Gold Journal`, {
           body: `${e.displayCurrent} vs ${e.displayTarget} target`,
           icon: "/icons/icon-192.png",
         });
-        SESSION_NOTIFIED.add(id);
+        updateBreachLogEntry(brId, { notified: true });
       } catch { /* ignore */ }
     }
-    if (!isDismissed(id)) flashIds.add(id);
+    
+    // Flash the card if not dismissed
+    if (logEntry && !logEntry.dismissed) {
+      flashIds.add(goalId);
+    }
   }
+  
   for (const ev of activeEvaluations()) {
     if (ev.status !== "BREACHED") {
       clearDismissIfResolved(ev.goal.id);
-      SESSION_NOTIFIED.delete(ev.goal.id);
       flashIds.delete(ev.goal.id);
     }
   }

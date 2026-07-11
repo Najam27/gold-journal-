@@ -1,5 +1,5 @@
 import { state, saveTrade, currentAccount } from "../store.js";
-import { toast, fmtPct, fmtMoney, escapeHtml, todayISO } from "../ui.js";
+import { toast, fmtPct, fmtMoney, fmtRR, escapeHtml, todayISO } from "../ui.js";
 
 let chartLibLoaded = false;
 const charts = [];
@@ -64,7 +64,7 @@ export function render(container) {
     <div class="heatmap-head">
       <h6>Performance Heatmap</h6>
       <div class="heatmap-tabs">
-        ${["edge", "hour", "session", "level", "tf", "setup"].map((tab) => `<button class="heatmap-tab ${tab === "edge" ? "active" : ""}" data-heatmap="${tab}">${heatmapTabLabel(tab)}</button>`).join("")}
+        ${["edge", "hour", "session", "level", "tf", "setup", "exec", "exec_lvl_tf"].map((tab) => `<button class="heatmap-tab ${tab === "edge" ? "active" : ""}" data-heatmap="${tab}">${heatmapTabLabel(tab)}</button>`).join("")}
       </div>
     </div>
     <div id="heatmap-body">${heatmapHtml("edge")}</div>
@@ -90,7 +90,7 @@ const GRID = "rgba(255,255,255,0.06)";
 const TICK = "#8b93a7";
 
 function heatmapTabLabel(tab) {
-  return { edge: "Level Edge", hour: "By Hour", session: "By Session", level: "By Level", tf: "By TF", setup: "By Setup" }[tab];
+  return { edge: "Level Edge", hour: "By Hour", session: "By Session", level: "By Level", tf: "By TF", setup: "By Setup", exec: "By Execution", exec_lvl_tf: "Exec x Lvl x TF" }[tab];
 }
 
 function wireHeatmap(container) {
@@ -107,6 +107,8 @@ function wireHeatmap(container) {
 function heatmapHtml(tab) {
   if (tab === "edge") return levelEdgeHtml();
   if (tab === "hour") return hourHeatmapHtml();
+  if (tab === "exec") return executionBreakdownHtml();
+  if (tab === "exec_lvl_tf") return execLvlTfBreakdownHtml();
   const configs = {
     session: ["Session", (t) => t.session, state.options.sessions],
     level: ["Level", (t) => t.level, state.options.levels],
@@ -123,6 +125,18 @@ function resultCounts(trades) {
   const decided = wins + losses;
   const pnl = trades.reduce((sum, t) => sum + Number(t.pnl || 0), 0);
   return { total: trades.length, wins, losses, pnl, avgPnl: trades.length ? pnl / trades.length : 0, winRate: decided ? (wins / decided) * 100 : 0 };
+}
+
+function averageRR(trades) {
+  const values = trades
+    .map((t) => {
+      const risk = Number(t.risk_amount || 0);
+      const reward = Number(t.reward_amount || 0);
+      return risk > 0 ? reward / risk : null;
+    })
+    .filter((v) => Number.isFinite(v));
+  if (!values.length) return "—";
+  return fmtRR(1, values.reduce((sum, v) => sum + v, 0) / values.length);
 }
 
 function heatClass(stats) {
@@ -181,6 +195,75 @@ function dimensionHeatmapHtml(label, keyFn, defaults = []) {
         <div class="hm-metric ${heatClass(stats)}">${stats.wins}</div>
         <div class="hm-metric ${heatClass(stats)}">${stats.losses}</div>
         <div class="hm-metric ${heatClass(stats)}">${stats.total ? stats.winRate.toFixed(1) : "0.0"}%</div>`;
+    }).join("")}
+  </div>`;
+}
+
+function executionBreakdownHtml() {
+  const values = [...new Set(state.trades.map((t) => t.execution_type).filter(Boolean))];
+  if (!values.length) return `<div class="empty-state">No execution type data yet.</div>`;
+  const rows = values.map((exec) => {
+    const trades = state.trades.filter((t) => t.execution_type === exec);
+    const stats = resultCounts(trades);
+    return { exec, stats };
+  }).sort((a, b) => b.stats.pnl - a.stats.pnl);
+  
+  return `<div class="hm-exec-grid">
+    <div class="hm-col-head">Execution Type</div>
+    <div class="hm-col-head">Total Trades</div>
+    <div class="hm-col-head">Wins</div>
+    <div class="hm-col-head">Losses</div>
+    <div class="hm-col-head">Win Rate %</div>
+    <div class="hm-col-head">Net P&L</div>
+    <div class="hm-col-head">Avg R:R</div>
+    ${rows.map((row) => {
+      const execTrades = state.trades.filter((t) => t.execution_type === row.exec);
+      return `<div class="hm-row-label ${heatClass(row.stats)}">${escapeHtml(row.exec)}</div>
+        <div class="hm-metric ${heatClass(row.stats)}">${row.stats.total}</div>
+        <div class="hm-metric ${heatClass(row.stats)}">${row.stats.wins}</div>
+        <div class="hm-metric ${heatClass(row.stats)}">${row.stats.losses}</div>
+        <div class="hm-metric ${heatClass(row.stats)}">${row.stats.total ? row.stats.winRate.toFixed(1) : "0.0"}%</div>
+        <div class="hm-metric ${heatClass(row.stats)} money">${fmtMoney(row.stats.pnl)}</div>
+        <div class="hm-metric ${heatClass(row.stats)}">${averageRR(execTrades)}</div>`;
+    }).join("")}
+  </div>`;
+}
+
+function execLvlTfBreakdownHtml() {
+  const combos = new Map();
+  for (const t of state.trades) {
+    const exec = t.execution_type || "—";
+    const level = t.level || "—";
+    const tf = t.timeframe || "—";
+    const key = `${exec}|||${level}|||${tf}`;
+    if (!combos.has(key)) combos.set(key, { exec, level, tf, trades: [] });
+    combos.get(key).trades.push(t);
+  }
+  const rows = [...combos.values()]
+    .map((row) => ({ ...row, stats: resultCounts(row.trades) }))
+    .filter((row) => row.stats.total >= 1)
+    .sort((a, b) => b.stats.pnl - a.stats.pnl || b.stats.total - a.stats.total);
+  
+  if (!rows.length) return `<div class="empty-state">No execution x level x timeframe data yet.</div>`;
+
+  return `<div class="hm-3d-grid">
+    <div class="hm-col-head">Execution</div>
+    <div class="hm-col-head">Level</div>
+    <div class="hm-col-head">TF</div>
+    <div class="hm-col-head">Trades</div>
+    <div class="hm-col-head">Wins</div>
+    <div class="hm-col-head">Losses</div>
+    <div class="hm-col-head">Win Rate %</div>
+    <div class="hm-col-head">Net P&L</div>
+    ${rows.map((row) => {
+      return `<div class="hm-row-label ${heatClass(row.stats)}">${escapeHtml(row.exec)}</div>
+        <div class="hm-metric ${heatClass(row.stats)}">${escapeHtml(row.level)}</div>
+        <div class="hm-metric ${heatClass(row.stats)}">${escapeHtml(row.tf)}</div>
+        <div class="hm-metric ${heatClass(row.stats)}">${row.stats.total}</div>
+        <div class="hm-metric ${heatClass(row.stats)}">${row.stats.wins}</div>
+        <div class="hm-metric ${heatClass(row.stats)}">${row.stats.losses}</div>
+        <div class="hm-metric ${heatClass(row.stats)}">${row.stats.total ? row.stats.winRate.toFixed(1) : "0.0"}%</div>
+        <div class="hm-metric ${heatClass(row.stats)} money">${fmtMoney(row.stats.pnl)}</div>`;
     }).join("")}
   </div>`;
 }
@@ -337,6 +420,7 @@ async function loadDemo(onDone) {
         trade_date: d.toISOString().slice(0, 10),
         session: pick(o.sessions), side: pick(o.sides), level: pick(o.levels), timeframe: pick(o.timeframes),
         setup_quality: pick(o.setupQuality), confirmation_type: pick(o.confirmationType),
+        execution_type: pick(o.executionType),
         market_condition: pick(o.marketCondition), bias_alignment: pick(o.biasAlignment),
         sl_placement: pick(o.slPlacement), tp_placement: pick(o.tpPlacement),
         patience_score: 1 + Math.floor(Math.random() * 5), mistake: pick(o.mistakeTypes), hold_quality: pick(o.holdQuality),

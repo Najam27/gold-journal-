@@ -46,6 +46,7 @@ create table if not exists public.trades (
   timeframe          text,
   setup_quality      text,
   confirmation_type  text,
+  execution_type     text,
   market_condition   text,
   bias_alignment     text,             -- With Trend / Counter Trend
   sl_placement       text,

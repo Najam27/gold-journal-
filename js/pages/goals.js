@@ -4,6 +4,7 @@ import {
 import {
   evaluationsForPage, notificationPermission, requestNotificationPermission,
   shouldFlashCard, clearFlash, processGoalNotifications,
+  getNotificationCenter, clearAllNotifications, markAllNotificationsRead, getBreachLogForExport, updateBreachLog,
 } from "../goalsAlerts.js";
 import {
   listPastMonths, monthHistory, customTrackToType, comparisonFromDirection,
@@ -58,6 +59,10 @@ export function render(container) {
     ${periods.map((p) => sectionHtml(p, evaluated.filter((e) => e.goal.period === p))).join("")}
   </div>
 
+  <div class="notification-center glass card-pad" id="notification-center">
+    ${notificationCenterHtml()}
+  </div>
+
   <div class="goals-history glass card-pad">
     <div class="gh-head">
       <h6><i data-lucide="history"></i> Past Periods</h6>
@@ -83,45 +88,73 @@ function notifyBtnLabel() {
 function sectionHtml(period, items) {
   const expanded = periodFilter === period;
   return `
-  <div class="goals-section ${expanded ? "active-period" : ""}" data-section="${period}">
+  <div class="goals-section glass ${expanded ? "active-period" : ""}" data-section="${period}">
     <button class="goals-section-head" data-toggle-section="${period}">
       <span><i data-lucide="chevron-${expanded ? "down" : "right"}"></i> ${PERIOD_LABELS[period]}</span>
       <span class="goals-section-hint">${PERIOD_HINTS[period]}</span>
       <span class="count-badge">${items.filter((e) => e.goal.is_active).length} active</span>
     </button>
-    <div class="goals-grid ${expanded ? "" : "collapsed"}" id="grid-${period}">
-      ${items.length ? items.map(goalCard).join("") : `<div class="empty-state small"><p>No goals in this period.</p></div>`}
+    <div class="goals-table-wrapper ${expanded ? "" : "collapsed"}" id="grid-${period}">
+      ${items.length ? `
+      <table class="goals-table">
+        <thead>
+          <tr>
+            <th>NAME</th>
+            <th>TARGET</th>
+            <th>PROGRESS</th>
+            <th>STATUS</th>
+            <th>ACTIONS</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.map(goalRow).join("")}
+        </tbody>
+      </table>
+      ` : `<div class="empty-state small"><p>No goals in this period.</p></div>`}
     </div>
   </div>`;
 }
 
-function goalCard(ev) {
+function goalRow(ev) {
   const g = ev.goal;
   const flash = shouldFlashCard(g.id) && ev.status === "BREACHED";
   const statusClass = ev.status.toLowerCase().replace("_", "-");
   const barClass = ev.status === "MET" ? "bar-met" : ev.status === "BREACHED" ? "bar-breach" : ev.status === "AT_RISK" ? "bar-risk" : "bar-pending";
   const progress = Math.min(100, Math.max(0, ev.progress || 0));
+  
+  // Format TARGET display
+  let targetDisplay = "";
+  if (g.type === "no_revenge_trade") {
+    targetDisplay = ev.status === "BREACHED" ? `<span class="target-breached">BREACHED</span>` : `<span class="target-met">CLEAR</span>`;
+  } else {
+    targetDisplay = `<span class="${ev.status === "BREACHED" ? "target-breached" : ev.status === "MET" ? "target-met" : "target-pending"}">${ev.displayCurrent} / ${ev.displayTarget}</span>`;
+  }
+
   return `
-  <div class="goal-card glass ${flash ? "goal-flash" : ""} ${!g.is_active ? "goal-inactive" : ""}" data-goal="${g.id}">
-    <div class="gc-head">
-      <h6 class="gc-title">${escapeHtml(g.title)}</h6>
+  <tr class="goal-row ${flash ? "goal-flash" : ""} ${!g.is_active ? "goal-inactive" : ""}" data-goal="${g.id}">
+    <td class="cell-name">
+      <span class="goal-title">${escapeHtml(g.title)}</span>
+    </td>
+    <td class="cell-target">
+      ${targetDisplay}
+    </td>
+    <td class="cell-progress">
+      <div class="goal-progress-bar">
+        <span class="goal-bar-fill ${barClass}" style="width:${progress}%"></span>
+      </div>
+    </td>
+    <td class="cell-status">
       <span class="goal-badge goal-badge-${statusClass}">${ev.inactive ? "PAUSED" : ev.status.replace("_", " ")}</span>
-    </div>
-    <div class="gc-progress">
-      <div class="gc-progress-label">${escapeHtml(formatProgressLabel(g.type))}: <b>${ev.displayCurrent}</b> / ${ev.displayTarget} target</div>
-      <div class="gc-bar"><span class="gc-bar-fill ${barClass}" style="width:${progress}%"></span></div>
-    </div>
-    <div class="gc-foot">
+    </td>
+    <td class="cell-actions">
       <label class="goal-switch" title="${g.is_active ? "Deactivate" : "Activate"}">
         <input type="checkbox" data-toggle="${g.id}" ${g.is_active ? "checked" : ""}>
         <span class="goal-switch-ui"></span>
       </label>
-      <div class="gc-actions">
-        <button class="ic-btn" data-edit="${g.id}" title="Edit target"><i data-lucide="pencil"></i></button>
-        ${!g.is_default ? `<button class="ic-btn danger" data-del="${g.id}" title="Delete"><i data-lucide="trash-2"></i></button>` : ""}
-      </div>
-    </div>
-  </div>`;
+      <button class="ic-btn" data-edit="${g.id}" title="Edit target"><i data-lucide="pencil"></i></button>
+      ${!g.is_default ? `<button class="ic-btn danger" data-del="${g.id}" title="Delete"><i data-lucide="trash-2"></i></button>` : ""}
+    </td>
+  </tr>`;
 }
 
 function formatProgressLabel(type) {
@@ -138,24 +171,112 @@ function formatProgressLabel(type) {
 function pastMonthsHtml() {
   const months = listPastMonths(6);
   if (!months.length) return `<p class="muted small">No past months yet.</p>`;
-  return months.map(({ year, month }) => {
-    const label = new Date(year, month, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
-    const hist = monthHistory(state.goals, year, month);
-    const key = `${year}-${month}`;
-    const open = expandedMonths.has(key);
-    return `
-    <div class="past-month-item">
-      <button class="past-month-head" data-month="${key}">
-        <i data-lucide="chevron-${open ? "down" : "right"}"></i>
-        <span>${label}: <b>${hist.met}/${hist.total}</b> goals met</span>
-      </button>
-      ${open ? `<div class="past-month-body">${hist.results.map((r) => `
-        <div class="pm-goal pm-${r.status.toLowerCase()}">
-          <span>${escapeHtml(r.goal.title)}</span>
-          <span class="goal-badge goal-badge-${r.status.toLowerCase().replace("_", "-")}">${r.status}</span>
-        </div>`).join("")}</div>` : ""}
-    </div>`;
-  }).join("");
+  return `
+  <table class="past-months-table">
+    <thead>
+      <tr>
+        <th>MONTH</th>
+        <th>TARGET</th>
+        <th>SUCCESS</th>
+        <th>PROGRESS</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${months.map(({ year, month }) => {
+        const label = new Date(year, month, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+        const hist = monthHistory(state.goals, year, month);
+        const key = `${year}-${month}`;
+        const open = expandedMonths.has(key);
+        const successPercentage = hist.total > 0 ? Math.round((hist.met / hist.total) * 100) : 0;
+        return `
+        <tr class="past-month-row">
+          <td class="pm-month-label">
+            <button class="pm-expand-btn" data-month="${key}" title="View details">
+              <i data-lucide="chevron-${open ? "down" : "right"}"></i>
+              ${label}
+            </button>
+          </td>
+          <td class="pm-target">${hist.total} goals</td>
+          <td class="pm-success">${hist.met}/${hist.total}</td>
+          <td class="pm-progress">
+            <div class="past-month-bar">
+              <span class="past-month-bar-fill" style="width:${successPercentage}%"></span>
+            </div>
+          </td>
+        </tr>
+        ${open ? `<tr class="pm-details-row"><td colspan="4"><div class="pm-details">
+          ${hist.results.map((r) => `
+          <div class="pm-goal pm-${r.status.toLowerCase()}">
+            <span>${escapeHtml(r.goal.title)}</span>
+            <span class="goal-badge goal-badge-${r.status.toLowerCase().replace("_", "-")}">${r.status}</span>
+          </div>`).join("")}
+        </div></td></tr>` : ""}
+        `;
+      }).join("")}
+    </tbody>
+  </table>`;
+}
+
+function notificationCenterHtml() {
+  const { todayNotif, olderNotif, unreadCount, totalCount } = getNotificationCenter();
+  
+  if (totalCount === 0) {
+    return `<div class="nc-empty"><p>No notifications yet. Stay tuned for goal breaches.</p></div>`;
+  }
+  
+  const formatTime = (isoStr) => {
+    const date = new Date(isoStr);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) {
+      return `Today ${date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
+    }
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays < 7) return `${diffDays} days ago`;
+    return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  };
+  
+  const renderNotif = (n) => `
+  <div class="nc-item nc-item-breached" data-notif-id="${n.id}">
+    <span class="nc-icon"><i data-lucide="alert-triangle"></i></span>
+    <div class="nc-content">
+      <div class="nc-goal-name">${escapeHtml(n.goal_name)}</div>
+      <div class="nc-message">${escapeHtml(n.value_at_breach)} / ${escapeHtml(n.target)}</div>
+      <div class="nc-time">${formatTime(n.breached_at)}</div>
+    </div>
+    <button class="nc-dismiss" data-dismiss-notif="${n.id}" title="Dismiss" aria-label="Dismiss">
+      <i data-lucide="x"></i>
+    </button>
+  </div>`;
+  
+  const unreadBadge = unreadCount > 0 ? `<span class="nc-badge">${unreadCount} new</span>` : "";
+  
+  return `
+  <div class="nc-head">
+    <div class="nc-head-left">
+      <h6><i data-lucide="bell"></i> Notification History</h6>
+      ${unreadBadge}
+    </div>
+    <div class="nc-head-actions">
+      <button class="nc-btn nc-btn-sm" id="btn-mark-read" title="Mark all as read">Mark All Read</button>
+      <button class="nc-btn nc-btn-sm" id="btn-clear-notif" title="Clear all">Clear All</button>
+    </div>
+  </div>
+  <div class="nc-list">
+    ${todayNotif.length ? `
+    <div class="nc-group">
+      <div class="nc-group-label">Today</div>
+      ${todayNotif.map(renderNotif).join("")}
+    </div>` : ""}
+    ${olderNotif.length ? `
+    <div class="nc-group">
+      <div class="nc-group-label">Earlier</div>
+      ${olderNotif.map(renderNotif).join("")}
+    </div>` : ""}
+  </div>`;
 }
 
 function wire(container) {
@@ -214,9 +335,9 @@ function wire(container) {
     });
   });
 
-  container.querySelectorAll(".goal-card[data-goal]").forEach((card) => {
-    if (card.classList.contains("goal-flash")) {
-      setTimeout(() => clearFlash(card.dataset.goal), 3000);
+  container.querySelectorAll(".goal-row[data-goal]").forEach((row) => {
+    if (row.classList.contains("goal-flash")) {
+      setTimeout(() => clearFlash(row.dataset.goal), 3000);
     }
   });
 
@@ -226,6 +347,39 @@ function wire(container) {
       if (expandedMonths.has(key)) expandedMonths.delete(key);
       else expandedMonths.add(key);
       render(container);
+    });
+  });
+
+  // Notification center handlers
+  container.querySelector("#btn-clear-notif")?.addEventListener("click", async () => {
+    const ok = await confirmDialog({ title: "Clear all notifications?", body: "This cannot be undone.", confirmText: "Clear" });
+    if (ok) {
+      clearAllNotifications();
+      render(container);
+    }
+  });
+
+  container.querySelector("#btn-mark-read")?.addEventListener("click", () => {
+    markAllNotificationsRead();
+    render(container);
+  });
+
+  container.querySelectorAll("[data-dismiss-notif]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.dismissNotif;
+      const { todayNotif, olderNotif } = getNotificationCenter();
+      const log = todayNotif.concat(olderNotif);
+      const entry = log.find((n) => n.id === id);
+      if (entry) {
+        const brLog = getBreachLogForExport();
+        const logEntry = brLog.find((le) => le.id === id);
+        if (logEntry) {
+          logEntry.dismissed = true;
+          updateBreachLog(brLog);
+        }
+        render(container);
+      }
     });
   });
 }

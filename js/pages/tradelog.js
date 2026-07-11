@@ -8,13 +8,13 @@ import { openFullReport } from "../fullReport.js";
 const ALL_COLUMNS = [
   ["idx", "#"], ["date", "Date"], ["session", "Session"], ["side", "Side"], ["level", "Level"],
   ["timeframe", "TF"], ["setup", "Setup"], ["mistake", "Mistake"], ["hold", "Hold"],
-  ["market", "Market"], ["bias", "Bias"], ["confirm", "Confirm"], ["sl", "SL"], ["tp", "TP"],
+  ["market", "Market"], ["bias", "Bias"], ["confirm", "Confirm"], ["execution", "Execution"], ["sl", "SL"], ["tp", "TP"],
   ["patience", "Patience"], ["risk", "Risk $"], ["reward", "Reward $"], ["rr", "R:R"],
   ["result", "Result"], ["pnl", "P&L"], ["balance", "Balance"], ["notes", "Notes"], ["actions", "Actions"],
 ];
 const DEFAULT_HIDDEN = new Set(["mistake", "hold", "market", "bias", "confirm", "sl", "tp"]);
 
-const filters = { search: "", result: "", session: "", setup: "" };
+const filters = { search: "", result: "", session: "", setup: "", execution: "" };
 let hiddenCols = new Set(JSON.parse(localStorage.getItem("gj-hidden-cols") || "null") || [...DEFAULT_HIDDEN]);
 let loading = false;
 
@@ -63,6 +63,7 @@ export function render(container) {
       <select id="f-result" class="mini-select"><option value="">All Results</option>${optionsHtml([...state.options.results, "Deposit", "Withdraw"], filters.result)}</select>
       <select id="f-session" class="mini-select">${optionsHtml(state.options.sessions, filters.session, { placeholder: "All Sessions" })}</select>
       <select id="f-setup" class="mini-select">${optionsHtml(state.options.setupQuality, filters.setup, { placeholder: "All Setups" })}</select>
+      <select id="f-execution" class="mini-select">${optionsHtml(state.options.executionType, filters.execution, { placeholder: "All Executions" })}</select>
     </div>
     <div class="toolbar-right">
       <div class="dropdown" id="cols-dd">
@@ -130,8 +131,23 @@ function filtered() {
       if (filters.result && t.result !== filters.result) return false;
       if (filters.session && t.session !== filters.session) return false;
       if (filters.setup && t.setup_quality !== filters.setup) return false;
+      if (filters.execution && t.execution_type !== filters.execution) return false;
       if (q) {
-        const hay = [t.notes, t.setup_quality, t.level, t.session, t.side, t.result, t.mistake].join(" ").toLowerCase();
+        const hay = [
+          t.notes,
+          t.setup_quality,
+          t.level,
+          t.session,
+          t.side,
+          t.result,
+          t.execution_type,
+          t.confirmation_type,
+          t.market_condition,
+          t.bias_alignment,
+          t.sl_placement,
+          t.tp_placement,
+          t.mistake,
+        ].join(" ").toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -158,6 +174,7 @@ function rowsHtml(trades, l) {
         market: escapeHtml(t.market_condition || ""),
         bias: escapeHtml(t.bias_alignment || ""),
         confirm: escapeHtml(t.confirmation_type || ""),
+        execution: escapeHtml(t.execution_type || "—"),
         sl: escapeHtml(t.sl_placement || ""),
         tp: escapeHtml(t.tp_placement || ""),
         patience: t.patience_score ?? "",
@@ -191,7 +208,8 @@ function wire(container) {
   container.querySelector("#f-result").addEventListener("change", (e) => { filters.result = e.target.value; refreshBody(container); });
   container.querySelector("#f-session").addEventListener("change", (e) => { filters.session = e.target.value; refreshBody(container); });
   container.querySelector("#f-setup").addEventListener("change", (e) => { filters.setup = e.target.value; refreshBody(container); });
-  container.querySelector("#btn-clear-filters").addEventListener("click", () => { filters.search = filters.result = filters.session = filters.setup = ""; rerender(); });
+  container.querySelector("#f-execution").addEventListener("change", (e) => { filters.execution = e.target.value; refreshBody(container); });
+  container.querySelector("#btn-clear-filters").addEventListener("click", () => { filters.search = filters.result = filters.session = filters.setup = filters.execution = ""; rerender(); });
 
   container.querySelector("#btn-new").addEventListener("click", () => openTradeModal(null, rerender));
   container.querySelector("#btn-dup").addEventListener("click", () => {
@@ -291,6 +309,7 @@ export function openTradeModal(trade, onDone, { duplicate = false } = {}) {
       ${field("Confirmation Type", sel("confirmation_type", o.confirmationType, t.confirmation_type))}
     </div></div>
     <div class="form-section"><h6>Execution</h6><div class="grid-2">
+      ${field("Execution Type", sel("execution_type", o.executionType, t.execution_type))}
       ${field("Market Condition", sel("market_condition", o.marketCondition, t.market_condition))}
       ${field("Direction vs Bias", sel("bias_alignment", o.biasAlignment, t.bias_alignment))}
       ${field("SL Placement", sel("sl_placement", o.slPlacement, t.sl_placement))}
@@ -371,6 +390,7 @@ export function openTradeModal(trade, onDone, { duplicate = false } = {}) {
         timeframe: fd.get("timeframe") || null,
         setup_quality: fd.get("setup_quality") || null,
         confirmation_type: fd.get("confirmation_type") || null,
+        execution_type: fd.get("execution_type") || null,
         market_condition: fd.get("market_condition") || null,
         bias_alignment: fd.get("bias_alignment") || null,
         sl_placement: fd.get("sl_placement") || null,

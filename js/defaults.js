@@ -53,6 +53,12 @@ export const DEFAULT_OPTIONS = {
     "Open TP",
     "Manually Exit",
   ],
+  executionType: [
+    "Manual Direct",
+    "Limit Order",
+    "Stop Order",
+    "Manual After Confirmation",
+  ],
   skipReasons: [
     "Fear - H1/15m too slow",
     "Fear - SL looked too big",
@@ -89,6 +95,7 @@ export const OPTION_LABELS = {
   confirmationType: "Confirmation Type",
   slPlacement: "SL Placement",
   tpPlacement: "TP Placement",
+  executionType: "Execution Type",
   skipReasons: "Skipped Trade Reasons",
   skipOutcomes: "Skipped Trade Outcomes",
   results: "Results",
