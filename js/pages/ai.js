@@ -114,7 +114,7 @@ Use pre-defined rules to detect revenge trades: a trade taken within 30 minutes 
 2E. DISCIPLINE SCORE
 Give a discipline score out of 10. Base it on setup quality distribution, risk consistency, and respect for rules.`;
 
-function render(container) {
+export function render(container) {
   const savedKey = localStorage.getItem(KEY_STORE) || "";
   const savedReview = loadSavedReview();
   const rangeValue = localStorage.getItem("gj_ai_range") || "last_30";
