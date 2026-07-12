@@ -103,15 +103,14 @@ function notificationToggleHtml() {
 }
 
 function sectionHtml(period, items) {
-  const expanded = periodFilter === period;
   return `
-  <div class="goals-section glass ${expanded ? "active-period" : ""}" data-section="${period}">
-    <button class="goals-section-head" data-toggle-section="${period}">
-      <span><i data-lucide="chevron-${expanded ? "down" : "right"}"></i> ${PERIOD_LABELS[period]}</span>
+  <div class="goals-section glass" data-section="${period}">
+    <button class="goals-section-head" type="button">
+      <span><i data-lucide="chevron-down"></i> ${PERIOD_LABELS[period]}</span>
       <span class="goals-section-hint">${PERIOD_HINTS[period]}</span>
       <span class="count-badge">${items.filter((e) => e.goal.is_active).length} active</span>
     </button>
-    <div class="goals-table-wrapper ${expanded ? "" : "collapsed"}" id="grid-${period}">
+    <div class="goals-table-wrapper" id="grid-${period}">
       ${items.length ? `
       <table class="goals-table">
         <thead>
@@ -205,23 +204,28 @@ function pastMonthsHtml() {
         const key = `${year}-${month}`;
         const open = expandedMonths.has(key);
         const successPercentage = hist.total > 0 ? Math.round((hist.met / hist.total) * 100) : 0;
+        const monthLabel = hist.noData
+          ? `<span class="pm-month-label-text">${label}</span>`
+          : `<button class="pm-expand-btn" data-month="${key}" title="View details">
+              <i data-lucide="chevron-${open ? "down" : "right"}"></i>
+              ${label}
+            </button>`;
+        const targetCell = hist.noData ? "—" : `${hist.total} goals`;
+        const successCell = hist.noData ? "No trades" : `${hist.met}/${hist.total}`;
         return `
         <tr class="past-month-row">
           <td class="pm-month-label">
-            <button class="pm-expand-btn" data-month="${key}" title="View details">
-              <i data-lucide="chevron-${open ? "down" : "right"}"></i>
-              ${label}
-            </button>
+            ${monthLabel}
           </td>
-          <td class="pm-target">${hist.total} goals</td>
-          <td class="pm-success">${hist.met}/${hist.total}</td>
+          <td class="pm-target">${targetCell}</td>
+          <td class="pm-success">${successCell}</td>
           <td class="pm-progress">
             <div class="past-month-bar">
-              <span class="past-month-bar-fill" style="width:${successPercentage}%"></span>
+              <span class="past-month-bar-fill" style="width:${hist.noData ? 0 : successPercentage}%"></span>
             </div>
           </td>
         </tr>
-        ${open ? `<tr class="pm-details-row"><td colspan="4"><div class="pm-details">
+        ${!hist.noData && open ? `<tr class="pm-details-row"><td colspan="4"><div class="pm-details">
           ${hist.results.map((r) => `
           <div class="pm-goal pm-${r.status.toLowerCase()}">
             <span>${escapeHtml(r.goal.title)}</span>
@@ -235,9 +239,7 @@ function pastMonthsHtml() {
 }
 
 function notificationDropdownHtml() {
-  const { todayNotif, olderNotif, unreadCount, totalCount } = getNotificationCenter();
-  const isBlocked = notificationPermission() === "denied";
-  const hasEnabled = notificationPermission() === "granted";
+  const { notifications, unreadCount, totalCount } = getNotificationCenter();
 
   const formatTime = (isoStr) => {
     const date = getPKTDate(new Date(isoStr));
@@ -266,11 +268,21 @@ function notificationDropdownHtml() {
     </button>
   </div>`;
 
-  if (totalCount === 0) {
-    return `<div class="nc-empty"><p>No notifications yet</p></div>`;
+  if (totalCount === 0 || notifications.length === 0) {
+    return `<div class="nc-empty"><p>No active notifications</p></div>`;
   }
 
   const unreadBadge = unreadCount > 0 ? `<span class="nc-badge">${unreadCount} new</span>` : "";
+  const groups = ["daily", "weekly", "monthly"].map((period) => {
+    const items = notifications.filter((n) => n.period === period);
+    if (!items.length) return "";
+    const label = period === "daily" ? "TODAY" : period === "weekly" ? "THIS WEEK" : "THIS MONTH";
+    return `
+    <div class="nc-group">
+      <div class="nc-group-label">${label}</div>
+      ${items.map(renderNotif).join("")}
+    </div>`;
+  }).filter(Boolean).join("");
 
   return `
   <div class="nc-head">
@@ -284,16 +296,7 @@ function notificationDropdownHtml() {
     </div>
   </div>
   <div class="nc-list">
-    ${todayNotif.length ? `
-    <div class="nc-group">
-      <div class="nc-group-label">TODAY</div>
-      ${todayNotif.map(renderNotif).join("")}
-    </div>` : ""}
-    ${olderNotif.length ? `
-    <div class="nc-group">
-      <div class="nc-group-label">EARLIER</div>
-      ${olderNotif.map(renderNotif).join("")}
-    </div>` : ""}
+    ${groups}
   </div>`;
 }
 
@@ -350,6 +353,9 @@ function wire(container) {
     btn.addEventListener("click", () => {
       periodFilter = btn.dataset.period;
       render(container);
+      requestAnimationFrame(() => {
+        document.getElementById(`grid-${btn.dataset.period}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
     });
   });
 
@@ -417,9 +423,8 @@ function wire(container) {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const id = btn.dataset.dismissNotif;
-      const { todayNotif, olderNotif } = getNotificationCenter();
-      const log = todayNotif.concat(olderNotif);
-      const entry = log.find((n) => n.id === id);
+      const { notifications } = getNotificationCenter();
+      const entry = notifications.find((n) => n.id === id);
       if (entry) {
         const brLog = getBreachLogForExport();
         const logEntry = brLog.find((le) => le.id === id);

@@ -364,6 +364,13 @@ export function monthHistory(goals, year, month) {
   const range = monthRange(year, month);
   const ref = new Date(year, month, 15);
   const active = goals.filter((g) => g.is_active !== false);
+  const tradeCount = state.trades.filter((t) => inRange(t.trade_date, range)).length;
+  const reviewCount = reviewsInRange(range).length;
+
+  if (tradeCount === 0 && reviewCount === 0) {
+    return { year, month, results: [], met: 0, total: 0, noData: true };
+  }
+
   const results = active.map((g) => {
     const ev = evaluateGoal(g, ref);
     const trades = tradesInRange(periodRange(g.period, ref));

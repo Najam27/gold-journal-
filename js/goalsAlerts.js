@@ -111,16 +111,14 @@ export function updateBreachLog(updatedLog) {
 }
 
 export function getNotificationCenter() {
+  cleanupBreachLog();
   const log = getBreachLog().filter((e) => !e.dismissed);
-  
-  const todayNotif = log.filter((e) => isDateInCurrentPeriod(e.date_key, e.period));
-  const olderNotif = log.filter((e) => !isDateInCurrentPeriod(e.date_key, e.period));
-  
+  const notifications = log.filter((e) => isDateInCurrentPeriod(e.date_key, e.period));
   const unreadCount = log.filter((e) => !e.read).length;
-  
+
   return {
-    todayNotif,
-    olderNotif,
+    notifications,
+    todayNotif: notifications,
     unreadCount,
     totalCount: log.length,
   };
@@ -128,8 +126,14 @@ export function getNotificationCenter() {
 
 export function cleanupBreachLog() {
   const todayPKT = getPKTDateKey();
+  const currentMonthKey = getPKTMonthKey();
   const log = getBreachLog();
-  const cleaned = log.filter((entry) => !(entry.period === "daily" && entry.date_key !== todayPKT));
+  const cleaned = log.filter((entry) => {
+    if (entry.period === "daily") return entry.date_key === todayPKT;
+    if (entry.period === "weekly") return isDateInCurrentPeriod(entry.date_key, "weekly");
+    if (entry.period === "monthly") return entry.date_key.slice(0, 7) === currentMonthKey;
+    return true;
+  });
   if (cleaned.length !== log.length) {
     saveBreachLog(cleaned);
   }
