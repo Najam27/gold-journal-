@@ -125,6 +125,35 @@ create index if not exists reviews_user_id_idx on public.weekly_reviews(user_id)
 create index if not exists reviews_account_id_idx on public.weekly_reviews(account_id);
 
 -- =====================================================================
+-- daily_plans — morning plan & end-of-day execution review
+-- =====================================================================
+create table if not exists public.daily_plans (
+  id               uuid primary key default gen_random_uuid(),
+  user_id          uuid not null references auth.users(id) on delete cascade,
+  account_id       uuid not null references public.accounts(id) on delete cascade,
+  plan_date        date not null,
+  pre_bias         text,
+  key_levels       text,
+  session_focus    text,
+  plan_notes       text,
+  rules_planned    jsonb default '[]'::jsonb,
+  emotion_start    text,
+  emotion_end      text,
+  execution_score  integer,
+  rules_followed   jsonb default '[]'::jsonb,
+  what_went_well   text,
+  what_went_wrong  text,
+  lessons          text,
+  overall_rating   integer,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  unique (user_id, account_id, plan_date)
+);
+create index if not exists daily_plans_user_id_idx on public.daily_plans(user_id);
+create index if not exists daily_plans_account_id_idx on public.daily_plans(account_id);
+create index if not exists daily_plans_date_idx on public.daily_plans(plan_date);
+
+-- =====================================================================
 -- goals — per-account trading discipline targets
 -- =====================================================================
 create table if not exists public.goals (
@@ -163,7 +192,7 @@ create index if not exists meta_user_id_idx on public.journal_meta(user_id);
 do $$
 declare t text;
 begin
-  foreach t in array array['accounts','trades','cash_transactions','skipped_trades','weekly_reviews','goals','journal_meta']
+  foreach t in array array['accounts','trades','cash_transactions','skipped_trades','weekly_reviews','daily_plans','goals','journal_meta']
   loop
     execute format('drop trigger if exists set_updated_at on public.%I;', t);
     execute format('create trigger set_updated_at before update on public.%I for each row execute function public.set_updated_at();', t);
@@ -182,7 +211,7 @@ grant usage on schema public to anon, authenticated;
 do $$
 declare t text;
 begin
-  foreach t in array array['accounts','trades','cash_transactions','skipped_trades','weekly_reviews','goals','journal_meta']
+  foreach t in array array['accounts','trades','cash_transactions','skipped_trades','weekly_reviews','daily_plans','goals','journal_meta']
   loop
     execute format('grant select, insert, update, delete on public.%I to anon, authenticated;', t);
   end loop;
@@ -196,7 +225,7 @@ alter default privileges in schema public
 do $$
 declare t text;
 begin
-  foreach t in array array['accounts','trades','cash_transactions','skipped_trades','weekly_reviews','goals','journal_meta']
+  foreach t in array array['accounts','trades','cash_transactions','skipped_trades','weekly_reviews','daily_plans','goals','journal_meta']
   loop
     execute format('alter table public.%I enable row level security;', t);
     execute format('drop policy if exists "own_select" on public.%I;', t);
@@ -247,7 +276,7 @@ create policy "screenshots_delete" on storage.objects
 do $$
 declare t text;
 begin
-  foreach t in array array['accounts','trades','cash_transactions','skipped_trades','weekly_reviews','goals','journal_meta']
+  foreach t in array array['accounts','trades','cash_transactions','skipped_trades','weekly_reviews','daily_plans','goals','journal_meta']
   loop
     begin
       execute format('alter publication supabase_realtime add table public.%I;', t);

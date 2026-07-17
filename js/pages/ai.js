@@ -18,6 +18,12 @@ If the trader is losing money because of fear, say it. If the trader is undiscip
 
 You are not their friend. You are their coach. A coach who only tells athletes what they want to hear produces losers. You produce winners by being ruthless with the truth.
 
+You also have access to the trader's daily plan and execution reviews. Use this to:
+1. Detect if the trader knows what they should do (their plan) vs what they actually do (execution). A gap between plan quality and execution quality is a major psychological indicator.
+2. If the trader writes good plans but executes poorly, the problem is emotional discipline, not knowledge.
+3. If the trader does not write plans, flag this directly: 'You have no daily plans logged. Trading without a written plan is gambling. Start logging your daily plan before every session.'
+4. Cross-reference emotion logs with trade outcomes. If bad trades cluster on days with negative emotions, call it out specifically.
+
 LANGUAGE RULE (critical): The trader writes notes in a mix of English and Roman Urdu. Roman Urdu means Urdu language written using English/Latin letters. You must read, understand, and analyze Roman Urdu as fluently as English. It is not a typo or foreign language error — it is intentional.
 
 Roman Urdu emotion vocabulary you will encounter:
@@ -404,10 +410,26 @@ function filterReviews(items, range) {
   });
 }
 
+function filterDailyPlans(items, range) {
+  const list = Array.isArray(items) ? items : [];
+  const selected = parseRange(range);
+  if (!selected) return [];
+  return list.filter((item) => {
+    const dateValue = item.plan_date || item.date || item.created_at || "";
+    if (!dateValue) return true;
+    const d = new Date(dateValue);
+    if (Number.isNaN(d.getTime())) return true;
+    if (selected.from && d < selected.from) return false;
+    if (selected.to && d > selected.to) return false;
+    return true;
+  }).sort((a, b) => String(a.plan_date || "").localeCompare(String(b.plan_date || "")));
+}
+
 function summarize(range) {
   const trades = filterTrades(state.trades || [], range);
   const skippedTrades = filterTrades(state.skipped || [], range);
   const reviews = filterReviews(state.reviews || [], range);
+  const dailyPlans = filterDailyPlans(state.dailyPlans || [], range);
   const totalTrades = trades.length;
   const wins = trades.filter((x) => String(x.result || "").toLowerCase() === "win").length;
   const losses = trades.filter((x) => String(x.result || "").toLowerCase() === "loss").length;
@@ -452,6 +474,36 @@ function summarize(range) {
   const fearSignals = noteSignals.filter((x) => x.fear).length;
   const rushSignals = noteSignals.filter((x) => x.rush).length;
   const greedSignals = noteSignals.filter((x) => x.greed).length;
+
+  const complianceValues = dailyPlans.map((plan) => {
+    const rules = Array.isArray(plan.rules_followed) && plan.rules_followed.length
+      ? plan.rules_followed
+      : (Array.isArray(plan.rules_planned) ? plan.rules_planned : []);
+    const planned = rules.filter((rule) => rule?.planned !== false);
+    const followed = planned.filter((rule) => rule?.followed === true).length;
+    const total = planned.length;
+    return total ? Math.round((followed / total) * 100) : 0;
+  });
+  const averageRulesCompliance = complianceValues.length
+    ? Math.round(complianceValues.reduce((sum, n) => sum + n, 0) / complianceValues.length)
+    : 0;
+  const brokenRuleCounts = new Map();
+  for (const plan of dailyPlans) {
+    const rules = Array.isArray(plan.rules_followed) ? plan.rules_followed : [];
+    for (const rule of rules) {
+      if (rule?.followed === false) {
+        const key = rule?.text || rule?.id || "Rule";
+        brokenRuleCounts.set(key, (brokenRuleCounts.get(key) || 0) + 1);
+      }
+    }
+  }
+  const mostBrokenRules = [...brokenRuleCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([rule, count]) => ({ rule, count }));
+  const averageExecutionScore = dailyPlans.length
+    ? Number((dailyPlans.reduce((sum, plan) => sum + Number(plan.execution_score || 0), 0) / dailyPlans.length).toFixed(1))
+    : 0;
 
   return {
     range: parseRange(range),
@@ -501,6 +553,20 @@ function summarize(range) {
       notes: x.notes || x.note || x.comment || "",
     })),
     weeklyReviews: reviews.map((x) => ({ week_of: x.week_of || x.date, learned: x.learned, pattern: x.pattern, improve: x.improve })),
+    dailyPlans: {
+      entries: dailyPlans.slice(-10).map((plan) => ({
+        date: plan.plan_date,
+        plan_notes: plan.plan_notes || "",
+        rules_followed: Array.isArray(plan.rules_followed) ? plan.rules_followed : [],
+        emotion_start: plan.emotion_start || "",
+        emotion_end: plan.emotion_end || "",
+        what_went_wrong: plan.what_went_wrong || "",
+        lessons: plan.lessons || "",
+      })),
+      averageRulesCompliancePct: averageRulesCompliance,
+      mostBrokenRules,
+      averageExecutionScore,
+    },
   };
 }
 
@@ -553,6 +619,7 @@ async function analyze(container) {
     tradeSequence: summary.trades.slice(-50),
     skippedTrades: summary.skippedTrades,
     weeklyReviews: summary.weeklyReviews,
+    dailyPlans: summary.dailyPlans,
     emotionSignals: {
       fearCount: summary.fearSignals,
       rushCount: summary.rushSignals,

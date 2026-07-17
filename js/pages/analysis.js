@@ -68,7 +68,8 @@ export function render(container) {
       </div>
     </div>
     <div id="heatmap-body">${heatmapHtml("edge")}</div>
-  </div>`}`;
+  </div>
+  ${disciplineTrendsHtml()}`}`;
 
   window.lucide?.createIcons({ nameAttr: "data-lucide" });
   container.querySelector("#btn-demo").addEventListener("click", () => loadDemo(() => render(container)));
@@ -81,6 +82,126 @@ export function render(container) {
 function stat(label, value, icon, money) {
   return `<div class="stat-card glass"><div class="stat-glow"></div><div class="stat-icon"><i data-lucide="${icon}"></i></div>
     <div class="stat-meta"><div class="stat-label">${label}</div><div class="stat-value ${money ? "money" : ""}">${value}</div></div></div>`;
+}
+
+function disciplineTrendsHtml() {
+  const entries = [...state.dailyPlans]
+    .filter((entry) => entry?.plan_date)
+    .sort((a, b) => String(a.plan_date).localeCompare(String(b.plan_date)));
+
+  if (!entries.length || entries.length < 3) {
+    return `<div class="discipline-card glass mt"><h6>Discipline Trends</h6><div class="empty-state">Log at least 3 days to see discipline trends</div></div>`;
+  }
+
+  const grouped = new Map();
+  for (const entry of entries) {
+    const weekKey = weekKeyFor(entry.plan_date);
+    if (!grouped.has(weekKey)) grouped.set(weekKey, []);
+    grouped.get(weekKey).push(entry);
+  }
+
+  const weeklyBars = [...grouped.entries()]
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+    .slice(-8)
+    .map(([weekKey, weekEntries]) => {
+      const pct = Math.round(weekEntries.reduce((sum, entry) => sum + entryCompliance(entry), 0) / weekEntries.length);
+      return { weekKey, pct, label: weekLabel(weekKey) };
+    });
+
+  const complianceCounts = entries.map((entry) => entryCompliance(entry));
+  let bestStreak = 0;
+  let currentStreak = 0;
+  for (const pct of complianceCounts) {
+    if (pct >= 80) currentStreak += 1;
+    else currentStreak = 0;
+    bestStreak = Math.max(bestStreak, currentStreak);
+  }
+
+  const brokenRuleCounts = new Map();
+  for (const entry of entries) {
+    const rules = Array.isArray(entry.rules_followed) ? entry.rules_followed : Array.isArray(entry.rules_planned) ? entry.rules_planned : [];
+    for (const rule of rules) {
+      if (rule?.followed === false) {
+        const label = rule?.text || rule?.id || "Rule";
+        brokenRuleCounts.set(label, (brokenRuleCounts.get(label) || 0) + 1);
+      }
+    }
+  }
+  const mostBrokenRule = [...brokenRuleCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "—";
+
+  const executionSeries = entries
+    .filter((entry) => Number.isFinite(Number(entry.execution_score)) && Number(entry.execution_score) > 0)
+    .slice(-30)
+    .map((entry) => ({ date: entry.plan_date, value: Number(entry.execution_score) }));
+  const chartPoints = executionSeries.length ? buildTrendLinePoints(executionSeries) : null;
+
+  return `
+    <div class="discipline-card glass mt">
+      <div class="discipline-head">
+        <h6>Discipline Trends</h6>
+        <span class="discipline-sub">Client-side view of plan quality over time</span>
+      </div>
+      <div class="discipline-grid">
+        <div class="discipline-metric">
+          <span>Most broken rule</span>
+          <strong>${escapeHtml(mostBrokenRule)}</strong>
+        </div>
+        <div class="discipline-metric">
+          <span>Best streak</span>
+          <strong>${bestStreak} day${bestStreak === 1 ? "" : "s"} ≥80%</strong>
+        </div>
+      </div>
+      <div class="discipline-panel">
+        <div class="discipline-panel-head">Rules compliance by week</div>
+        ${weeklyBars.length ? `<div class="discipline-bars">${weeklyBars.map((item) => `<div class="discipline-bar-row"><span>${escapeHtml(item.label)}</span><div class="discipline-bar-track"><div class="discipline-bar-fill" style="width:${Math.max(6, item.pct)}%"></div></div><b>${item.pct}%</b></div>`).join("")}</div>` : `<div class="empty-state">Not enough weekly data yet.</div>`}
+      </div>
+      <div class="discipline-panel">
+        <div class="discipline-panel-head">Average execution score (last 30 days)</div>
+        ${chartPoints ? `<svg class="discipline-trend" viewBox="0 0 100 100" preserveAspectRatio="none">${chartPoints}</svg>` : `<div class="empty-state">No execution scores logged yet.</div>`}
+      </div>
+    </div>`;
+}
+
+function weekKeyFor(date) {
+  const d = new Date(`${date}T12:00:00`);
+  const day = d.getDay();
+  const monday = new Date(d);
+  const offset = day === 0 ? -6 : 1 - day;
+  monday.setDate(d.getDate() + offset);
+  return monday.toISOString().slice(0, 10);
+}
+
+function weekLabel(weekKey) {
+  const d = new Date(`${weekKey}T12:00:00`);
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+function entryCompliance(entry) {
+  const rules = Array.isArray(entry?.rules_followed) && entry.rules_followed.length
+    ? entry.rules_followed
+    : (Array.isArray(entry?.rules_planned) ? entry.rules_planned : []);
+  const planned = rules.filter((rule) => rule?.planned !== false);
+  if (!planned.length) return 0;
+  const followed = planned.filter((rule) => rule?.followed === true).length;
+  return Math.round((followed / planned.length) * 100);
+}
+
+function buildTrendLinePoints(series) {
+  const values = series.map((item) => item.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const points = series.map((item, index) => {
+    const x = 100 * (index / Math.max(1, series.length - 1));
+    const y = 100 - ((item.value - min) / span) * 100;
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  });
+  const line = `<polyline points="${points.join(" ")}" />`;
+  const circles = points.map((point) => {
+    const [x, y] = point.split(",");
+    return `<circle cx="${x}" cy="${y}" r="1.8" />`;
+  }).join("");
+  return `<line x1="0" y1="100" x2="100" y2="0" />${line}${circles}`;
 }
 
 const GOLD = "#d4af37";

@@ -2,7 +2,7 @@
 // CRUD, computes balances, drives realtime + sync-status + offline events.
 import { getSupabase, humanError } from "./supabaseClient.js";
 import { SCREENSHOTS_BUCKET } from "./config.js";
-import { DEFAULT_OPTIONS } from "./defaults.js";
+import { DEFAULT_OPTIONS, DEFAULT_TRADING_RULES } from "./defaults.js";
 import { DEFAULT_GOALS } from "./goalsEngine.js";
 import {
   saveSnapshot, loadSnapshot, getQueue, enqueue, flushQueue,
@@ -20,8 +20,15 @@ export const state = {
   cash: [],
   skipped: [],
   reviews: [],
+  dailyPlans: [],
   goals: [],
   options: structuredClone(DEFAULT_OPTIONS),
+  tradingRulesMeta: {
+    custom: [],
+    disabled: [],
+    edited: {},
+    order: null,
+  },
   online: navigator.onLine,
   sync: "idle", // idle | syncing | synced | offline | signed-out
 };
@@ -71,6 +78,7 @@ const TABLE_STATE = {
   cash_transactions: "cash",
   skipped_trades: "skipped",
   weekly_reviews: "reviews",
+  daily_plans: "dailyPlans",
   goals: "goals",
 };
 
@@ -80,6 +88,7 @@ function persistSnapshot() {
     cash: state.cash,
     skipped: state.skipped,
     reviews: state.reviews,
+    dailyPlans: state.dailyPlans,
     goals: state.goals,
   });
 }
@@ -140,6 +149,7 @@ function hydrateOffline() {
   state.cash = snap?.cash || [];
   state.skipped = snap?.skipped || [];
   state.reviews = snap?.reviews || [];
+  state.dailyPlans = snap?.dailyPlans || [];
   state.goals = snap?.goals || [];
   for (const op of getQueue(state.user?.id)) {
     if (op.accountId === state.currentAccountId) applyOptimistic(op.table, op.op, op.payload, op.rowId);
@@ -152,8 +162,9 @@ export function setUser(user) {
   if (!user) {
     state.accounts = [];
     state.currentAccountId = null;
-    state.trades = state.cash = state.skipped = state.reviews = state.goals = [];
+    state.trades = state.cash = state.skipped = state.reviews = state.dailyPlans = state.goals = [];
     state.options = structuredClone(DEFAULT_OPTIONS);
+    state.tradingRulesMeta = { custom: [], disabled: [], edited: {}, order: null };
     unsubscribeRealtime();
     setSync("signed-out");
     emit();
@@ -252,6 +263,7 @@ export async function updateAccountStartingBalance(id, val) {
 export async function loadOptions() {
   if (!navigator.onLine) {
     state.options = loadOptionsCache(state.user.id) || structuredClone(DEFAULT_OPTIONS);
+    await loadTradingRulesMeta();
     return;
   }
   const { data, error } = await sb()
@@ -264,6 +276,7 @@ export async function loadOptions() {
   if (data?.value) Object.assign(merged, data.value);
   state.options = merged;
   saveOptionsCache(state.user.id, merged);
+  await loadTradingRulesMeta();
 }
 
 export async function saveOptions(options) {
@@ -282,6 +295,81 @@ export async function resetOptions() {
   await saveOptions(structuredClone(DEFAULT_OPTIONS));
 }
 
+const DEFAULT_RULES_META = { custom: [], disabled: [], edited: {}, order: null };
+
+export async function loadTradingRulesMeta() {
+  if (!state.user) return;
+  if (!navigator.onLine) {
+    const cached = loadOptionsCache(state.user.id + "-rules");
+    state.tradingRulesMeta = cached || structuredClone(DEFAULT_RULES_META);
+    return;
+  }
+  const [customRes, prefsRes] = await Promise.all([
+    sb().from("journal_meta").select("value").eq("key", "custom_trading_rules").maybeSingle(),
+    sb().from("journal_meta").select("value").eq("key", "trading_rules_prefs").maybeSingle(),
+  ]);
+  const custom = Array.isArray(customRes.data?.value) ? customRes.data.value : [];
+  const prefs = prefsRes.data?.value || {};
+  state.tradingRulesMeta = {
+    custom,
+    disabled: prefs.disabled || [],
+    edited: prefs.edited || {},
+    order: prefs.order || null,
+  };
+  saveOptionsCache(state.user.id + "-rules", state.tradingRulesMeta);
+}
+
+export async function saveTradingRulesMeta(meta) {
+  state.tradingRulesMeta = meta;
+  const { error: e1 } = await sb()
+    .from("journal_meta")
+    .upsert(
+      { user_id: state.user.id, key: "custom_trading_rules", value: meta.custom || [] },
+      { onConflict: "user_id,key" }
+    );
+  if (e1) throw e1;
+  const { error: e2 } = await sb()
+    .from("journal_meta")
+    .upsert(
+      {
+        user_id: state.user.id,
+        key: "trading_rules_prefs",
+        value: { disabled: meta.disabled || [], edited: meta.edited || {}, order: meta.order || null },
+      },
+      { onConflict: "user_id,key" }
+    );
+  if (e2) throw e2;
+  saveOptionsCache(state.user.id + "-rules", meta);
+  emit();
+}
+
+/** Build the active rule list for a new daily plan entry. */
+export function getActiveTradingRules() {
+  const meta = state.tradingRulesMeta || DEFAULT_RULES_META;
+  const defaults = DEFAULT_TRADING_RULES.filter((r) => !meta.disabled.includes(r.id)).map((r) => ({
+    ...r,
+    text: meta.edited[r.id] || r.text,
+    planned: true,
+    followed: null,
+  }));
+  const custom = (meta.custom || [])
+    .filter((r) => r.active !== false)
+    .map((r) => ({
+      id: r.id,
+      text: r.text,
+      is_default: false,
+      is_custom: true,
+      planned: true,
+      followed: null,
+    }));
+  let all = [...defaults, ...custom];
+  if (meta.order?.length) {
+    const orderMap = new Map(meta.order.map((id, i) => [id, i]));
+    all.sort((a, b) => (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999));
+  }
+  return all;
+}
+
 // ---------- data load ----------
 export async function refreshAll() {
   if (!state.user) return;
@@ -293,18 +381,20 @@ export async function refreshAll() {
   setSync("syncing");
   try {
     const acc = state.currentAccountId;
-    const [trades, cash, skipped, reviews, goals] = await Promise.all([
+    const [trades, cash, skipped, reviews, dailyPlans, goals] = await Promise.all([
       sb().from("trades").select("*").eq("account_id", acc).order("trade_date", { ascending: true }).order("created_at", { ascending: true }),
       sb().from("cash_transactions").select("*").eq("account_id", acc).order("tx_date", { ascending: true }).order("created_at", { ascending: true }),
       sb().from("skipped_trades").select("*").eq("account_id", acc).order("trade_date", { ascending: false }),
       sb().from("weekly_reviews").select("*").eq("account_id", acc).order("week_of", { ascending: false }),
+      sb().from("daily_plans").select("*").eq("account_id", acc).order("plan_date", { ascending: false }),
       sb().from("goals").select("*").eq("account_id", acc).order("created_at", { ascending: true }),
     ]);
-    for (const r of [trades, cash, skipped, reviews, goals]) if (r.error) throw r.error;
+    for (const r of [trades, cash, skipped, reviews, dailyPlans, goals]) if (r.error) throw r.error;
     state.trades = trades.data || [];
     state.cash = cash.data || [];
     state.skipped = skipped.data || [];
     state.reviews = reviews.data || [];
+    state.dailyPlans = dailyPlans.data || [];
     state.goals = goals.data || [];
     if (!state.goals.length) {
       await ensureGoalsForAccount(acc);
@@ -437,6 +527,25 @@ export async function deleteReview(id) {
   await refreshAll();
 }
 
+// ---------- daily plans CRUD ----------
+export async function saveDailyPlan(payload, id = null) {
+  if (!navigator.onLine) return offlineMutate("daily_plans", id ? "update" : "insert", payload, id);
+  const row = { ...payload, user_id: state.user.id, account_id: state.currentAccountId };
+  let res;
+  if (id) res = await sb().from("daily_plans").update(row).eq("id", id).select().single();
+  else res = await sb().from("daily_plans").insert(row).select().single();
+  if (res.error) throw new Error(humanError(res.error));
+  await refreshAll();
+  return res.data;
+}
+
+export async function deleteDailyPlan(id) {
+  if (!navigator.onLine) return offlineMutate("daily_plans", "delete", null, id);
+  const { error } = await sb().from("daily_plans").delete().eq("id", id);
+  if (error) throw new Error(humanError(error));
+  await refreshAll();
+}
+
 // ---------- goals CRUD ----------
 async function seedDefaultGoals(accountId) {
   if (!state.user || !navigator.onLine) return;
@@ -517,7 +626,7 @@ export function subscribeRealtime() {
   const c = getSupabase();
   if (!c || !state.user) return;
   channel = c.channel("gj-" + state.user.id);
-  const tables = ["trades", "cash_transactions", "skipped_trades", "weekly_reviews", "goals", "accounts", "journal_meta"];
+  const tables = ["trades", "cash_transactions", "skipped_trades", "weekly_reviews", "daily_plans", "goals", "accounts", "journal_meta"];
   for (const table of tables) {
     channel.on("postgres_changes", { event: "*", schema: "public", table, filter: `user_id=eq.${state.user.id}` }, () => {
       refreshAll().catch(() => {});
