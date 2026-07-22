@@ -84,24 +84,14 @@ export const DEFAULT_OPTIONS = {
 
 // Default trading rules pre-loaded for every new daily plan entry.
 export const DEFAULT_TRADING_RULES = [
-  { id: "max_trades", text: "Maximum 3 trades today. Stop after 3 regardless of outcome.", is_default: true, planned: true, followed: null, is_custom: false },
-  { id: "max_loss", text: "Stop trading if daily loss exceeds my limit. No exceptions.", is_default: true, planned: true, followed: null, is_custom: false },
-  { id: "no_revenge", text: "After a loss, wait minimum 30 minutes before next entry.", is_default: true, planned: true, followed: null, is_custom: false },
-  { id: "no_fomo", text: "No chasing moves. If I missed the entry, I missed it. Wait for next setup.", is_default: true, planned: true, followed: null, is_custom: false },
-  { id: "no_random", text: "Every trade must have a clear level, setup, and confirmation. No random trades.", is_default: true, planned: true, followed: null, is_custom: false },
-  { id: "no_overtrading", text: "Quality over quantity. Do not force trades in choppy or unclear conditions.", is_default: true, planned: true, followed: null, is_custom: false },
-  { id: "bias_check", text: "Check H1 bias before the session. Know the direction before opening charts.", is_default: true, planned: true, followed: null, is_custom: false },
-  { id: "levels_marked", text: "Mark all key levels (TJL, QML, SBR, RBS) before session starts.", is_default: true, planned: true, followed: null, is_custom: false },
-  { id: "news_check", text: "Check high-impact news calendar. No trades 30 minutes before/after news.", is_default: true, planned: true, followed: null, is_custom: false },
-  { id: "session_plan", text: "Only trade during my planned session. Do not trade outside planned hours.", is_default: true, planned: true, followed: null, is_custom: false },
-  { id: "setup_quality", text: "Only take A or A+ setups. No B setups until win rate is consistently above 60%.", is_default: true, planned: true, followed: null, is_custom: false },
-  { id: "confirmation", text: "Wait for confirmation candle before entry. No anticipation entries.", is_default: true, planned: true, followed: null, is_custom: false },
-  { id: "sl_no_move", text: "Never move stop loss against the trade. SL is final once set.", is_default: true, planned: true, followed: null, is_custom: false },
-  { id: "be_rule", text: "Move SL to break-even only after price reaches 50% of take profit.", is_default: true, planned: true, followed: null, is_custom: false },
-  { id: "screenshot", text: "Take screenshot before AND after every trade. No exceptions.", is_default: true, planned: true, followed: null, is_custom: false },
-  { id: "mental_check", text: "If I feel anxious, tired, or angry before the session, do not trade today.", is_default: true, planned: true, followed: null, is_custom: false },
-  { id: "no_news_trades", text: "No trading during high-volatility news spikes even if setup looks valid.", is_default: true, planned: true, followed: null, is_custom: false },
-  { id: "accept_loss", text: "A stop loss hit is not a failure. It is the plan working. Move on.", is_default: true, planned: true, followed: null, is_custom: false },
+  { id: "max_trades", text: "Maximum 3 trades today. Stop after 3.", is_default: true },
+  { id: "max_loss", text: "Stop trading if daily loss exceeds my limit.", is_default: true },
+  { id: "no_revenge", text: "After a loss, wait 30 minutes before next entry.", is_default: true },
+  { id: "no_fomo", text: "No chasing moves. Missed entry = wait for next setup.", is_default: true },
+  { id: "setup_quality", text: "Only take A or A+ setups today.", is_default: true },
+  { id: "sl_no_move", text: "Never move SL against the trade once set.", is_default: true },
+  { id: "no_news", text: "No trades 30 minutes before/after high-impact news.", is_default: true },
+  { id: "screenshot", text: "Take screenshot for every trade. No exceptions.", is_default: true },
 ];
 
 export const EMOTION_OPTIONS = [

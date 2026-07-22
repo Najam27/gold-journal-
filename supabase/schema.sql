@@ -60,6 +60,9 @@ create table if not exists public.trades (
   pnl                numeric default 0,
   screenshot_path    text,             -- storage object path
   notes              text,
+  emotion_before     text,
+  emotion_during     text,
+  emotion_after      text,
   created_at         timestamptz not null default now(),
   updated_at         timestamptz not null default now()
 );

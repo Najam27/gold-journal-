@@ -45,7 +45,49 @@ koi confirmation nahi tha = no confirmation was there
 thaka hua tha = was tired
 achanak = suddenly (often indicates surprise/FOMO)
 
-Read between the lines of notes. A trader who writes 'jaldi ki' on 4 losing trades is confessing to a pattern even if they do not realize it. A trader who writes 'dar gaya' on winning trades that were exited early is telling you their fear is costing them money. Extract these confessions and confront the trader with them directly.
+PLAN VS EXECUTION ANALYSIS (critical):
+You have access to the trader's daily plans AND their actual trade execution. Analyze the gap between them.
+
+Key patterns to detect:
+
+1. UNPLANNED TRADING: Did the trader take trades on days they had no morning plan? If yes, state how many trades were taken without a written plan and what the win rate was on those vs planned days.
+
+2. PLAN-EXECUTION GAP: On days where the trader wrote a plan and also logged trades, compare:
+   - What session did they plan to trade vs what they actually traded?
+   - Did they stick to their planned bias (Bullish/Bearish)?
+   - Rules compliance: if average compliance is below 70%, name the most broken rules specifically.
+
+3. EMOTION-OUTCOME CORRELATION:
+   Read emotion_before, emotion_during, emotion_after for every trade. Find patterns:
+   - Trades where emotion_before shows fear/anxiety: what was the win rate?
+   - Trades where emotion_during shows desire to exit early (dar raha tha, nikalna chahta tha, uncomfortable): did they exit early? What did hold_quality show?
+   - Trades where emotion_after shows regret (chahiye tha hold karna, chhota TP le liya): calculate money left on table
+   State findings as specific correlations with numbers.
+
+4. DAILY PLAN QUALITY CHECK:
+   If plansLogged < 3 for the analysis period:
+   State: 'You logged a trading plan on only X out of Y trading days. Every trade taken without a written plan is an unplanned trade. Unplanned trades have no accountability. Start logging your morning plan first.'
+
+   If average execution score < 3:
+   State: 'Your average self-rated execution score is X/5. You already know you are not executing well — the data confirms it. The question is why.'
+
+5. WHAT THE TRADER KNOWS VS WHAT THEY DO:
+   Compare plan_notes quality vs trade outcomes.
+   If plans are detailed but execution is poor:
+   'Your plans are solid. You know what to do. The problem is not knowledge — it is discipline under pressure. This is an emotional problem, not a strategy problem.'
+
+   If no plans written:
+   'You have no daily plans. You are trading without a roadmap. This is not a strategy — it is gambling with structure.'
+
+EMOTION VOCABULARY FOR TRADE FIELDS:
+emotion_before showing concern:
+  dar raha tha, nervous, pata nahi, unsure, anxious, thaka hua, distracted, gussa
+emotion_during showing stress:
+  nikalna chahta tha, SL move karna chahta tha, uncomfortable, worried, restless, jaldi close karna tha
+emotion_after showing regret:
+  chahiye tha rakhta, chhota exit kiya, gussa, should have held, nahi raha, disappointed
+
+Read between the lines of notes.
 
 DATA INSUFFICIENCY WARNING:
 If total trades analyzed is below 20, begin the entire report with this block in red bold:
@@ -118,7 +160,22 @@ State finding:
 Use pre-defined rules to detect revenge trades: a trade taken within 30 minutes of a loss AND at higher risk than average. Report how many and how much it cost.
 
 2E. DISCIPLINE SCORE
-Give a discipline score out of 10. Base it on setup quality distribution, risk consistency, and respect for rules.`;
+Give a discipline score out of 10. Base it on setup quality distribution, risk consistency, and respect for rules.
+
+SECTION 5B — PLAN & EXECUTION ANALYSIS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Plans logged this period: X of Y trading days
+Average execution score: X/5
+Average day rating: X/5
+Rules compliance: X%
+
+PLANNING HABIT: [Did they plan consistently? Be direct about the number.]
+
+MOST BROKEN RULE: [Name the specific rule that was violated most often. State how many times.]
+
+EMOTION PATTERNS IN TRADES: [What do the emotion_before/during/after fields reveal? Correlate with outcomes. Be specific.]
+
+PLAN-EXECUTION GAP: [Biggest difference between what they planned and what they did. One specific example.]`;
 
 export function render(container) {
   const savedKey = localStorage.getItem(KEY_STORE) || "";
@@ -504,6 +561,23 @@ function summarize(range) {
   const averageExecutionScore = dailyPlans.length
     ? Number((dailyPlans.reduce((sum, plan) => sum + Number(plan.execution_score || 0), 0) / dailyPlans.length).toFixed(1))
     : 0;
+  const ratedPlans = dailyPlans.filter((plan) => plan.overall_rating != null);
+  const averageOverallDayRating = ratedPlans.length
+    ? Number((ratedPlans.reduce((sum, plan) => sum + Number(plan.overall_rating || 0), 0) / ratedPlans.length).toFixed(1))
+    : 0;
+  const planNotesCorpus = dailyPlans.slice(-10).map((plan) => ({
+    date: plan.plan_date,
+    pre_bias: plan.pre_bias || "",
+    plan_notes: plan.plan_notes || "",
+    emotion_start: plan.emotion_start || "",
+    emotion_end: plan.emotion_end || "",
+    what_went_wrong: plan.what_went_wrong || "",
+    lessons: plan.lessons || "",
+    overall_rating: plan.overall_rating || null,
+  }));
+  const plannedDates = new Set(dailyPlans.map((plan) => plan.plan_date).filter(Boolean));
+  const unplannedTradingDays = [...new Set(trades.map((trade) => trade.trade_date).filter(Boolean))]
+    .filter((date) => !plannedDates.has(date));
 
   return {
     range: parseRange(range),
@@ -525,7 +599,7 @@ function summarize(range) {
     fearSignals,
     rushSignals,
     greedSignals,
-    trades: trades.map((x) => ({
+    trades: trades.map((x, index) => ({
       date: x.trade_date,
       session: x.session,
       level: x.level,
@@ -543,6 +617,10 @@ function summarize(range) {
       result: x.result,
       pnl: Number(x.pnl || 0),
       notes: x.notes || x.note || x.comment || "",
+      emotion_before: x.emotion_before || "",
+      emotion_during: x.emotion_during || "",
+      emotion_after: x.emotion_after || "",
+      notesCorpus: `[Trade ${index + 1} — ${x.result || "Open"} — ${x.trade_date || "Unknown date"}]\nNotes: ${x.notes || x.note || x.comment || ""}\nBefore: ${x.emotion_before || ""}\nDuring: ${x.emotion_during || ""}\nAfter: ${x.emotion_after || ""}`,
     })),
     skippedTrades: skippedTrades.map((x) => ({
       date: x.trade_date,
@@ -554,18 +632,15 @@ function summarize(range) {
     })),
     weeklyReviews: reviews.map((x) => ({ week_of: x.week_of || x.date, learned: x.learned, pattern: x.pattern, improve: x.improve })),
     dailyPlans: {
-      entries: dailyPlans.slice(-10).map((plan) => ({
-        date: plan.plan_date,
-        plan_notes: plan.plan_notes || "",
-        rules_followed: Array.isArray(plan.rules_followed) ? plan.rules_followed : [],
-        emotion_start: plan.emotion_start || "",
-        emotion_end: plan.emotion_end || "",
-        what_went_wrong: plan.what_went_wrong || "",
-        lessons: plan.lessons || "",
-      })),
+      entries: planNotesCorpus,
       averageRulesCompliancePct: averageRulesCompliance,
       mostBrokenRules,
       averageExecutionScore,
+      averageOverallDayRating,
+      plansLogged: dailyPlans.length,
+      daysWithReviewCompleted: dailyPlans.filter((plan) => plan.overall_rating != null).length,
+      unplannedTradingDays,
+      detailNotice: null,
     },
   };
 }
@@ -626,6 +701,12 @@ async function analyze(container) {
       greedCount: summary.greedSignals,
     },
   };
+
+  const payloadSize = JSON.stringify(requestData).length;
+  if (payloadSize > 18000) {
+    requestData.dailyPlans.entries = requestData.dailyPlans.entries.slice(-5);
+    requestData.dailyPlans.detailNotice = "Showing last 5 plan entries in detail";
+  }
 
   btn.disabled = true;
   btn.classList.add("loading");

@@ -1,5 +1,5 @@
 import {
-  state, currentAccount, switchAccount, saveGoal, deleteGoal, toggleGoalActive,
+  state, currentAccount, saveGoal, deleteGoal, toggleGoalActive,
 } from "../store.js";
 import {
   evaluationsForPage, notificationPermission, requestNotificationPermission,
@@ -13,16 +13,17 @@ import {
 import { toast, confirmDialog, escapeHtml } from "../ui.js";
 import { openModal } from "../modal.js";
 
-let activePeriodAnchor = "daily";
+let activePeriodAnchor = "all";
 let recalcTimer = null;
 let expandedMonths = new Set();
 let goalsContainer = null;
 let eventsWired = false;
 
 const PERIODS = ["daily", "weekly", "monthly"];
+const PERIOD_TABS = ["all", ...PERIODS];
 const PERIOD_LABELS = { daily: "Daily Goals", weekly: "Weekly Goals", monthly: "Monthly Goals" };
 const PERIOD_HINTS = {
-  daily: "Resets every midnight PKT",
+  daily: "Resets every midnight",
   weekly: "Resets every Monday 00:00 PKT",
   monthly: "Resets every 1st of month PKT",
 };
@@ -50,12 +51,12 @@ export function render(container) {
 
   container.innerHTML = `
   <div class="goals-page">
-    <div class="page-head">
+    <div class="page-head goals-header-row">
       <div>
         <h1 class="page-title">Goals</h1>
         <p class="page-sub">${escapeHtml(acc?.name || "Account")}</p>
       </div>
-      <div class="page-actions">
+      <div class="page-actions goals-header-actions">
         <div class="notify-wrap">
           ${notificationBellHtml()}
           <div class="notification-dropdown" id="notification-dropdown" hidden>
@@ -66,20 +67,15 @@ export function render(container) {
       </div>
     </div>
 
-    <div class="goals-toolbar glass">
-      <div class="goals-acct">
-        <label>Account</label>
-        <select id="goals-acct-select" class="mini-select">
-          ${state.accounts.map((a) => `<option value="${a.id}" ${a.id === state.currentAccountId ? "selected" : ""}>${escapeHtml(a.name)}</option>`).join("")}
-        </select>
-      </div>
-      <div class="period-toggle">
-        ${PERIODS.map((p) => `<button type="button" class="chip ${activePeriodAnchor === p ? "active" : ""}" data-period="${p}">${p.charAt(0).toUpperCase() + p.slice(1)}</button>`).join("")}
-      </div>
+    <div class="goals-summary-cards" id="goals-summary-stats">
+      ${summaryStatsHtml(stats)}
     </div>
 
-    <div class="goals-summary-stats" id="goals-summary-stats">
-      ${summaryStatsHtml(stats)}
+    <div class="goals-period-tabs">
+      ${PERIOD_TABS.map((p) => {
+        const label = p === "all" ? "All" : p.charAt(0).toUpperCase() + p.slice(1);
+        return `<button type="button" class="goals-period-tab ${activePeriodAnchor === p ? "active" : ""}" data-period="${p}">${label}</button>`;
+      }).join("")}
     </div>
 
     <div class="goals-sections" id="goals-sections">
@@ -119,37 +115,35 @@ function markGoalsNotificationsRead() {
 }
 
 function computeSummaryStats(evaluated) {
-  const active = evaluated.filter((e) => e.goal.is_active);
+  const activeGoals = evaluated.filter((e) => e.goal.is_active);
   return {
-    active: state.goals.filter((g) => g.is_active).length,
-    met: active.filter((e) => e.status === "MET").length,
-    breached: active.filter((e) => e.status === "BREACHED").length,
-    atRisk: active.filter((e) => e.status === "AT_RISK").length,
+    active: activeGoals.length,
+    met: activeGoals.filter((e) => e.status === "MET").length,
+    breached: activeGoals.filter((e) => e.status === "BREACHED").length,
+    atRisk: activeGoals.filter((e) => e.status === "AT_RISK").length,
   };
 }
 
+const SUMMARY_CARDS = [
+  { key: "active", label: "Total Active Goals", icon: "target", color: "#f3f4f6" },
+  { key: "met", label: "Met", icon: "check-circle", color: "#22c55e" },
+  { key: "breached", label: "Breached", icon: "alert-triangle", color: "#ef4444" },
+  { key: "atRisk", label: "At Risk", icon: "alert-circle", color: "#f59e0b" },
+];
+
 function summaryStatsHtml(stats) {
-  return `
-    <div class="goals-stat-card">
-      <div class="goals-stat-num" data-count="${stats.active}">0</div>
-      <div class="goals-stat-label">Active Goals</div>
-    </div>
-    <div class="goals-stat-card goals-stat-met">
-      <div class="goals-stat-num" data-count="${stats.met}">0</div>
-      <div class="goals-stat-label">Goals Met</div>
-    </div>
-    <div class="goals-stat-card goals-stat-breach">
-      <div class="goals-stat-num" data-count="${stats.breached}">0</div>
-      <div class="goals-stat-label">Goals Breached</div>
-    </div>
-    <div class="goals-stat-card goals-stat-risk">
-      <div class="goals-stat-num" data-count="${stats.atRisk}">0</div>
-      <div class="goals-stat-label">Goals At Risk</div>
-    </div>`;
+  return SUMMARY_CARDS.map((card) => `
+    <div class="goals-card">
+      <div class="goals-card-top">
+        <i data-lucide="${card.icon}" style="color:${card.color}"></i>
+        <div class="goals-card-num" data-count="${stats[card.key]}" style="color:${card.color}">0</div>
+      </div>
+      <div class="goals-card-label">${card.label}</div>
+    </div>`).join("");
 }
 
 function animateSummaryStats(container) {
-  container.querySelectorAll(".goals-stat-num[data-count]").forEach((el) => {
+  container.querySelectorAll(".goals-card-num[data-count]").forEach((el) => {
     const target = Number(el.dataset.count) || 0;
     const duration = 500;
     const start = performance.now();
@@ -165,9 +159,7 @@ function animateSummaryStats(container) {
 function notificationBellHtml() {
   const perm = notificationPermission();
   const { unreadCount } = getNotificationCenter();
-  const badge = perm === "granted" && unreadCount > 0
-    ? `<span class="notify-count">${unreadCount}</span>`
-    : "";
+  const badge = unreadCount > 0 ? `<span class="notify-count">${unreadCount}</span>` : "";
   const blocked = perm === "denied"
     ? `<span class="notify-state blocked">blocked</span>`
     : "";
@@ -184,9 +176,9 @@ function notificationBellHtml() {
 function sectionHtml(period, items) {
   const activeCount = items.filter((e) => e.goal.is_active).length;
   return `
-  <section class="goals-section glass" id="section-${period}" data-section="${period}">
+  <section class="goals-section" id="section-${period}" data-section="${period}">
     <div class="goals-section-head">
-      <span class="goals-section-title"><i data-lucide="${PERIOD_ICONS[period]}"></i> ${PERIOD_LABELS[period]}</span>
+      <span class="goals-section-title"><i data-lucide="${PERIOD_ICONS[period]}"></i> <strong>${PERIOD_LABELS[period]}</strong></span>
       <span class="goals-section-hint">${PERIOD_HINTS[period]}</span>
       <span class="count-badge">${activeCount} active</span>
     </div>
@@ -212,52 +204,70 @@ function sectionHtml(period, items) {
 }
 
 function goalDescription(g) {
-  const t = Number(g.target_value);
-  const periodWord = g.period === "daily" ? "today" : g.period === "weekly" ? "this week" : "this month";
   const map = {
-    max_trades: `Max ${t} trades ${periodWord}`,
-    max_loss_day: `Max $${t} daily loss ${periodWord}`,
-    max_loss_week: `Max $${t} weekly loss`,
-    profit_target: `Target $${t} net P&L ${periodWord}`,
-    win_rate: `Must stay ≥ ${t}% ${periodWord}`,
-    min_rr: `Minimum ${t}:1 avg R:R ${periodWord}`,
-    max_consecutive_losses: `Max ${t} losses in a row ${periodWord}`,
-    setup_quality: `≥ ${t}% A/A+ setups ${periodWord}`,
-    patience_score: `Minimum ${t} avg patience ${periodWord}`,
-    no_revenge_trade: `${t} min gap after loss`,
-    screenshot_rate: `≥ ${t}% trades with screenshots ${periodWord}`,
-    weekly_review: `${t} reviews completed ${periodWord}`,
-    profit_factor: `Profit factor ≥ ${t} ${periodWord}`,
-    drawdown_pct: `Max ${t}% drawdown ${periodWord}`,
-    log_same_day: `≥ ${t}% same-day logging ${periodWord}`,
-    custom: g.comparison === "lte" ? `Must stay below ${t} ${periodWord}` : `Must reach ${t} ${periodWord}`,
+    max_trades: "Max trades per day",
+    max_loss_day: "Max loss today",
+    max_loss_week: "Max weekly loss",
+    no_revenge_trade: "Min gap after loss",
+    profit_target: "Net P&L target",
+    win_rate: "Win rate this period",
+    min_rr: "Avg R:R achieved",
+    setup_quality: "% A/A+ setups",
+    patience_score: "Avg patience score",
+    screenshot_rate: "% trades with screenshot",
+    max_consecutive_losses: "Max loss streak",
+    weekly_review: "Reviews logged",
+    profit_factor: "Gross win / gross loss",
+    drawdown_pct: "Max drawdown",
+    log_same_day: "Same-day logging rate",
+    custom: "Custom goal",
   };
-  return map[g.type] || `Target: ${t} ${periodWord}`;
+  return map[g.type] || "Custom goal";
+}
+
+function countRevengeIncidents(minMinutes) {
+  const byDay = new Map();
+  for (const t of state.trades) {
+    if (!t.created_at) continue;
+    if (!byDay.has(t.trade_date)) byDay.set(t.trade_date, []);
+    byDay.get(t.trade_date).push(t);
+  }
+  let count = 0;
+  for (const dayTrades of byDay.values()) {
+    const sorted = dayTrades.slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    for (let i = 0; i < sorted.length - 1; i++) {
+      if (sorted[i].result !== "Loss") continue;
+      const gap = (new Date(sorted[i + 1].created_at) - new Date(sorted[i].created_at)) / 60000;
+      if (gap < minMinutes) count += 1;
+    }
+  }
+  return count;
 }
 
 function goalRow(ev) {
   const g = ev.goal;
   const flash = shouldFlashCard(g.id) && ev.status === "BREACHED";
-  const statusKey = ev.inactive ? "paused" : ev.status.toLowerCase().replace("_", "-");
+  const statusKey = ev.inactive ? "paused" : ev.status.toLowerCase();
   const barClass = ev.status === "MET" ? "bar-met" : ev.status === "BREACHED" ? "bar-breach" : ev.status === "AT_RISK" ? "bar-risk" : "bar-pending";
   const progress = Math.min(100, Math.max(0, ev.progress || 0));
-  const rowState = ev.inactive ? "goal-paused" : `goal-state-${statusKey}`;
+  const rowClass = ev.inactive ? "goal-row-paused" : `goal-row-${statusKey}`;
 
   let targetDisplay;
-  if (g.type === "no_revenge_trade") {
-    targetDisplay = ev.status === "BREACHED"
-      ? `<span class="target-breached">BREACHED</span>`
-      : `<span class="target-met">CLEAR</span>`;
+  if (g.type === "no_revenge_trade" && ev.status === "BREACHED") {
+    const count = countRevengeIncidents(Number(g.target_value) || 30);
+    targetDisplay = `<span class="target-breached">${count} revenge trade${count === 1 ? "" : "s"}</span>`;
   } else {
     const cls = ev.status === "BREACHED" ? "target-breached" : ev.status === "MET" ? "target-met" : "target-pending";
     targetDisplay = `<span class="${cls}">${ev.displayCurrent} / ${ev.displayTarget}</span>`;
   }
 
+  const badgeLabel = ev.inactive ? "PAUSED" : ev.status.replace("_", " ");
+
   return `
-  <tr class="goal-row ${rowState} ${flash ? "goal-flash" : ""} ${!g.is_active ? "goal-inactive" : ""}" data-goal="${g.id}">
+  <tr class="goal-row ${rowClass} ${flash ? "goal-flash" : ""} ${!g.is_active ? "goal-inactive" : ""}" data-goal="${g.id}">
     <td class="cell-name">
-      <span class="goal-title">${escapeHtml(g.title)}</span>
-      <span class="goal-desc">${escapeHtml(goalDescription(g))}</span>
+      <div class="goal-name-title">${escapeHtml(g.title)}</div>
+      <div class="goal-name-desc">${escapeHtml(goalDescription(g))}</div>
     </td>
     <td class="cell-target">${targetDisplay}</td>
     <td class="cell-progress">
@@ -266,7 +276,7 @@ function goalRow(ev) {
       </div>
     </td>
     <td class="cell-status">
-      <span class="goal-badge goal-badge-${statusKey}">${ev.inactive ? "PAUSED" : ev.status.replace("_", " ")}</span>
+      <span class="goal-badge badge-${statusKey}">${badgeLabel}</span>
     </td>
     <td class="cell-actions">
       <label class="goal-switch" title="${g.is_active ? "Deactivate" : "Activate"}">
@@ -327,9 +337,9 @@ function pastMonthsHtml() {
         </tr>
         ${open ? `<tr class="pm-details-row"><td colspan="4"><div class="pm-details">
           ${hist.results.map((r) => `
-          <div class="pm-goal pm-${r.status.toLowerCase().replace("_", "-")}">
+          <div class="pm-goal pm-${r.status.toLowerCase()}">
             <span>${escapeHtml(r.goal.title)}</span>
-            <span class="goal-badge goal-badge-${r.status.toLowerCase().replace("_", "-")}">${r.status}</span>
+            <span class="goal-badge badge-${r.status.toLowerCase()}">${r.status}</span>
           </div>`).join("")}
         </div></td></tr>` : ""}`;
       }).join("")}
@@ -439,19 +449,15 @@ function wire(container) {
     refreshGoalsContent(container);
   });
 
-  container.querySelector("#goals-acct-select")?.addEventListener("change", async (e) => {
-    try {
-      await switchAccount(e.target.value);
-      toast("Switched account.", "info");
-      render(container);
-    } catch (err) { toast(err.message, "error"); }
-  });
-
-  container.querySelectorAll("[data-period]").forEach((btn) => {
+  container.querySelectorAll(".goals-period-tab[data-period]").forEach((btn) => {
     btn.addEventListener("click", () => {
       activePeriodAnchor = btn.dataset.period;
-      container.querySelectorAll("[data-period]").forEach((b) => b.classList.toggle("active", b.dataset.period === activePeriodAnchor));
-      document.getElementById(`section-${btn.dataset.period}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      container.querySelectorAll(".goals-period-tab").forEach((b) => b.classList.toggle("active", b.dataset.period === activePeriodAnchor));
+      if (btn.dataset.period === "all") {
+        container.querySelector(".goals-page")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else {
+        document.getElementById(`section-${btn.dataset.period}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
     });
   });
 

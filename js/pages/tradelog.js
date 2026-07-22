@@ -338,6 +338,23 @@ export function openTradeModal(trade, onDone, { duplicate = false } = {}) {
     <div class="form-section"><h6>Notes</h6>
       ${field("", `<textarea name="notes" rows="3" placeholder="What happened, how you felt, lessons…">${escapeHtml(t.notes || "")}</textarea>`)}
     </div>
+    <div class="form-section">
+      <h6>Emotions</h6>
+      <div class="emotion-notes-grid">
+        <label class="field">
+          <span>😌 Before Trade</span>
+          <textarea name="emotion_before" rows="2" placeholder="How were you feeling before entering? e.g. Calm, focused, dar raha tha, nervous about news…">${escapeHtml(t.emotion_before || "")}</textarea>
+        </label>
+        <label class="field">
+          <span>🧠 During Trade</span>
+          <textarea name="emotion_during" rows="2" placeholder="What were you thinking while in the trade? e.g. Confident in setup, wanted to exit early, SL move karna chahta tha…">${escapeHtml(t.emotion_during || "")}</textarea>
+        </label>
+        <label class="field">
+          <span>😤 After Trade</span>
+          <textarea name="emotion_after" rows="2" placeholder="How did you feel after closing? e.g. Satisfied, frustrated, gussa aya, should have held longer…">${escapeHtml(t.emotion_after || "")}</textarea>
+        </label>
+      </div>
+    </div>
     <div class="modal-actions">
       <button type="button" class="btn btn-ghost" data-cancel>Cancel</button>
       <button type="submit" class="btn btn-gold" id="save-trade"><span class="btn-label">${isEdit ? "Save Changes" : "Save Trade"}</span></button>
@@ -407,6 +424,9 @@ export function openTradeModal(trade, onDone, { duplicate = false } = {}) {
         pnl: Number(fd.get("pnl") || 0),
         result: fd.get("result") || null,
         notes: fd.get("notes") || null,
+        emotion_before: fd.get("emotion_before") || null,
+        emotion_during: fd.get("emotion_during") || null,
+        emotion_after: fd.get("emotion_after") || null,
         screenshot_path,
       };
       await saveTrade(payload, isEdit ? trade.id : null);
@@ -453,7 +473,10 @@ async function openViewModal(id) {
     ["Patience", t.patience_score], ["Mistake", t.mistake], ["Hold", t.hold_quality],
     ["Risk $", fmtNum(t.risk_amount)], ["Reward $", fmtNum(t.reward_amount)], ["R:R", rr],
     ["Result", t.result], ["P&L", fmtMoney(t.pnl)], ["Balance", fmtMoney(tradeRunningBalance(t.id))],
-  ];
+    ["Before Trade", t.emotion_before],
+    ["During Trade", t.emotion_during],
+    ["After Trade", t.emotion_after],
+  ].filter(([, v]) => v != null && String(v).trim() !== "");
   const bodyHtml = `
   <div class="view-grid">
     ${rows.map(([k, v]) => `<div class="view-item"><span class="vk">${k}</span><span class="vv">${escapeHtml(v ?? "—")}</span></div>`).join("")}

@@ -11,6 +11,45 @@ let selectedDate = todayISO();
 let formDirty = false;
 let savedSnapshot = null;
 let showAutoFillNote = false;
+let sessionEmotionOptions = [...EMOTION_OPTIONS];
+
+function parseEmotions(str) {
+  if (!str) return [];
+  if (Array.isArray(str)) return str.filter(Boolean);
+  return String(str).split("|").filter(Boolean);
+}
+
+function serializeEmotions(arr) {
+  return (arr || []).filter(Boolean).join("|");
+}
+
+function emotionVal(e) {
+  return e.emoji ? `${e.emoji} ${e.label}` : e.label;
+}
+
+function emotionPillsHtml(selected, key) {
+  const options = sessionEmotionOptions.slice();
+  for (const val of selected) {
+    if (!options.some((e) => emotionVal(e) === val)) {
+      options.push({ emoji: "", label: val });
+    }
+  }
+  return `
+    <div class="emotion-pills" data-emotion="${key}">
+      ${options.map((e) => {
+        const val = emotionVal(e);
+        const active = selected.includes(val) ? "active" : "";
+        const label = e.emoji ? `${e.emoji} ${escapeHtml(e.label)}` : escapeHtml(e.label);
+        return `<button type="button" class="emotion-pill ${active}" data-val="${escapeHtml(val)}">${label}</button>`;
+      }).join("")}
+    </div>
+    <button type="button" class="plan-add-emotion-btn" data-add-emotion="${key}">+ Add emotion</button>
+    <div class="plan-add-emotion" id="add-emotion-${key}" hidden>
+      <input type="text" class="custom-emotion-input" placeholder="Custom emotion label…">
+      <button type="button" class="btn btn-ghost btn-sm custom-emotion-add">Add</button>
+      <button type="button" class="btn btn-ghost btn-sm custom-emotion-cancel">Cancel</button>
+    </div>`;
+}
 
 const EXEC_SCORE_LABELS = {
   1: "Poor — broke multiple rules",
@@ -109,8 +148,8 @@ function buildFormState(entry) {
     sessions: parseSessions(entry?.session_focus),
     plan_notes: entry?.plan_notes || "",
     rules_planned: rules,
-    emotion_start: entry?.emotion_start || "",
-    emotion_end: entry?.emotion_end || "",
+    emotion_start: parseEmotions(entry?.emotion_start),
+    emotion_end: parseEmotions(entry?.emotion_end),
     execution_score: entry?.execution_score || 0,
     rules_followed: followed,
     what_went_well: entry?.what_went_well || "",
@@ -325,21 +364,11 @@ function renderForm(container, form) {
       <label>Emotions</label>
       <div class="emotion-group">
         <span class="emotion-row-label">Before trading</span>
-        <div class="emotion-pills" data-emotion="start">
-          ${EMOTION_OPTIONS.map((e) => {
-            const val = `${e.emoji} ${e.label}`;
-            return `<button type="button" class="emotion-pill ${form.emotion_start === val ? "active" : ""}" data-val="${escapeHtml(val)}">${e.emoji} ${escapeHtml(e.label)}</button>`;
-          }).join("")}
-        </div>
+        ${emotionPillsHtml(form.emotion_start, "start")}
       </div>
       <div class="emotion-group">
         <span class="emotion-row-label">After trading</span>
-        <div class="emotion-pills" data-emotion="end">
-          ${EMOTION_OPTIONS.map((e) => {
-            const val = `${e.emoji} ${e.label}`;
-            return `<button type="button" class="emotion-pill ${form.emotion_end === val ? "active" : ""}" data-val="${escapeHtml(val)}">${e.emoji} ${escapeHtml(e.label)}</button>`;
-          }).join("")}
-        </div>
+        ${emotionPillsHtml(form.emotion_end, "end")}
       </div>
     </div>
 
@@ -387,6 +416,10 @@ function collectForm(container, form) {
   form.what_went_well = container.querySelector("#what-well")?.value || "";
   form.what_went_wrong = container.querySelector("#what-wrong")?.value || "";
   form.lessons = container.querySelector("#lessons")?.value || "";
+  form.emotion_start = [...container.querySelectorAll('[data-emotion="start"] .emotion-pill.active')]
+    .map((b) => b.dataset.val);
+  form.emotion_end = [...container.querySelectorAll('[data-emotion="end"] .emotion-pill.active')]
+    .map((b) => b.dataset.val);
   return form;
 }
 
@@ -478,9 +511,47 @@ function wireForm(container, form) {
       const btn = e.target.closest(".emotion-pill");
       if (!btn) return;
       const key = group.dataset.emotion === "start" ? "emotion_start" : "emotion_end";
-      form[key] = btn.dataset.val;
-      group.querySelectorAll(".emotion-pill").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
+      const val = btn.dataset.val;
+      if (form[key].includes(val)) form[key] = form[key].filter((x) => x !== val);
+      else form[key].push(val);
+      btn.classList.toggle("active");
+      markDirty(container, form);
+    });
+  });
+
+  area.querySelectorAll("[data-add-emotion]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.addEmotion;
+      area.querySelector(`#add-emotion-${key}`).hidden = false;
+      btn.hidden = true;
+      area.querySelector(`#add-emotion-${key} .custom-emotion-input`)?.focus();
+    });
+  });
+
+  area.querySelectorAll(".plan-add-emotion").forEach((wrap) => {
+    const key = wrap.id.replace("add-emotion-", "");
+    const formKey = key === "start" ? "emotion_start" : "emotion_end";
+    wrap.querySelector(".custom-emotion-cancel")?.addEventListener("click", () => {
+      wrap.hidden = true;
+      area.querySelector(`[data-add-emotion="${key}"]`).hidden = false;
+      wrap.querySelector(".custom-emotion-input").value = "";
+    });
+    wrap.querySelector(".custom-emotion-add")?.addEventListener("click", () => {
+      const input = wrap.querySelector(".custom-emotion-input");
+      const label = input.value.trim();
+      if (!label) return;
+      const custom = { emoji: "", label };
+      sessionEmotionOptions.push(custom);
+      const val = emotionVal(custom);
+      if (!form[formKey].includes(val)) form[formKey].push(val);
+      wrap.hidden = true;
+      area.querySelector(`[data-add-emotion="${key}"]`).hidden = false;
+      input.value = "";
+      const group = area.querySelector(`[data-emotion="${key}"]`);
+      if (group) {
+        group.insertAdjacentHTML("beforeend",
+          `<button type="button" class="emotion-pill active" data-val="${escapeHtml(val)}">${escapeHtml(label)}</button>`);
+      }
       markDirty(container, form);
     });
   });
@@ -547,8 +618,8 @@ function wireForm(container, form) {
       session_focus: serializeSessions(form.sessions) || null,
       plan_notes: form.plan_notes || null,
       rules_planned: form.rules_planned,
-      emotion_start: form.emotion_start || null,
-      emotion_end: form.emotion_end || null,
+      emotion_start: serializeEmotions(form.emotion_start) || null,
+      emotion_end: serializeEmotions(form.emotion_end) || null,
       execution_score: form.execution_score || null,
       rules_followed: form.rules_followed,
       what_went_well: form.what_went_well || null,
