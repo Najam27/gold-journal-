@@ -367,7 +367,13 @@ export function getActiveTradingRules() {
     const orderMap = new Map(meta.order.map((id, i) => [id, i]));
     all.sort((a, b) => (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999));
   }
-  return all;
+  const seen = new Set();
+  return all.filter((r) => {
+    const key = String(r.text || "").trim().toLowerCase().replace(/\s+/g, " ");
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // ---------- data load ----------

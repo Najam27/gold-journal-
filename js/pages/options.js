@@ -300,6 +300,11 @@ function wireTradingRules(container) {
     const input = container.querySelector("#tr-new-rule");
     const text = input.value.trim();
     if (!text) return toast("Enter rule text.", "warning");
+    const normalized = text.toLowerCase().replace(/\s+/g, " ");
+    const duplicate = getAllManagedRules().some((r) =>
+      String(r.text || "").trim().toLowerCase().replace(/\s+/g, " ") === normalized
+    );
+    if (duplicate) return toast("This rule already exists.", "warning");
     const id = "custom_" + Date.now();
     state.tradingRulesMeta.custom = state.tradingRulesMeta.custom || [];
     state.tradingRulesMeta.custom.push({ id, text, is_default: false, active: true });

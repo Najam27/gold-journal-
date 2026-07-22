@@ -226,7 +226,7 @@ export function goalsStatusStripHtml() {
   }
   return `<div class="goals-status-strip glass">
     ${strip.items.map((e) => `
-      <button class="goal-pill goal-pill-${e.status.toLowerCase()}" data-go-goals title="View Goals">
+      <button class="goal-pill goal-pill-${e.status.toLowerCase().replace("_", "-")}" data-go-goals title="View Goals">
         ${escapeBanner(e.goal.title)}: ${e.displayCurrent} / ${e.displayTarget}
       </button>`).join("")}
   </div>`;
@@ -287,7 +287,7 @@ export function processGoalNotifications() {
     }
     
     // Fire browser notification only if not yet notified
-    if (logEntry && !logEntry.notified && Notification?.permission === "granted") {
+    if (logEntry && !logEntry.notified && typeof Notification !== "undefined" && Notification.permission === "granted") {
       try {
         new Notification(`${e.goal.title} breached — Gold Journal`, {
           body: `${e.displayCurrent} vs ${e.displayTarget} target`,

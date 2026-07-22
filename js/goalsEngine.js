@@ -408,6 +408,8 @@ export function customTrackToType(track, period) {
     loss: period === "weekly" ? "max_loss_week" : "max_loss_day",
     patience: "patience_score",
     drawdown: "drawdown_pct",
+    profit_factor: "profit_factor",
+    log_same_day: "log_same_day",
     custom: "custom",
   };
   return map[track] || "custom";

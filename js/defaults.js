@@ -84,14 +84,13 @@ export const DEFAULT_OPTIONS = {
 
 // Default trading rules pre-loaded for every new daily plan entry.
 export const DEFAULT_TRADING_RULES = [
-  { id: "max_trades", text: "Maximum 3 trades today. Stop after 3.", is_default: true },
-  { id: "max_loss", text: "Stop trading if daily loss exceeds my limit.", is_default: true },
-  { id: "no_revenge", text: "After a loss, wait 30 minutes before next entry.", is_default: true },
-  { id: "no_fomo", text: "No chasing moves. Missed entry = wait for next setup.", is_default: true },
-  { id: "setup_quality", text: "Only take A or A+ setups today.", is_default: true },
-  { id: "sl_no_move", text: "Never move SL against the trade once set.", is_default: true },
-  { id: "no_news", text: "No trades 30 minutes before/after high-impact news.", is_default: true },
-  { id: "screenshot", text: "Take screenshot for every trade. No exceptions.", is_default: true },
+  { id: "setup_quality", text: "Only trade a planned A/A+ setup at marked level, in selected session.", is_default: true },
+  { id: "risk_exit_plan", text: "Before entry, define entry, SL, TP, risk amount, and minimum 1:1.5 R:R.", is_default: true },
+  { id: "max_trades", text: "Max 3 trades today. Stop immediately after daily loss limit or 2 losses.", is_default: true },
+  { id: "no_revenge", text: "No revenge or FOMO trade. After a loss or missed move, wait 30 minutes.", is_default: true },
+  { id: "emotion_lockout", text: "No trade while angry, greedy, anxious, tired, bored, or distracted. Take a reset first.", is_default: true },
+  { id: "exit_discipline", text: "Exit only by plan. Do not move SL, panic-close, or hold hoping after invalidation.", is_default: true },
+  { id: "no_news", text: "No trade during high-impact news, choppy price, or no-clear-bias conditions.", is_default: true },
 ];
 
 export const EMOTION_OPTIONS = [

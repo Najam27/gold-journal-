@@ -8,12 +8,15 @@ import {
 } from "../goalsAlerts.js";
 import {
   listPastMonths, monthHistory, customTrackToType, comparisonFromDirection,
+  periodRange, GOAL_TYPES,
   getPKTDate, getPKTDateKey,
 } from "../goalsEngine.js";
 import { toast, confirmDialog, escapeHtml } from "../ui.js";
 import { openModal } from "../modal.js";
 
 let activePeriodAnchor = "all";
+let activeStatusFilter = "all";
+let goalSearchTerm = "";
 let recalcTimer = null;
 let expandedMonths = new Set();
 let goalsContainer = null;
@@ -35,9 +38,10 @@ const TRACK_HINTS = {
   win_rate: "Enter percentage e.g. 50 for 50%",
   rr: "Enter ratio e.g. 1.5 means 1:1.5",
   loss: "Enter max loss amount in dollars",
-  patience: "Enter minimum average score (1–5)",
+  patience: "Enter minimum average score (1-5)",
   drawdown: "Enter max drawdown percentage e.g. 10 for 10%",
-  custom: "Enter your target value",
+  profit_factor: "Enter minimum profit factor e.g. 1.5",
+  log_same_day: "Enter minimum same-day logging percentage e.g. 90",
 };
 
 export function render(container) {
@@ -48,13 +52,14 @@ export function render(container) {
   const acc = currentAccount();
   const evaluated = evaluationsForPage("all");
   const stats = computeSummaryStats(evaluated);
+  const filtered = filterEvaluations(evaluated);
 
   container.innerHTML = `
   <div class="goals-page">
     <div class="page-head goals-header-row">
       <div>
         <h1 class="page-title">Goals</h1>
-        <p class="page-sub">${escapeHtml(acc?.name || "Account")}</p>
+        <p class="page-sub">${escapeHtml(acc?.name || "Account")} - discipline targets update automatically from your journal data.</p>
       </div>
       <div class="page-actions goals-header-actions">
         <div class="notify-wrap">
@@ -71,15 +76,28 @@ export function render(container) {
       ${summaryStatsHtml(stats)}
     </div>
 
-    <div class="goals-period-tabs">
-      ${PERIOD_TABS.map((p) => {
-        const label = p === "all" ? "All" : p.charAt(0).toUpperCase() + p.slice(1);
-        return `<button type="button" class="goals-period-tab ${activePeriodAnchor === p ? "active" : ""}" data-period="${p}">${label}</button>`;
-      }).join("")}
+    ${alertsPanelHtml(evaluated)}
+
+    <div class="goals-control-bar glass">
+      <div class="goals-period-tabs" role="tablist" aria-label="Goal periods">
+        ${PERIOD_TABS.map((p) => {
+          const label = p === "all" ? "All" : p.charAt(0).toUpperCase() + p.slice(1);
+          return `<button type="button" class="goals-period-tab ${activePeriodAnchor === p ? "active" : ""}" data-period="${p}">${label}</button>`;
+        }).join("")}
+      </div>
+      <div class="goals-filters">
+        <div class="search-box goals-search">
+          <i data-lucide="search"></i>
+          <input type="search" id="goal-search" placeholder="Search goals" value="${escapeHtml(goalSearchTerm)}">
+        </div>
+        <select class="mini-select" id="goal-status-filter" aria-label="Filter by status">
+          ${statusOptionsHtml()}
+        </select>
+      </div>
     </div>
 
     <div class="goals-sections" id="goals-sections">
-      ${PERIODS.map((p) => sectionHtml(p, evaluated.filter((e) => e.goal.period === p))).join("")}
+      ${sectionsHtml(filtered)}
     </div>
 
     <div class="goals-history glass card-pad">
@@ -97,6 +115,72 @@ export function render(container) {
   animateSummaryStats(container);
   wire(container);
   startRecalcTimer(container);
+}
+
+function statusKey(status) {
+  return String(status || "pending").toLowerCase().replace("_", "-");
+}
+
+function filterEvaluations(evaluated) {
+  const q = goalSearchTerm.trim().toLowerCase();
+  return evaluated.filter((e) => {
+    const g = e.goal;
+    if (activePeriodAnchor !== "all" && g.period !== activePeriodAnchor) return false;
+    if (activeStatusFilter !== "all") {
+      const status = e.inactive ? "paused" : statusKey(e.status);
+      if (status !== activeStatusFilter) return false;
+    }
+    if (!q) return true;
+    const haystack = [
+      g.title,
+      g.period,
+      g.type,
+      GOAL_TYPES[g.type],
+      goalDescription(g),
+      e.displayCurrent,
+      e.displayTarget,
+    ].join(" ").toLowerCase();
+    return haystack.includes(q);
+  });
+}
+
+function statusOptionsHtml() {
+  const options = [
+    ["all", "All statuses"],
+    ["met", "Met"],
+    ["at-risk", "At risk"],
+    ["breached", "Breached"],
+    ["pending", "Pending"],
+    ["paused", "Paused"],
+  ];
+  return options.map(([value, label]) =>
+    `<option value="${value}" ${activeStatusFilter === value ? "selected" : ""}>${label}</option>`
+  ).join("");
+}
+
+function alertsPanelHtml(evaluated) {
+  const alerts = evaluated.filter((e) => e.goal.is_active && (e.status === "BREACHED" || e.status === "AT_RISK"));
+  if (!alerts.length) {
+    return `
+    <div class="goals-alert-panel goals-alert-ok glass">
+      <i data-lucide="shield-check"></i>
+      <div>
+        <strong>All active goals are under control</strong>
+        <span>No active breach or risk warning in the current period.</span>
+      </div>
+    </div>`;
+  }
+  return `
+  <div class="goals-alert-panel glass">
+    <div class="goals-alert-title"><i data-lucide="alert-triangle"></i> Needs attention</div>
+    <div class="goals-alert-list">
+      ${alerts.slice(0, 4).map((e) => `
+        <button type="button" class="goals-alert-chip goals-alert-${statusKey(e.status)}" data-jump-goal="${e.goal.id}">
+          <span>${escapeHtml(e.goal.title)}</span>
+          <b>${escapeHtml(e.displayCurrent)} / ${escapeHtml(e.displayTarget)}</b>
+        </button>`).join("")}
+    </div>
+  </div>`;
 }
 
 function markGoalsNotificationsRead() {
@@ -173,32 +257,33 @@ function notificationBellHtml() {
     </button>`;
 }
 
+function sectionsHtml(items) {
+  if (!items.length) {
+    return `
+    <div class="empty-state big goals-empty glass">
+      <i data-lucide="target"></i>
+      <p>No goals match your filters.</p>
+    </div>`;
+  }
+  return PERIODS
+    .filter((p) => activePeriodAnchor === "all" || activePeriodAnchor === p)
+    .map((p) => sectionHtml(p, items.filter((e) => e.goal.period === p)))
+    .join("");
+}
+
 function sectionHtml(period, items) {
   const activeCount = items.filter((e) => e.goal.is_active).length;
   return `
   <section class="goals-section" id="section-${period}" data-section="${period}">
     <div class="goals-section-head">
-      <span class="goals-section-title"><i data-lucide="${PERIOD_ICONS[period]}"></i> <strong>${PERIOD_LABELS[period]}</strong></span>
-      <span class="goals-section-hint">${PERIOD_HINTS[period]}</span>
+      <div>
+        <span class="goals-section-title"><i data-lucide="${PERIOD_ICONS[period]}"></i> <strong>${PERIOD_LABELS[period]}</strong></span>
+        <span class="goals-section-hint">${PERIOD_HINTS[period]}</span>
+      </div>
       <span class="count-badge">${activeCount} active</span>
     </div>
-    <div class="goals-table-wrapper" id="grid-${period}">
-      ${items.length ? `
-      <table class="goals-table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Target</th>
-            <th>Progress</th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${items.map(goalRow).join("")}
-        </tbody>
-      </table>
-      ` : `<div class="empty-state small"><p>No goals in this period.</p></div>`}
+    <div class="goals-grid" id="grid-${period}">
+      ${items.length ? items.map(goalCard).join("") : `<div class="empty-state small"><p>No goals in this period.</p></div>`}
     </div>
   </section>`;
 }
@@ -244,13 +329,14 @@ function countRevengeIncidents(minMinutes) {
   return count;
 }
 
-function goalRow(ev) {
+function goalCard(ev) {
   const g = ev.goal;
   const flash = shouldFlashCard(g.id) && ev.status === "BREACHED";
-  const statusKey = ev.inactive ? "paused" : ev.status.toLowerCase();
+  const status = ev.inactive ? "paused" : statusKey(ev.status);
   const barClass = ev.status === "MET" ? "bar-met" : ev.status === "BREACHED" ? "bar-breach" : ev.status === "AT_RISK" ? "bar-risk" : "bar-pending";
   const progress = Math.min(100, Math.max(0, ev.progress || 0));
-  const rowClass = ev.inactive ? "goal-row-paused" : `goal-row-${statusKey}`;
+  const range = periodRange(g.period);
+  const typeLabel = GOAL_TYPES[g.type] || "Custom";
 
   let targetDisplay;
   if (g.type === "no_revenge_trade" && ev.status === "BREACHED") {
@@ -262,31 +348,63 @@ function goalRow(ev) {
   }
 
   const badgeLabel = ev.inactive ? "PAUSED" : ev.status.replace("_", " ");
+  const directionLabel = g.comparison === "lte" ? "Keep under" : g.comparison === "gte" ? "Reach at least" : "Match";
+  const stateText = ev.inactive
+    ? "This goal is paused and will not trigger alerts."
+    : ev.status === "PENDING"
+      ? "Waiting for enough journal data in this period."
+      : ev.status === "BREACHED"
+        ? ev.message
+        : ev.status === "AT_RISK"
+          ? "Close to the limit. Review before taking the next trade."
+          : "Goal is on track for the current period.";
 
   return `
-  <tr class="goal-row ${rowClass} ${flash ? "goal-flash" : ""} ${!g.is_active ? "goal-inactive" : ""}" data-goal="${g.id}">
-    <td class="cell-name">
-      <div class="goal-name-title">${escapeHtml(g.title)}</div>
-      <div class="goal-name-desc">${escapeHtml(goalDescription(g))}</div>
-    </td>
-    <td class="cell-target">${targetDisplay}</td>
-    <td class="cell-progress">
+  <article class="goal-card goal-state-${status} ${flash ? "goal-flash" : ""} ${!g.is_active ? "goal-inactive" : ""}" data-goal="${g.id}">
+    <div class="goal-card-head">
+      <div class="goal-card-icon"><i data-lucide="${PERIOD_ICONS[g.period] || "target"}"></i></div>
+      <div class="goal-card-title-wrap">
+        <h3>${escapeHtml(g.title)}</h3>
+        <span>${escapeHtml(typeLabel)} - ${escapeHtml(goalDescription(g))}</span>
+      </div>
+      <span class="goal-badge goal-badge-${status}">${badgeLabel}</span>
+    </div>
+
+    <div class="goal-metric-row">
+      <div>
+        <span class="goal-kicker">Current</span>
+        <strong class="goal-current">${targetDisplay}</strong>
+      </div>
+      <div>
+        <span class="goal-kicker">Rule</span>
+        <strong>${escapeHtml(directionLabel)}</strong>
+      </div>
+    </div>
+
+    <div class="goal-progress-wrap">
       <div class="goal-progress-bar">
         <span class="goal-bar-fill ${barClass}" style="width:${progress}%"></span>
       </div>
-    </td>
-    <td class="cell-status">
-      <span class="goal-badge badge-${statusKey}">${badgeLabel}</span>
-    </td>
-    <td class="cell-actions">
+      <div class="goal-progress-meta">
+        <span>${Math.round(progress)}% progress</span>
+        <span>${escapeHtml(range.start)} to ${escapeHtml(range.end)}</span>
+      </div>
+    </div>
+
+    <p class="goal-state-note">${escapeHtml(stateText)}</p>
+
+    <div class="goal-card-foot">
+      <span class="goal-kind">${g.is_default ? "System goal" : "Custom goal"}</span>
+      <div class="goal-actions">
       <label class="goal-switch" title="${g.is_active ? "Deactivate" : "Activate"}">
         <input type="checkbox" data-toggle="${g.id}" ${g.is_active ? "checked" : ""}>
         <span class="goal-switch-ui"></span>
       </label>
       <button type="button" class="ic-btn" data-edit="${g.id}" title="Edit"><i data-lucide="pencil"></i></button>
       ${!g.is_default ? `<button type="button" class="ic-btn danger" data-del="${g.id}" title="Delete"><i data-lucide="trash-2"></i></button>` : ""}
-    </td>
-  </tr>`;
+      </div>
+    </div>
+  </article>`;
 }
 
 function pastMonthsHtml() {
@@ -339,7 +457,7 @@ function pastMonthsHtml() {
           ${hist.results.map((r) => `
           <div class="pm-goal pm-${r.status.toLowerCase()}">
             <span>${escapeHtml(r.goal.title)}</span>
-            <span class="goal-badge badge-${r.status.toLowerCase()}">${r.status}</span>
+            <span class="goal-badge badge-${statusKey(r.status)}">${r.status}</span>
           </div>`).join("")}
         </div></td></tr>` : ""}`;
       }).join("")}
@@ -404,6 +522,7 @@ function notificationDropdownHtml() {
 function refreshGoalsContent(container) {
   const evaluated = evaluationsForPage("all");
   const stats = computeSummaryStats(evaluated);
+  const filtered = filterEvaluations(evaluated);
 
   const statsEl = container.querySelector("#goals-summary-stats");
   if (statsEl) {
@@ -411,9 +530,14 @@ function refreshGoalsContent(container) {
     animateSummaryStats(container);
   }
 
+  const alertEl = container.querySelector(".goals-alert-panel");
+  if (alertEl) {
+    alertEl.outerHTML = alertsPanelHtml(evaluated);
+  }
+
   const sectionsEl = container.querySelector("#goals-sections");
   if (sectionsEl) {
-    sectionsEl.innerHTML = PERIODS.map((p) => sectionHtml(p, evaluated.filter((e) => e.goal.period === p))).join("");
+    sectionsEl.innerHTML = sectionsHtml(filtered);
   }
 
   const bellWrap = container.querySelector(".notify-wrap");
@@ -452,12 +576,30 @@ function wire(container) {
   container.querySelectorAll(".goals-period-tab[data-period]").forEach((btn) => {
     btn.addEventListener("click", () => {
       activePeriodAnchor = btn.dataset.period;
-      container.querySelectorAll(".goals-period-tab").forEach((b) => b.classList.toggle("active", b.dataset.period === activePeriodAnchor));
-      if (btn.dataset.period === "all") {
-        container.querySelector(".goals-page")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      } else {
-        document.getElementById(`section-${btn.dataset.period}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
+      refreshGoalsContent(container);
+    });
+  });
+
+  container.querySelector("#goal-search")?.addEventListener("input", (event) => {
+    goalSearchTerm = event.target.value;
+    refreshGoalsContent(container);
+    container.querySelector("#goal-search")?.focus();
+  });
+
+  container.querySelector("#goal-status-filter")?.addEventListener("change", (event) => {
+    activeStatusFilter = event.target.value;
+    refreshGoalsContent(container);
+  });
+
+  container.querySelectorAll("[data-jump-goal]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      activePeriodAnchor = "all";
+      activeStatusFilter = "all";
+      goalSearchTerm = "";
+      refreshGoalsContent(container);
+      requestAnimationFrame(() => {
+        document.querySelector(`[data-goal="${btn.dataset.jumpGoal}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
     });
   });
 
@@ -491,7 +633,7 @@ function wire(container) {
     });
   });
 
-  container.querySelectorAll(".goal-row.goal-flash").forEach((row) => {
+  container.querySelectorAll(".goal-card.goal-flash").forEach((row) => {
     setTimeout(() => clearFlash(row.dataset.goal), 3000);
   });
 
@@ -674,7 +816,8 @@ function openCustomGoalModal(container) {
         <option value="loss">Loss Amount</option>
         <option value="patience">Patience Score</option>
         <option value="drawdown">Drawdown %</option>
-        <option value="custom">Custom</option>
+        <option value="profit_factor">Profit Factor</option>
+        <option value="log_same_day">Same-Day Logging %</option>
       </select>
     </label>
     <label class="field">
@@ -738,8 +881,10 @@ function openCustomGoalModal(container) {
       toast("Goal created.", "success");
       m.close();
       refreshGoalAlerts();
-      render(container);
       activePeriodAnchor = period;
+      activeStatusFilter = "all";
+      goalSearchTerm = "";
+      render(container);
       requestAnimationFrame(() => {
         document.getElementById(`section-${period}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
       });
