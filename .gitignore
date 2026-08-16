@@ -7,3 +7,7 @@ js/config.local.js
 
 # Generated at build time from environment variables (see build.js)
 js/env.js
+
+# Vite build output
+/dist/
+*.tsbuildinfo

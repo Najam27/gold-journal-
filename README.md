@@ -1,144 +1,89 @@
 # Gold Journal
 
-A production-ready **XAUUSD (Gold) trading journal** — a fully static web app
-(HTML5 + Bootstrap 5 + vanilla JS) backed entirely by **Supabase** (Auth,
-Postgres with Row Level Security, and Storage). No build step, no server code.
+Gold Journal is a private, installable progressive web application for discretionary XAUUSD traders. It provides an account-scoped trade log, missed-trade review, strategy-edge analysis, risk and behavior controls, a P&L calendar, daily planning, an AI mentor, MT5 synchronization, custom option lists, and secure export-ready architecture.
 
-Dark trading-desk theme, cloud-synced across every device, real-time sync,
-multi-account support, analytics, PnL calendar, weekly reviews, an AI mentor,
-and full CSV / Excel / PDF export.
+## Stack
 
----
+The frontend is React 19 with TypeScript and Vite. Supabase provides Auth, PostgreSQL, Storage, and Row Level Security. Netlify serves the SPA and the protected MT5 Function. Zod validates browser-bound and server-bound input. Vitest covers deterministic core behavior, including the PKT session classifier and blank-form validation.
 
-## Features
+The app intentionally has a local preview mode when Supabase variables are absent. Local preview uses browser storage, never fabricates trades, and is useful for visual QA. Production must use Supabase and the migration in `supabase/migrations/0001_gold_journal.sql`.
 
-- **Auth** — email/password (sign up with strength meter, sign in, forgot
-  password, show/hide password), **Continue with Google** (PKCE OAuth),
-  persistent sessions with auto-refresh, and specific error messages.
-- **Trade Log** — animated stat strip, searchable/filterable table with
-  column toggles, new/edit/view trade modals, screenshot upload (drag & drop),
-  deposit/withdraw, duplicate-last-trade, running balance, and a date-range
-  PDF report generator.
-- **Missed / Skipped Trades** — log what you passed on and why, with outcome
-  tracking and estimated $ missed.
-- **Analysis** — auto-generated charts (equity curve, win/loss split, P&L by
-  session/level/confirmation, win rate by setup, common mistakes) + demo data.
-- **PnL** — monthly calendar heatmap of daily profit/loss.
-- **Weekly Review** — structured weekly reflection with saved history.
-- **AI Mentor** — bring your own OpenRouter key (session-only, never stored in
-  the DB) to get a written performance review of your trades.
-- **Options** — profile & change-password, danger zone, and full customisation
-  of every dropdown option list (synced to the cloud).
-- **Reliability** — toast notifications, loading skeletons, offline banner with
-  auto-retry, confirmation dialogs, form validation, and duplicate-submit
-  protection throughout.
-- **Realtime** — changes sync live across tabs/devices via Supabase Realtime.
-
----
-
-## Setup
-
-### 1. Create a Supabase project
-
-1. Go to <https://supabase.com>, create a project.
-2. Open **SQL Editor → New query**, paste the contents of
-   [`supabase/schema.sql`](supabase/schema.sql), and **Run**. This creates all
-   tables (`accounts`, `trades`, `cash_transactions`, `skipped_trades`,
-   `weekly_reviews`, `journal_meta`), Row Level Security policies, the private
-   `screenshots` storage bucket, and enables Realtime.
-
-### 2. Add your credentials (environment variables)
-
-Credentials are **never hardcoded** in the source. They are injected at build
-time from environment variables into `js/env.js` (git-ignored) by
-[`build.js`](build.js).
-
-Find both values under **Project Settings → API**. The **anon** key is safe to
-ship in a static site — it is protected by Row Level Security. **Never** put the
-`service_role` key anywhere in frontend code.
-
-**Local development** — copy `.env.example` to `.env` and fill it in:
+## Local development
 
 ```bash
-cp .env.example .env
-# edit .env:
-#   SUPABASE_URL=https://YOUR-PROJECT.supabase.co
-#   SUPABASE_ANON_KEY=YOUR_ANON_KEY
-node build.js   # writes js/env.js from your .env
+pnpm install
+cp .env.example .env.local
+pnpm dev
 ```
 
-`.env` and `js/env.js` are both git-ignored and must never be committed.
+The browser-safe variables are:
 
-**Netlify** — set `SUPABASE_URL` and `SUPABASE_ANON_KEY` under **Site Settings →
-Environment Variables**. The build command (`node build.js`, configured in
-[`netlify.toml`](netlify.toml)) injects them into `js/env.js` at deploy time.
+| Variable | Where | Purpose |
+| --- | --- | --- |
+| `VITE_SUPABASE_URL` | Browser | Supabase project URL |
+| `VITE_SUPABASE_ANON_KEY` | Browser | Supabase anonymous client key |
+| `SUPABASE_URL` | Netlify Functions only | Server-side Supabase URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Netlify Functions only | Privileged server key; never prefix with `VITE_` |
 
-If either variable is missing, the app shows a visible error screen
-("App configuration missing. Please contact support.") instead of failing
-silently.
+Never commit `.env.local`, service-role keys, MT5 raw keys, or OpenRouter keys. The OpenRouter key is intentionally local-browser-only for the AI Mentor and is not persisted to Supabase.
 
-### 3. (Optional) Enable Google sign-in
+## Supabase setup
 
-In Supabase **Authentication → Providers → Google**, add your Google OAuth
-client ID/secret, and add your site URL (and `http://localhost:*` for local
-dev) to **Authentication → URL Configuration → Redirect URLs**.
+Create a Supabase project, enable email/password Auth, and run the SQL migration in the Supabase SQL editor or through the Supabase CLI. The migration creates the account-scoped domain tables, indexes, update triggers, private screenshot bucket, and RLS policies. Every business row is protected through `trading_accounts.owner_id` and the `public.owns_account(account_id)` security-definer helper.
 
-### 4. Run locally
+The private screenshot bucket is `trade-screenshots`. Production upload code should use paths beginning with the authenticated user ID and should return short-lived signed URLs only. Do not expose object paths or signed URLs in exports.
 
-It's a static site. Generate `js/env.js` from your `.env`, then serve the folder:
+## MT5 setup
+
+The MT5 ingestion endpoint is `/.netlify/functions/mt5`. The Expert Advisor must send an API key, connection ID, account metrics, and position objects. Each position must contain a stable ticket, direction, status, and timestamps. Broker timestamps default to UTC+3 and are converted to UTC before PKT classification. The function hashes the API key, authenticates requests, limits requests by source IP, validates payloads, upserts positions by `(account_id, mt5_position_ticket)`, and reconciles closed positions to an existing journal trade by ticket.
+
+A production EA source file should be placed beside the function or distributed from the MT5 Live page. The key is revealed once in the application and must never be stored in browser storage or logs.
+
+## Netlify deployment
+
+Netlify uses the configuration in `netlify.toml`:
 
 ```bash
-node build.js               # writes js/env.js
-python3 -m http.server 8080
-# then open http://localhost:8080
+pnpm build
 ```
 
-### 5. Deploy (Netlify)
+The publish directory is `dist`, SPA routing falls back to `index.html`, and serverless functions are read from `netlify/functions`. Configure the browser-safe `VITE_` variables as Netlify environment variables for the build. Configure `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as function runtime variables only. Deploying a new version should invalidate the static asset bundle; the service worker caches static assets only and never caches authenticated HTML, Supabase responses, private API data, or signed storage URLs.
 
-The repo ships with [`netlify.toml`](netlify.toml):
+## Verification
 
-- `publish = "."` — the repository root is served as-is.
-- `command = "node build.js"` — injects `SUPABASE_URL` / `SUPABASE_ANON_KEY`
-  (from **Site Settings → Environment Variables**) into `js/env.js` at build
-  time.
-- A `/* → /index.html` (200) redirect provides the single-page-app fallback so
-  deep links and the OAuth callback resolve instead of 404ing.
-
-Add your Netlify URL (and `http://localhost:8080` for local dev) to Supabase's
-**Authentication → URL Configuration → Redirect URLs**. Other static hosts
-(Vercel, Cloudflare Pages, …) work too — just run `node build.js` as the build
-command and publish the root.
-
----
-
-## Project structure
-
-```
-index.html            App shell + splash + CDN deps
-css/styles.css        Theme
-build.js              Injects env vars -> js/env.js at build time
-netlify.toml          Netlify build command + SPA redirect
-js/
-  env.js              Generated at build time (git-ignored); sets config globals
-  config.js           Reads Supabase URL / anon key from env globals
-  supabaseClient.js   Client singleton + error mapping
-  store.js            Data layer (CRUD, balances, realtime, offline)
-  auth.js             Auth screen + flows
-  app.js              Boot, shell, navigation, sidebar
-  ui.js               Toasts, dialogs, formatting helpers
-  modal.js            Animated modal
-  export.js           CSV / Excel / PDF export
-  defaults.js         Default dropdown option lists
-  pages/              One module per page
-supabase/schema.sql   Database schema + RLS + storage + realtime
+```bash
+pnpm lint
+pnpm test
+pnpm build
 ```
 
-## Notes on data model
+The regression suite proves that 05:30 PKT is Asian, 01:30 PKT is Post-NY, key boundaries are covered, and blank direction/result or skipped-trade required fields are rejected. Production QA should additionally verify account switching, RLS with two users, MT5 retry and reconciliation, private screenshot URLs, light and dark themes, and the four target viewport sizes: 375×812, 768×1024, 1280×720, and 1600×1000.
 
-- Every table is scoped to `auth.uid()` via RLS, so users only ever see their
-  own rows.
-- Balances are computed client-side from a time-ordered ledger of trades +
-  cash transactions on top of each account's `starting_balance`.
-- Screenshots are stored under `screenshots/<user_id>/<account_id>/<ts>.<ext>`
-  in a **private** bucket; the app fetches short-lived signed URLs to display
-  them.
+## Manual QA checklist
+
+| Area | Check |
+| --- | --- |
+| Auth | Register, sign in, restore a session, sign out, and receive generic auth errors |
+| Isolation | A second user cannot select, update, delete, or infer another account's rows |
+| Manual trade | New form starts blank for direction/result and refuses incomplete saves |
+| PKT | Date changes recompute session using Asia/Karachi rather than browser timezone |
+| Missed trades | Cancel discards the draft; required direction, reason, confidence, and outcome are enforced |
+| Account manager | Create, switch, rename/archive with a destructive confirmation and valid replacement |
+| Analysis | Only completed real data is used; insufficient samples are labeled inconclusive |
+| Goals | Loss limits display as negative P&L floors and statuses use current account data |
+| Planning | Active trading rules populate the protocol checklist; archive search works |
+| MT5 | Keys are one-time, payloads are idempotent by ticket, and broker metrics remain separate from journal balance |
+| Privacy | Internal IDs, storage paths, owner IDs, raw keys, and signed URLs are absent from user-facing views and exports |
+| PWA | Install manifest works, offline state is clear, static updates activate without caching private data |
+| Responsive | No critical control is hidden or horizontally clipped at all required viewport sizes |
+
+## Repository layout
+
+```text
+src/                 React application and domain logic
+src/lib/              Supabase client, data service, time, types, Zod schemas
+src/test/             Vitest regression tests
+netlify/functions/   Protected serverless ingestion
+supabase/migrations/ Database schema, indexes, RLS, and private storage policies
+public/              PWA manifest, icons, and service worker
+```

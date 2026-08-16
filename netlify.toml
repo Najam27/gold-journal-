@@ -1,12 +1,30 @@
 [build]
-  publish = "."
-  # Injects SUPABASE_URL / SUPABASE_ANON_KEY (from Netlify env vars) into
-  # js/env.js at build time. No bundler/build step is otherwise required.
-  command = "node build.js"
+  command = "pnpm build"
+  publish = "dist"
+  functions = "netlify/functions"
 
-# Single-page app fallback: any path that is not an existing static file
-# is served index.html so client-side routing / OAuth callbacks work.
+[build.environment]
+  NODE_VERSION = "22"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+
+[[headers]]
+  for = "/service-worker.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
