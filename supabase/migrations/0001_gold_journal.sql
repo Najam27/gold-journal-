@@ -1,7 +1,6 @@
 create extension if not exists pgcrypto;
 
 create or replace function public.set_updated_at() returns trigger language plpgsql as $$ begin new.updated_at = now(); return new; end; $$;
-create or replace function public.owns_account(target uuid) returns boolean language sql stable security definer set search_path = public as $$ select exists(select 1 from public.trading_accounts where id = target and owner_id = auth.uid() and is_archived = false); $$;
 
 create table if not exists public.profiles (id uuid primary key references auth.users(id) on delete cascade, display_name text, avatar_preference text default 'initials', theme_preference text not null default 'dark' check(theme_preference in ('dark','light')), created_at timestamptz not null default now(), updated_at timestamptz not null default now());
 create table if not exists public.trading_accounts (id uuid primary key default gen_random_uuid(), owner_id uuid not null references auth.users(id) on delete cascade, name text not null check(length(name) between 1 and 120), broker_name text, base_currency text not null default 'USD', starting_balance numeric, is_active boolean not null default true, is_archived boolean not null default false, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
@@ -18,6 +17,8 @@ create table if not exists public.option_lists (id uuid primary key default gen_
 create table if not exists public.trading_rules (id uuid primary key default gen_random_uuid(), account_id uuid not null references public.trading_accounts(id) on delete cascade, title text not null, is_active boolean not null default true, sort_order integer not null default 0, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
 create table if not exists public.notifications (id uuid primary key default gen_random_uuid(), account_id uuid not null references public.trading_accounts(id) on delete cascade, category text not null, title text not null, body text not null, is_read boolean not null default false, created_at timestamptz not null default now());
 create table if not exists public.mentor_reports (id uuid primary key default gen_random_uuid(), account_id uuid not null references public.trading_accounts(id) on delete cascade, date_from date not null, date_to date not null, prompt_summary text not null, result text not null, model_metadata jsonb not null default '{}', created_at timestamptz not null default now());
+
+create or replace function public.owns_account(target uuid) returns boolean language sql stable security definer set search_path = public as $$ select exists(select 1 from public.trading_accounts where id = target and owner_id = auth.uid() and is_archived = false); $$;
 
 create index if not exists trades_account_date_idx on public.trades(account_id, trade_at_utc desc); create index if not exists trades_account_result_idx on public.trades(account_id, result); create index if not exists plans_account_date_idx on public.daily_plans(account_id, plan_date desc); create index if not exists skipped_account_date_idx on public.skipped_trades(account_id, skipped_at desc); create index if not exists notifications_account_read_idx on public.notifications(account_id, is_read, created_at desc);
 
