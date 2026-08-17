@@ -1,14 +1,10 @@
-import { and, count, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq } from "./supabaseQuery";
 import { accounts, mt5Connections, mt5LivePositions, trades } from "../drizzle/schema";
-import { getDb } from "./db";
 import { getOwnedAccount } from "./goldDb";
+import { getDb } from "./db";
 import { mt5ApiKeyFingerprint } from "./mt5Security";
 
-async function requireDb() {
-  const db = await getDb();
-  if (!db) throw new Error("Cloud database is unavailable. Please retry shortly.");
-  return db;
-}
+async function requireDb() { const db = await getDb(); if (!db) throw new Error("Supabase database is unavailable. Please retry shortly."); return db; }
 
 function safePosition(position: typeof mt5LivePositions.$inferSelect, journaledTickets: Set<string>) {
   return {

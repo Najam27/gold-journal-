@@ -1,7 +1,6 @@
 type RuntimeEnvironment = Record<string, string | undefined>;
 
 const requiredProductionVariables = [
-  "DATABASE_URL",
   "SUPABASE_URL",
   "SUPABASE_SERVICE_ROLE_KEY",
 ] as const;
@@ -17,7 +16,6 @@ export function validateRuntimeConfiguration(environment: RuntimeEnvironment = p
 }
 
 export const ENV = {
-  databaseUrl: process.env.DATABASE_URL ?? "",
   supabaseUrl: process.env.SUPABASE_URL ?? "",
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
   isProduction: process.env.NODE_ENV === "production",

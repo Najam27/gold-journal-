@@ -1,15 +1,11 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "./supabaseQuery";
 import { accounts, cashMovements, dailyPlans, goals, skippedTrades, trades } from "../drizzle/schema";
-import { getDb } from "./db";
 import { storageGetSignedUrl } from "./storage";
+import { getDb } from "./db";
 import { hydrateSignedScreenshots } from "./journalScreenshots";
 import { toSafeAccount, toSafeJournalRecord, toSafeTrade } from "./journalPrivacy";
 
-async function requireDb() {
-  const db = await getDb();
-  if (!db) throw new Error("Cloud database is unavailable. Please retry shortly.");
-  return db;
-}
+async function requireDb() { const db = await getDb(); if (!db) throw new Error("Supabase database is unavailable. Please retry shortly."); return db; }
 
 export async function ensureAccount(userId: number) {
   const db = await requireDb();

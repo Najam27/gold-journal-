@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { getUserByOpenId, upsertUser } from "./db";
 
-function adminClient() {
+export function getSupabaseAdmin() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error("Supabase Auth is not configured on the server.");
@@ -9,7 +9,7 @@ function adminClient() {
 }
 
 export async function authenticateSupabaseAccessToken(token: string) {
-  const { data, error } = await adminClient().auth.getUser(token);
+  const { data, error } = await getSupabaseAdmin().auth.getUser(token);
   if (error || !data.user) return null;
   const authUser = data.user;
   const name = (authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email?.split("@")[0] || "Gold Trader") as string;

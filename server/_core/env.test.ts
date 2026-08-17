@@ -3,7 +3,6 @@ import { missingProductionConfiguration, validateRuntimeConfiguration } from "./
 
 const configuredProductionEnvironment = {
   NODE_ENV: "production",
-  DATABASE_URL: "postgresql://example.test/journal",
   SUPABASE_URL: "https://project.supabase.co",
   SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
 };

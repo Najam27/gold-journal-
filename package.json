@@ -9,8 +9,7 @@
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc --noEmit",
     "format": "prettier --write .",
-    "test": "vitest run",
-    "db:push": "drizzle-kit generate && drizzle-kit migrate"
+    "test": "vitest run"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.693.0",
@@ -63,7 +62,6 @@
     "jose": "6.1.0",
     "jspdf": "^4.2.1",
     "lucide-react": "^0.453.0",
-    "pg": "^8.16.3",
     "nanoid": "^5.1.5",
     "next-themes": "^0.4.6",
     "react": "^19.2.1",
@@ -98,8 +96,6 @@
     "add": "^2.0.6",
     "autoprefixer": "^10.4.20",
     "@netlify/functions": "^3.1.10",
-    "@types/pg": "^8.15.5",
-    "drizzle-kit": "^0.31.4",
     "esbuild": "^0.25.0",
     "jsdom": "^30.0.1",
     "pnpm": "^10.15.1",

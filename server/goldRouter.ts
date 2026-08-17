@@ -1,10 +1,10 @@
-import { and, count, desc, eq, like, or } from "drizzle-orm";
+import { and, count, desc, eq, like, or } from "./supabaseQuery";
 import { randomBytes } from "crypto";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { accounts, cashMovements, dailyPlans, goals, mt5Connections, mt5LivePositions, notificationHistory, notificationSettings, optionLists, skippedTrades, trades } from "../drizzle/schema";
-import { getDb } from "./db";
 import { ensureAccount, getJournal, getOwnedAccount, ownsTrade } from "./goldDb";
+import { getDb } from "./db";
 import { getMt5History, getMt5Workspace, syncStoredMt5PositionsToTradeLog } from "./mt5Db";
 import { mt5ApiKeyFingerprint } from "./mt5Security";
 import { toSafeJournalRecord, toSafeTrade } from "./journalPrivacy";
@@ -48,11 +48,7 @@ const tradeInput = z.object({
   mt5Ticket: mt5TicketInput,
 });
 
-async function dbOrThrow() {
-  const db = await getDb();
-  if (!db) throw new Error("Cloud database is unavailable. Please retry shortly.");
-  return db;
-}
+async function dbOrThrow() { const db = await getDb(); if (!db) throw new Error("Supabase database is unavailable. Please retry shortly."); return db; }
 
 async function ownGoal(userId: number, goalId: number) {
   const db = await dbOrThrow();
