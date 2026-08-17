@@ -11,4 +11,13 @@ describe("hydrateSignedScreenshots", () => {
     const never = () => new Promise<string>(() => {});
     await expect(hydrateSignedScreenshots([{ id: 1, screenshotKey: "slow" }], never, 1)).resolves.toEqual([{ id: 1, screenshotKey: "slow", screenshotUrl: null }]);
   });
+
+  it("caps simultaneous signing work for large dashboard batches", async () => {
+    let active = 0;
+    let peak = 0;
+    const sign = async (key: string) => { active += 1; peak = Math.max(peak, active); await new Promise(resolve => setTimeout(resolve, 1)); active -= 1; return `signed:${key}`; };
+    const rows = Array.from({ length: 40 }, (_, id) => ({ id, screenshotKey: `key-${id}` }));
+    await expect(hydrateSignedScreenshots(rows, sign, 1_000, 8)).resolves.toHaveLength(40);
+    expect(peak).toBeLessThanOrEqual(8);
+  });
 });

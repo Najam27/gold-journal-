@@ -2,6 +2,7 @@ import { and, count, desc, eq, like, or } from "./supabaseQuery";
 import { randomBytes } from "crypto";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { accounts, cashMovements, dailyPlans, goals, mt5Connections, mt5LivePositions, notificationHistory, notificationSettings, optionLists, skippedTrades, trades } from "../drizzle/schema";
 import { ensureAccount, getJournal, getOwnedAccount, ownsTrade } from "./goldDb";
 import { getDb } from "./db";
@@ -10,6 +11,7 @@ import { mt5ApiKeyFingerprint } from "./mt5Security";
 import { toSafeJournalRecord, toSafeTrade } from "./journalPrivacy";
 import { protectedProcedure, router } from "./_core/trpc";
 import { storageGetSignedUrl, storagePut } from "./storage";
+import { consumeRateLimit } from "./rateLimit";
 
 const MAX_MONEY = 999_999_999_999.99;
 const optionalText = (max = 5000) => z.string().trim().max(max).optional().default("");
@@ -235,6 +237,7 @@ export const goldRouter = router({
       return { success: true };
     }),
     uploadScreenshot: protectedProcedure.input(z.object({ tradeId: z.number().int().positive(), fileName: z.string().trim().min(1).max(255), mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]), base64: z.string().trim().min(40).max(7_000_000).regex(/^(?:data:image\/(?:jpeg|png|webp);base64,)?[A-Za-z0-9+/]+={0,2}$/, "Invalid base64 image payload") })).mutation(async ({ ctx, input }) => {
+      if (!consumeRateLimit("screenshot", ctx.user.id, 20, 60_000)) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Screenshot upload limit reached. Please try again shortly." });
       const trade = await ownsTrade(ctx.user.id, input.tradeId);
       const base64 = input.base64.includes(",") ? input.base64.split(",")[1] : input.base64;
       const bytes = Buffer.from(base64, "base64");
@@ -301,11 +304,19 @@ export const goldRouter = router({
     }),
   }),
   notifications: router({
-    get: protectedProcedure.query(async ({ ctx }) => {
+    get: protectedProcedure.input(z.object({ page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(50).default(50) }).optional()).query(async ({ ctx, input }) => {
+      const { page: requestedPage, pageSize } = input ?? { page: 1, pageSize: 50 };
       const db = await dbOrThrow();
-      const [settings] = await db.select().from(notificationSettings).where(eq(notificationSettings.userId, ctx.user.id)).limit(1);
-      const history = await db.select().from(notificationHistory).where(eq(notificationHistory.userId, ctx.user.id)).orderBy(desc(notificationHistory.createdAt)).limit(50);
-      return { settings: settings ? toSafeJournalRecord(settings) : { goalAlerts: true, emailAlerts: false }, history: history.map(toSafeJournalRecord) };
+      const where = eq(notificationHistory.userId, ctx.user.id);
+      const [settingsRows, totalRows] = await Promise.all([
+        db.select().from(notificationSettings).where(eq(notificationSettings.userId, ctx.user.id)).limit(1),
+        db.select({ total: count() }).from(notificationHistory).where(where),
+      ]);
+      const total = Number(totalRows[0]?.total ?? 0);
+      const pageCount = Math.max(1, Math.ceil(total / pageSize));
+      const page = Math.min(requestedPage, pageCount);
+      const history = await db.select().from(notificationHistory).where(where).orderBy(desc(notificationHistory.createdAt)).limit(pageSize).offset((page - 1) * pageSize);
+      return { settings: settingsRows[0] ? toSafeJournalRecord(settingsRows[0]) : { goalAlerts: true, emailAlerts: false }, history: history.map(toSafeJournalRecord), total, page, pageSize, pageCount };
     }),
     updateSettings: protectedProcedure.input(z.object({ goalAlerts: z.boolean(), emailAlerts: z.boolean() })).mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
@@ -313,6 +324,7 @@ export const goldRouter = router({
       return { success: true };
     }),
     recordGoalAlerts: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), alerts: z.array(z.object({ goalId: z.number().int().positive(), status: z.enum(["AT_RISK", "BREACHED", "MET"]), cycleKey: z.string().min(4).max(24), message: z.string().trim().min(1).max(800) })).max(20) })).mutation(async ({ ctx, input }) => {
+      if (!consumeRateLimit("goal-alerts", ctx.user.id, 30, 60_000)) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Notification write limit reached. Please try again shortly." });
       await getOwnedAccount(ctx.user.id, input.accountId);
       const db = await dbOrThrow();
       const [settings] = await db.select().from(notificationSettings).where(eq(notificationSettings.userId, ctx.user.id)).limit(1);

@@ -1,4 +1,4 @@
-import { and, count, desc, eq } from "./supabaseQuery";
+import { and, count, desc, eq, or } from "./supabaseQuery";
 import { accounts, mt5Connections, mt5LivePositions, trades } from "../drizzle/schema";
 import { getOwnedAccount } from "./goldDb";
 import { getDb } from "./db";
@@ -64,12 +64,13 @@ export function pktSession(date: Date) {
 export async function getMt5Workspace(userId: number, accountId: number) {
   const account = await getOwnedAccount(userId, accountId);
   const db = await requireDb();
-  const [connections, openPositions, closedPositions, journalRows] = await Promise.all([
-    db.select().from(mt5Connections).where(and(eq(mt5Connections.userId, userId), eq(mt5Connections.accountId, accountId))).orderBy(desc(mt5Connections.createdAt)),
-    db.select().from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, accountId), eq(mt5LivePositions.status, "OPEN"))).orderBy(desc(mt5LivePositions.updatedAt)),
+  const [connections, openPositions, closedPositions] = await Promise.all([
+    db.select().from(mt5Connections).where(and(eq(mt5Connections.userId, userId), eq(mt5Connections.accountId, accountId))).orderBy(desc(mt5Connections.createdAt)).limit(20),
+    db.select().from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, accountId), eq(mt5LivePositions.status, "OPEN"))).orderBy(desc(mt5LivePositions.updatedAt)).limit(500),
     db.select().from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, accountId), eq(mt5LivePositions.status, "CLOSED"))).orderBy(desc(mt5LivePositions.closeTime)).limit(10),
-    db.select({ mt5Ticket: trades.mt5Ticket }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId))),
   ]);
+  const visibleTickets = [...openPositions, ...closedPositions].map(position => position.ticket);
+  const journalRows = visibleTickets.length ? await db.select({ mt5Ticket: trades.mt5Ticket }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId), or(...visibleTickets.map(ticket => eq(trades.mt5Ticket, ticket))))) : [];
   const journaledTickets = new Set(journalRows.flatMap(row => row.mt5Ticket == null ? [] : [row.mt5Ticket.toString()]));
   return {
     connections: connections.map(connection => ({ id: connection.id, accountName: account.name, label: connection.label, active: connection.active, brokerUtcOffsetMinutes: (connection as typeof connection & { brokerUtcOffsetMinutes?: number }).brokerUtcOffsetMinutes ?? 180, lastPing: connection.lastPing, mt5Login: connection.mt5Login?.toString() ?? null, brokerServer: connection.brokerServer, currency: connection.currency, balance: connection.balance, equity: connection.equity, margin: connection.margin, freeMargin: connection.freeMargin, floatingPnl: connection.floatingPnl, lastHistorySync: connection.lastHistorySync, historySyncedCount: connection.historySyncedCount, lastHistoryAttempt: connection.lastHistoryAttempt, lastHistoryStatus: connection.lastHistoryStatus, lastHistoryMessage: connection.lastHistoryMessage, lastHistoryBatchSize: connection.lastHistoryBatchSize, createdAt: connection.createdAt })),
@@ -86,10 +87,9 @@ export async function getMt5History(userId: number, accountId: number, page: num
   const total = Number(totalRows[0]?.total ?? 0);
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(Math.max(1, page), pageCount);
-  const [positions, journalRows] = await Promise.all([
-    db.select().from(mt5LivePositions).where(where).orderBy(desc(mt5LivePositions.closeTime)).limit(pageSize).offset((safePage - 1) * pageSize),
-    db.select({ mt5Ticket: trades.mt5Ticket }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId))),
-  ]);
+  const positions = await db.select().from(mt5LivePositions).where(where).orderBy(desc(mt5LivePositions.closeTime)).limit(pageSize).offset((safePage - 1) * pageSize);
+  const visibleTickets = positions.map(position => position.ticket);
+  const journalRows = visibleTickets.length ? await db.select({ mt5Ticket: trades.mt5Ticket }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId), or(...visibleTickets.map(ticket => eq(trades.mt5Ticket, ticket))))) : [];
   const journaledTickets = new Set(journalRows.flatMap(row => row.mt5Ticket == null ? [] : [row.mt5Ticket.toString()]));
   return { positions: positions.map(position => safePosition(position, journaledTickets)), total, page: safePage, pageSize, pageCount };
 }
@@ -190,7 +190,7 @@ async function syncMt5PositionToTradeLog(userId: number, accountId: number, posi
 export async function syncStoredMt5PositionsToTradeLog(userId: number, accountId: number) {
   const db = await requireDb();
   const [positions, resetAt] = await Promise.all([
-    db.select().from(mt5LivePositions).where(eq(mt5LivePositions.accountId, accountId)),
+    db.select().from(mt5LivePositions).where(eq(mt5LivePositions.accountId, accountId)).orderBy(desc(mt5LivePositions.updatedAt)).limit(500),
     getJournalDataResetAt(db, accountId),
   ]);
   for (const position of positions) {

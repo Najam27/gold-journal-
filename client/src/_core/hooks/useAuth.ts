@@ -1,6 +1,7 @@
 import { trpc } from "@/lib/trpc";
 import { supabase } from "@/lib/supabase";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { clearPrivateClientState } from "@/lib/queryClient";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type UseAuthOptions = { redirectOnUnauthenticated?: boolean; redirectPath?: string };
 
@@ -8,18 +9,33 @@ export function useAuth(options?: UseAuthOptions) {
   const { redirectOnUnauthenticated = false, redirectPath } = options ?? {};
   const [session, setSession] = useState<any>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
+  const lastUserId = useRef<string | null | undefined>(undefined);
   const utils = trpc.useUtils();
   const meQuery = trpc.auth.me.useQuery(undefined, { enabled: Boolean(session), retry: false, refetchOnWindowFocus: false });
 
   useEffect(() => {
     if (!supabase) { setSessionLoading(false); return; }
     let active = true;
-    void supabase.auth.getSession().then(({ data }) => { if (active) { setSession(data.session); setSessionLoading(false); } });
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => { setSession(nextSession); setSessionLoading(false); void utils.auth.me.invalidate(); });
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      const nextUserId = data.session?.user?.id ?? null;
+      if (lastUserId.current !== undefined && lastUserId.current !== nextUserId) clearPrivateClientState();
+      lastUserId.current = nextUserId;
+      setSession(data.session);
+      setSessionLoading(false);
+    });
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      const nextUserId = nextSession?.user?.id ?? null;
+      if (lastUserId.current !== nextUserId) clearPrivateClientState();
+      lastUserId.current = nextUserId;
+      setSession(nextSession);
+      setSessionLoading(false);
+      void utils.auth.me.invalidate();
+    });
     return () => { active = false; data.subscription.unsubscribe(); };
   }, [utils]);
 
-  const logout = useCallback(async () => { if (supabase) await supabase.auth.signOut(); setSession(null); utils.auth.me.setData(undefined, null); await utils.auth.me.invalidate(); }, [utils]);
+  const logout = useCallback(async () => { if (supabase) await supabase.auth.signOut(); clearPrivateClientState(); lastUserId.current = null; setSession(null); utils.auth.me.setData(undefined, null); await utils.auth.me.invalidate(); }, [utils]);
   const state = useMemo(() => ({ user: meQuery.data ?? null, loading: sessionLoading || (Boolean(session) && meQuery.isLoading), error: meQuery.error ?? null, isAuthenticated: Boolean(session && meQuery.data) }), [meQuery.data, meQuery.error, meQuery.isLoading, session, sessionLoading]);
 
   useEffect(() => {
