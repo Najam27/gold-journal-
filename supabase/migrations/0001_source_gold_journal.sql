@@ -234,3 +234,14 @@ on conflict (id) do nothing;
 
 -- The Netlify Function uses the service role for database/storage access and
 -- enforces ownership through the source server routers. Keep the bucket private.
+
+-- Private bucket policies. Netlify uses the service role for uploads and signed URLs;
+-- these policies also protect any direct authenticated Storage access.
+drop policy if exists "trade screenshots read own folder" on storage.objects;
+drop policy if exists "trade screenshots insert own folder" on storage.objects;
+drop policy if exists "trade screenshots update own folder" on storage.objects;
+drop policy if exists "trade screenshots delete own folder" on storage.objects;
+create policy "trade screenshots read own folder" on storage.objects for select using (bucket_id = 'trade-screenshots' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy "trade screenshots insert own folder" on storage.objects for insert with check (bucket_id = 'trade-screenshots' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy "trade screenshots update own folder" on storage.objects for update using (bucket_id = 'trade-screenshots' and (storage.foldername(name))[1] = auth.uid()::text) with check (bucket_id = 'trade-screenshots' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy "trade screenshots delete own folder" on storage.objects for delete using (bucket_id = 'trade-screenshots' and (storage.foldername(name))[1] = auth.uid()::text);

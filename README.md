@@ -1,41 +1,47 @@
 # Gold Journal
 
-Gold Journal is the complete trading-journal application ported from [Najam27/MyGoldJournal](https://github.com/Najam27/MyGoldJournal). The target repository now contains the source repository’s full UI, feature pages, reusable components, validation, tRPC contracts, MT5 workflows, tests, PWA assets, and export functionality.
+Gold Journal is the complete application ported from [Najam27/MyGoldJournal](https://github.com/Najam27/MyGoldJournal). The target repository contains the source UI, feature pages, reusable components, validation, MT5 workflows, exports, PWA behavior, server procedures, and regression tests.
 
-The runtime keeps the source application architecture while moving persistence and screenshot storage to **Supabase PostgreSQL and Supabase Storage**. Netlify serves the Vite frontend and exposes the copied Express/tRPC backend through a serverless function.
+The application now uses **Supabase as the single backend**:
 
-## Included source features
+| Layer | Supabase implementation |
+| --- | --- |
+| Authentication | Supabase Auth with email/password and magic-link sign-in |
+| Database | Supabase PostgreSQL through the transaction pooler and Drizzle PostgreSQL |
+| File storage | Private Supabase Storage bucket with server-generated signed URLs |
+| API delivery | Netlify Function running the copied tRPC/Express API |
+| Frontend delivery | Netlify static Vite build |
 
-The copied implementation includes Trade Log with search, filtering, pagination, manual entry, editing, deletion, duplicate entry, screenshots, CSV/Excel/PDF export, account balance and cash movements; Missed Trades; Analysis Edge; configurable Goals and goal alerts; P&L Calendar; Plan & Execution; AI Mentor privacy behavior; MT5 Live telemetry, history, reconciliation, and journal linking; Options; notification center; account switching; responsive sidebar/mobile navigation; dark/light themes; offline state; installable PWA behavior; and the complete source test suite.
+The previous source OAuth/session provider, Manus session SDK, source OAuth callback, Forge storage proxy, and source MySQL adapter are no longer used by the application.
 
 ## Supabase setup
 
-Create a Supabase project and open the SQL Editor. Run the complete migration at `supabase/migrations/0001_source_gold_journal.sql`. It creates all source-compatible `users`, `gj_*` application tables, indexes, constraints, and the private `trade-screenshots` Storage bucket. The Netlify backend uses the Supabase transaction-pooler `DATABASE_URL` for Drizzle PostgreSQL access and the service-role key for private screenshot uploads and signed URLs.
+Create a Supabase project. In **Authentication → Providers**, enable Email. Configure the site URL and redirect URL to your Netlify site URL. Email confirmation may remain enabled; the login form supports password sign-in, account creation, and magic links.
 
-The source application’s authentication contract remains the source OAuth/session contract. Supabase is the persistent data and storage layer; the Netlify function must receive the source OAuth/session environment variables as well as the Supabase variables.
+Open the Supabase SQL Editor and run the complete migration at `supabase/migrations/0001_source_gold_journal.sql`. It creates the source-compatible users/accounts/trades/goals/plans/options/notifications/MT5 tables, indexes, constraints, and the private `trade-screenshots` Storage bucket. The Netlify backend maps each Supabase Auth UUID to the `users.openId` column and enforces ownership through the server procedures.
 
-## Environment variables
+The server uses the Supabase service role only inside Netlify Functions. Browser code receives only the Supabase anonymous key. Do not expose the service role key in a `VITE_` variable.
 
-Copy `.env.example` to `.env` for local work. In Netlify, configure the same values in **Site configuration → Environment variables**. Never expose `DATABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET`, `MT5_ENCRYPTION_KEY`, or `BUILT_IN_FORGE_API_KEY` with a `VITE_` prefix.
+## Required environment variables
 
-| Variable | Purpose |
-| --- | --- |
-| `DATABASE_URL` | Supabase PostgreSQL transaction-pooler URL, normally port 6543 |
-| `SUPABASE_URL` | Supabase project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-only private Storage/database key |
-| `SUPABASE_STORAGE_BUCKET` | Private screenshot bucket; use `trade-screenshots` |
-| `JWT_SECRET` | Session cookie signing secret |
-| `VITE_APP_ID`, `OAUTH_SERVER_URL`, `VITE_OAUTH_PORTAL_URL` | Source authentication flow |
-| `OWNER_OPEN_ID`, `OWNER_NAME` | Source owner configuration |
-| `MT5_ENCRYPTION_KEY` | Server-only MT5 secret encryption key |
-| `BUILT_IN_FORGE_API_URL`, `BUILT_IN_FORGE_API_KEY` | Optional source service integrations |
-| `VITE_ANALYTICS_ENDPOINT`, `VITE_ANALYTICS_WEBSITE_ID` | Optional Umami analytics |
+Use `.env.example` as the template. Configure these in Netlify Site configuration → Environment variables and use the browser-safe pair during local Vite development.
+
+| Variable | Where | Purpose |
+| --- | --- | --- |
+| `VITE_SUPABASE_URL` | Browser | Supabase project URL for Supabase Auth |
+| `VITE_SUPABASE_ANON_KEY` | Browser | Supabase anonymous public key |
+| `SUPABASE_URL` | Netlify only | Server-side Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Netlify only | Server-side Auth verification, database/storage access |
+| `DATABASE_URL` | Netlify only | Supabase PostgreSQL transaction-pooler URL, normally port 6543 |
+| `SUPABASE_STORAGE_BUCKET` | Netlify only | Private screenshot bucket; use `trade-screenshots` |
+
+`OPENAI_API_KEY` and `OPENAI_API_BASE` are optional non-database variables for AI/integration helpers. Analytics variables are also optional. The old `VITE_APP_ID`, `JWT_SECRET`, `OAUTH_SERVER_URL`, `VITE_OAUTH_PORTAL_URL`, `OWNER_OPEN_ID`, `OWNER_NAME`, and source Forge variables are not required by the Supabase Auth flow.
 
 ## Netlify deployment
 
-The repository includes `netlify.toml`. Netlify should use the `pnpm build` command, publish `dist/public`, and use `netlify/functions` for the API. The redirect from `/api/*` to `/.netlify/functions/api/:splat` keeps the copied source tRPC, OAuth, storage, and MT5 routes available under the same API path expected by the source UI.
+The repository includes `netlify.toml`. Connect the target GitHub repository to Netlify. The build command is `pnpm build`, the publish directory is `dist/public`, and the Function directory is `netlify/functions`. The `/api/*` redirect routes to the serverless tRPC/MT5 API function.
 
-Connect the GitHub repository, set the environment variables, deploy, then run the Supabase migration once. Do not commit `.env` files or any Supabase service-role key.
+After setting environment variables, deploy the site and run the Supabase migration once. Then verify account creation, email confirmation or magic-link return, password sign-in, sign-out, trade creation, screenshot upload, and MT5 connection setup.
 
 ## Local verification
 
@@ -46,8 +52,8 @@ pnpm test
 pnpm build
 ```
 
-The copied source baseline was verified before porting with 42 Vitest files and 129 tests. After the Supabase/Postgres conversion, the same checks pass locally, including the source UI tests and MT5 lifecycle tests.
+The source feature suite remains in the repository. The Supabase-only conversion adds dedicated Auth and runtime configuration tests while retaining the source UI, journal, goals, plans, exports, and MT5 regression coverage.
 
 ## MT5
 
-The source MT5 implementation remains intact. Create the connection from the MT5 Live view, configure the EA with the returned API key, and point it at the deployed Netlify endpoint. MT5 account metrics, live positions, history, ticket reconciliation, UTC offset handling, and journal linking remain source features. Keep the generated API key private and configure the broker timestamp offset explicitly.
+The source MT5 feature set remains intact. Create an MT5 connection from the MT5 Live view, configure the EA with the generated API key, and point it at the deployed Netlify endpoint. Account metrics, open positions, history, ticket reconciliation, UTC offset handling, and journal linking are stored in Supabase PostgreSQL.

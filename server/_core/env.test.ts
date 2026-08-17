@@ -3,23 +3,19 @@ import { missingProductionConfiguration, validateRuntimeConfiguration } from "./
 
 const configuredProductionEnvironment = {
   NODE_ENV: "production",
-  JWT_SECRET: "test-secret",
   DATABASE_URL: "postgresql://example.test/journal",
   SUPABASE_URL: "https://project.supabase.co",
   SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
-  VITE_APP_ID: "app-id",
-  OAUTH_SERVER_URL: "https://oauth.example.test",
-  VITE_OAUTH_PORTAL_URL: "https://portal.example.test",
 };
 
 describe("production runtime configuration", () => {
-  it("fails fast in production when the JWT signing secret is absent without exposing a value", () => {
-    const environment = { ...configuredProductionEnvironment, JWT_SECRET: "" };
-    expect(missingProductionConfiguration(environment)).toEqual(["JWT_SECRET"]);
-    expect(() => validateRuntimeConfiguration(environment)).toThrow("JWT_SECRET");
+  it("fails fast in production when the Supabase service key is absent", () => {
+    const environment = { ...configuredProductionEnvironment, SUPABASE_SERVICE_ROLE_KEY: "" };
+    expect(missingProductionConfiguration(environment)).toEqual(["SUPABASE_SERVICE_ROLE_KEY"]);
+    expect(() => validateRuntimeConfiguration(environment)).toThrow("SUPABASE_SERVICE_ROLE_KEY");
   });
 
-  it("permits development startup without production-only platform variables", () => {
+  it("permits development startup without production-only Supabase variables", () => {
     expect(missingProductionConfiguration({ NODE_ENV: "development" })).toEqual([]);
     expect(() => validateRuntimeConfiguration({ NODE_ENV: "development" })).not.toThrow();
   });

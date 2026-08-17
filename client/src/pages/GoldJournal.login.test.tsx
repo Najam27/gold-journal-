@@ -1,48 +1,32 @@
 // @vitest-environment jsdom
 import React from "react";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { oauthStatusQuery } = vi.hoisted(() => ({ oauthStatusQuery: vi.fn() }));
+const { signInWithPassword, signUp, signInWithOtp } = vi.hoisted(() => ({ signInWithPassword: vi.fn(), signUp: vi.fn(), signInWithOtp: vi.fn() }));
 
-vi.mock("@/lib/trpc", () => ({
-  trpc: {
-    auth: {
-      oauthStatus: { useQuery: oauthStatusQuery },
-    },
-  },
-}));
-
-vi.mock("@/const", () => ({ startLogin: vi.fn() }));
+vi.mock("@/lib/supabase", () => ({ supabase: { auth: { signInWithPassword, signUp, signInWithOtp } } }));
+vi.mock("@/lib/trpc", () => ({ trpc: {} }));
 
 import { LoginScreen } from "./GoldJournal";
 
-describe("Gold Journal login availability", () => {
-  afterEach(() => {
-    cleanup();
-    vi.clearAllMocks();
-    vi.useRealTimers();
+describe("Gold Journal Supabase login", () => {
+  afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+  it("signs in with email and password", async () => {
+    signInWithPassword.mockResolvedValue({ data: { session: {} }, error: null });
+    render(<LoginScreen />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "trader@example.com" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secure-pass" } });
+    fireEvent.click(screen.getByRole("button", { name: "Enter private journal" }));
+    await waitFor(() => expect(signInWithPassword).toHaveBeenCalledWith({ email: "trader@example.com", password: "secure-pass" }));
   });
 
-  it("surfaces an OAuth outage as a recoverable sign-in state", () => {
-    const refetch = vi.fn();
-    oauthStatusQuery.mockReturnValue({ data: { available: false }, isError: false, isLoading: false, isFetching: false, refetch });
-
+  it("sends a Supabase magic link", async () => {
+    signInWithOtp.mockResolvedValue({ error: null });
     render(<LoginScreen />);
-
-    expect(screen.getByRole("alert").textContent).toContain("Secure sign-in is temporarily unavailable.");
-    fireEvent.click(screen.getByRole("button", { name: "Recheck sign-in service" }));
-    expect(refetch).toHaveBeenCalledTimes(1);
-  });
-
-  it("exits the checking state after the client recovery deadline when the health request stalls", () => {
-    vi.useFakeTimers();
-    oauthStatusQuery.mockReturnValue({ data: undefined, isError: false, isLoading: true, isFetching: true, refetch: vi.fn() });
-
-    render(<LoginScreen />);
-    act(() => { vi.advanceTimersByTime(3_500); });
-
-    expect(screen.getByRole("alert").textContent).toContain("Secure sign-in is temporarily unavailable.");
-    expect(screen.getByRole("button", { name: "Recheck sign-in service" })).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "trader@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send magic link" }));
+    await waitFor(() => expect(signInWithOtp).toHaveBeenCalledWith({ email: "trader@example.com", options: { emailRedirectTo: window.location.origin } }));
   });
 });
