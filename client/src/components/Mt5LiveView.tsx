@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { formatMoney, formatRr, toNumber } from "@/lib/gold";
 import { toast } from "sonner";
 
-const EA_DOWNLOAD = "/manus-storage/GoldJournal_EA_6ebaf71a.mq5";
+const EA_DOWNLOAD = "/GoldJournal_EA.mq5";
 const brokerOffsetOptions = Array.from({ length: 105 }, (_, index) => -12 * 60 + index * 15);
 const formatBrokerOffset = (minutes: number) => { const sign = minutes >= 0 ? "+" : "-"; const absolute = Math.abs(minutes); return `UTC${sign}${String(Math.floor(absolute / 60)).padStart(2, "0")}:${String(absolute % 60).padStart(2, "0")}`; };
 const pkt = (value?: string | Date | null) => value ? new Date(value).toLocaleString("en-PK", { timeZone: "Asia/Karachi", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";

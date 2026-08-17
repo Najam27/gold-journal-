@@ -1,5 +1,5 @@
-const CACHE_NAME = "gold-journal-static-v13";
-const PRECACHE = ["/manifest.json", "/manus-storage/gold-journal-au-mark_de0e8ecf.png"];
+const CACHE_NAME = "gold-journal-static-v14";
+const PRECACHE = ["/manifest.json", "/gold-journal-mark.svg"];
 
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => Promise.allSettled(PRECACHE.map(asset => cache.add(asset)))).then(() => self.skipWaiting()));
@@ -16,7 +16,7 @@ self.addEventListener("message", event => {
 self.addEventListener("fetch", event => {
   const { request } = event;
   const url = new URL(request.url);
-  if (request.method !== "GET" || url.origin !== self.location.origin || url.pathname.startsWith("/api/") || url.pathname.startsWith("/manus-storage/")) return;
+  if (request.method !== "GET" || url.origin !== self.location.origin || url.pathname.startsWith("/api/") || url.pathname.startsWith("/storage/")) return;
   if (!["script", "style", "image", "font"].includes(request.destination)) return;
   event.respondWith(fetch(request).then(response => {
     if (response.ok) caches.open(CACHE_NAME).then(cache => cache.put(request, response.clone()));

@@ -1,9 +1,10 @@
 export type LedgerTrade = { id: number; tradeDate: number | Date; pnl: number | string | null };
+import { toNumber } from "./gold";
 
 export function buildRunningBalances<T extends LedgerTrade>(trades: T[], openingBalance: number) {
   let balance = openingBalance;
   return [...trades].sort((a, b) => new Date(a.tradeDate).getTime() - new Date(b.tradeDate).getTime()).map(trade => {
-    balance += Number(trade.pnl || 0);
+    balance += toNumber(trade.pnl);
     return { ...trade, runningBalance: balance };
   });
 }

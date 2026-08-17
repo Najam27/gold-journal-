@@ -187,14 +187,19 @@ describe("Gold Journal protected server workflows", () => {
     expect(mocks.getDb).not.toHaveBeenCalled();
   });
 
-  it("rejects a connection mutation when the connection is unavailable to the explicitly selected account", async () => {
+    it("rejects a connection mutation when the connection is unavailable to the explicitly selected account", async () => {
     const update = vi.fn();
     mocks.getOwnedAccount.mockResolvedValue({ id: 25, userId: 7, name: "Second account" });
     mocks.getDb.mockResolvedValue({ select: () => limitedRows([]), update });
     const caller = goldRouter.createCaller({ user } as any);
-
     await expect(caller.mt5.setConnectionActive({ accountId: 25, connectionId: 44, active: false })).rejects.toThrow("unavailable");
     expect(mocks.getOwnedAccount).toHaveBeenCalledWith(7, 25);
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a goal mutation when the goal belongs to another user", async () => {
+    mocks.getDb.mockResolvedValue({ select: () => limitedRows([]) });
+    const caller = goldRouter.createCaller({ user } as any);
+    await expect(caller.goals.delete({ goalId: 901 })).rejects.toThrow("unavailable");
   });
 });

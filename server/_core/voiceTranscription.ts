@@ -27,6 +27,20 @@
  */
 import { ENV } from "./env";
 
+const MAX_AUDIO_BYTES = 16 * 1024 * 1024;
+const ALLOWED_AUDIO_TYPES = new Set(["audio/webm", "audio/mp3", "audio/mpeg", "audio/wav", "audio/wave", "audio/ogg", "audio/m4a", "audio/mp4"]);
+
+function validateAudioUrl(audioUrl: string): URL | null {
+  try {
+    const url = new URL(audioUrl);
+    const configured = new URL(ENV.supabaseUrl);
+    if (url.protocol !== "https:" || url.username || url.password || url.port || url.hostname !== configured.hostname) return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
+
 export type TranscribeOptions = {
   audioUrl: string; // URL to the audio file (e.g., S3 URL)
   language?: string; // Optional: specify language code (e.g., "en", "es", "zh")
@@ -90,11 +104,22 @@ export async function transcribeAudio(
       };
     }
 
-    // Step 2: Download audio from URL
+    // Step 2: Download audio from the user's own Supabase Storage only.
+    const audioUrl = validateAudioUrl(options.audioUrl);
+    if (!audioUrl) {
+      return { error: "Audio URL must be an HTTPS Supabase Storage URL", code: "INVALID_FORMAT" };
+    }
+    if (options.language && !/^[a-z]{2,8}(?:[-_][A-Z]{2})?$/.test(options.language)) {
+      return { error: "Invalid language code", code: "INVALID_FORMAT" };
+    }
+    if (options.prompt && options.prompt.length > 1000) {
+      return { error: "Transcription prompt is too long", code: "INVALID_FORMAT" };
+    }
+
     let audioBuffer: Buffer;
     let mimeType: string;
     try {
-      const response = await fetch(options.audioUrl);
+      const response = await fetch(audioUrl, { redirect: "error", signal: AbortSignal.timeout(15_000) });
       if (!response.ok) {
         return {
           error: "Failed to download audio file",
@@ -102,19 +127,29 @@ export async function transcribeAudio(
           details: `HTTP ${response.status}: ${response.statusText}`
         };
       }
-      
-      audioBuffer = Buffer.from(await response.arrayBuffer());
-      mimeType = response.headers.get('content-type') || 'audio/mpeg';
-      
-      // Check file size (16MB limit)
-      const sizeMB = audioBuffer.length / (1024 * 1024);
-      if (sizeMB > 16) {
-        return {
-          error: "Audio file exceeds maximum size limit",
-          code: "FILE_TOO_LARGE",
-          details: `File size is ${sizeMB.toFixed(2)}MB, maximum allowed is 16MB`
-        };
+
+      const declaredLength = Number(response.headers.get("content-length"));
+      if (Number.isFinite(declaredLength) && declaredLength > MAX_AUDIO_BYTES) {
+        return { error: "Audio file exceeds maximum size limit", code: "FILE_TOO_LARGE", details: "Maximum allowed size is 16MB" };
       }
+      const body = response.body;
+      if (!body) return { error: "Audio response had no body", code: "INVALID_FORMAT" };
+      const reader = body.getReader();
+      const chunks: Buffer[] = [];
+      let totalBytes = 0;
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        totalBytes += chunk.value.byteLength;
+        if (totalBytes > MAX_AUDIO_BYTES) {
+          await reader.cancel();
+          return { error: "Audio file exceeds maximum size limit", code: "FILE_TOO_LARGE", details: "Maximum allowed size is 16MB" };
+        }
+        chunks.push(Buffer.from(chunk.value));
+      }
+      audioBuffer = Buffer.concat(chunks, totalBytes);
+      mimeType = (response.headers.get("content-type") || "audio/mpeg").split(";", 1)[0].trim().toLowerCase();
+      if (!ALLOWED_AUDIO_TYPES.has(mimeType)) return { error: "Unsupported audio format", code: "INVALID_FORMAT", details: `Content-Type ${mimeType || "unknown"} is not supported` };
     } catch (error) {
       return {
         error: "Failed to fetch audio file",
@@ -209,7 +244,7 @@ function getFileExtension(mimeType: string): string {
     'audio/mp4': 'm4a',
   };
   
-  return mimeToExt[mimeType] || 'audio';
+  return mimeToExt[mimeType] || 'bin';
 }
 
 /**

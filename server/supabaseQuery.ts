@@ -1,5 +1,5 @@
 import { getTableName } from "drizzle-orm";
-import { getSupabaseAdmin } from "./supabase";
+import { getSupabaseAdmin } from "./supabaseAdmin";
 
 type TableLike = Record<string, any>;
 type ColumnLike = { name?: string; columnName?: string };
@@ -10,7 +10,12 @@ type Selection = Record<string, any> | undefined;
 
 const columnName = (column: ColumnLike | string) => typeof column === "string" ? column : column.name ?? column.columnName ?? "";
 const tableName = (table: TableLike) => getTableName(table as any);
-const valueForFilter = (value: unknown) => value === null ? "null" : typeof value === "string" ? value.replaceAll("%", "\\%").replaceAll(",", "\\,") : String(value);
+const postgrestValue = (value: unknown) => value instanceof Date ? value.toISOString() : typeof value === "bigint" ? value.toString() : value;
+const valueForFilter = (value: unknown) => {
+  const normalized = postgrestValue(value);
+  if (normalized === null) return "null";
+  return String(normalized).replaceAll("\\", "\\\\").replaceAll(",", "\\,").replaceAll("(", "\\(").replaceAll(")", "\\)");
+};
 
 export const eq = (column: ColumnLike, value: unknown): Filter => ({ kind: "eq", column: columnName(column), value });
 export const like = (column: ColumnLike, value: string): Filter => ({ kind: "like", column: columnName(column), value });
@@ -22,7 +27,7 @@ export const count = () => ({ kind: "count" as const });
 
 function applyFilter(query: any, filter?: Filter): any {
   if (!filter) return query;
-  if (filter.kind === "eq") return filter.value === null ? query.is(filter.column, null) : query.eq(filter.column, filter.value);
+  if (filter.kind === "eq") return filter.value === null ? query.is(filter.column, null) : query.eq(filter.column, postgrestValue(filter.value));
   if (filter.kind === "like") return query.ilike(filter.column, filter.value);
   if (filter.kind === "and") return filter.parts.reduce((current, part) => applyFilter(current, part), query);
   if (filter.kind === "or") return query.or(filter.parts.map(renderFilter).join(","));

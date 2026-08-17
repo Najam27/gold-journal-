@@ -11,18 +11,21 @@ import { toSafeJournalRecord, toSafeTrade } from "./journalPrivacy";
 import { protectedProcedure, router } from "./_core/trpc";
 import { storageGetSignedUrl, storagePut } from "./storage";
 
+const MAX_MONEY = 999_999_999_999.99;
 const optionalText = (max = 5000) => z.string().trim().max(max).optional().default("");
+const money = (min = -MAX_MONEY) => z.number().finite().min(min).max(MAX_MONEY);
+const timestampInput = z.number().finite().int().positive().max(8_640_000_000_000_000);
 const accountIdInput = z.object({ accountId: z.number().int().positive() });
 const mt5TicketInput = z.string().regex(/^\d+$/).max(20).optional();
 const lossFloorMetrics = new Set(["daily_loss", "weekly_drawdown"]);
-const goalInput = z.object({ accountId: z.number().int().positive(), name: z.string().trim().min(1).max(120), description: optionalText(500), period: z.enum(["DAILY", "WEEKLY", "MONTHLY"]), metric: z.string().trim().min(1).max(80), comparison: z.enum(["GTE", "LTE"]), target: z.number().min(-1_000_000), notify: z.boolean().default(true), active: z.boolean().default(true) }).superRefine((value, ctx) => {
+const goalInput = z.object({ accountId: z.number().int().positive(), name: z.string().trim().min(1).max(120), description: optionalText(500), period: z.enum(["DAILY", "WEEKLY", "MONTHLY"]), metric: z.string().trim().min(1).max(80), comparison: z.enum(["GTE", "LTE"]), target: money(-1_000_000), notify: z.boolean().default(true), active: z.boolean().default(true) }).superRefine((value, ctx) => {
   if (lossFloorMetrics.has(value.metric) && value.target >= 0) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["target"], message: "Loss controls use a negative P&L floor, for example -100." });
   if (!lossFloorMetrics.has(value.metric) && value.target < 0) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["target"], message: "Only loss-floor controls can use a negative threshold." });
 });
 
 const tradeInput = z.object({
   accountId: z.number().int().positive(),
-  tradeDate: z.number().int().positive(),
+  tradeDate: timestampInput,
   session: z.string().min(1).max(40),
   direction: z.enum(["BUY", "SELL"]),
   result: z.enum(["WIN", "LOSS", "BREAK_EVEN", "OPEN"]),
@@ -38,9 +41,9 @@ const tradeInput = z.object({
   mistake: optionalText(80),
   holdQuality: optionalText(60),
   patienceScore: z.number().int().min(1).max(5).nullable(),
-  risk: z.number().min(0).nullable(),
-  reward: z.number().min(0).nullable(),
-  pnl: z.number(),
+  risk: money(0).nullable(),
+  reward: money(0).nullable(),
+  pnl: money(),
   notes: optionalText(6000),
   emotionBefore: optionalText(2000),
   emotionDuring: optionalText(2000),
@@ -90,7 +93,7 @@ export const goldRouter = router({
     }),
   }),
   accounts: router({
-    create: protectedProcedure.input(z.object({ name: z.string().trim().min(1).max(100), startingBalance: z.number().min(0).default(0) })).mutation(async ({ ctx, input }) => {
+    create: protectedProcedure.input(z.object({ name: z.string().trim().min(1).max(100), startingBalance: money(0).default(0) })).mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const inserted = await db.insert(accounts).values({ userId: ctx.user.id, name: input.name, startingBalance: input.startingBalance.toFixed(2) }).returning({ id: accounts.id });
       return { id: inserted[0].id };
@@ -200,6 +203,15 @@ export const goldRouter = router({
     }),
     update: protectedProcedure.input(tradeInput.extend({ tradeId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       const current = await ownsTrade(ctx.user.id, input.tradeId);
+      if (current.accountId !== input.accountId) throw new Error("A trade cannot be moved between journal accounts.");
+      const nextTicket = input.mt5Ticket ? BigInt(input.mt5Ticket) : current.mt5Ticket;
+      if (input.mt5Ticket && input.mt5Ticket !== current.mt5Ticket?.toString()) {
+        const db = await dbOrThrow();
+        const linked = await db.select({ id: mt5LivePositions.id }).from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, current.accountId), eq(mt5LivePositions.ticket, nextTicket), eq(mt5LivePositions.status, "CLOSED"))).limit(1);
+        if (!linked[0]) throw new Error("The selected MT5 ticket is not an unjournaled closed position for this account.");
+        const alreadyJournaled = await db.select({ id: trades.id }).from(trades).where(and(eq(trades.accountId, current.accountId), eq(trades.mt5Ticket, nextTicket))).limit(1);
+        if (alreadyJournaled[0] && alreadyJournaled[0].id !== current.id) throw new Error("That MT5 ticket is already linked to another journal trade.");
+      }
       const db = await dbOrThrow();
       await db.update(trades).set({
         tradeDate: new Date(input.tradeDate), session: input.session, direction: input.direction, result: input.result,
@@ -208,7 +220,7 @@ export const goldRouter = router({
         slPlacement: input.slPlacement, tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality,
         patienceScore: input.patienceScore, risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null,
         pnl: input.pnl.toFixed(2), notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
-        mt5Ticket: input.mt5Ticket ? BigInt(input.mt5Ticket) : current.mt5Ticket,
+        mt5Ticket: nextTicket,
       }).where(and(eq(trades.id, current.id), eq(trades.userId, ctx.user.id)));
       return { success: true };
     }),
@@ -222,20 +234,21 @@ export const goldRouter = router({
       await clearAccountJournalData(ctx.user.id, input.accountId);
       return { success: true };
     }),
-    uploadScreenshot: protectedProcedure.input(z.object({ tradeId: z.number().int().positive(), fileName: z.string().min(1).max(255), mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]), base64: z.string().min(40).max(7_000_000) })).mutation(async ({ ctx, input }) => {
+    uploadScreenshot: protectedProcedure.input(z.object({ tradeId: z.number().int().positive(), fileName: z.string().trim().min(1).max(255), mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]), base64: z.string().trim().min(40).max(7_000_000).regex(/^(?:data:image\/(?:jpeg|png|webp);base64,)?[A-Za-z0-9+/]+={0,2}$/, "Invalid base64 image payload") })).mutation(async ({ ctx, input }) => {
       const trade = await ownsTrade(ctx.user.id, input.tradeId);
       const base64 = input.base64.includes(",") ? input.base64.split(",")[1] : input.base64;
       const bytes = Buffer.from(base64, "base64");
+      if (!bytes.byteLength) throw new Error("Screenshot payload is empty.");
       if (bytes.byteLength > 5 * 1024 * 1024) throw new Error("Screenshot must be 5MB or smaller.");
       const extension = input.mimeType === "image/png" ? "png" : input.mimeType === "image/webp" ? "webp" : "jpg";
-      const stored = await storagePut(`gold-journal/${ctx.user.id}/trades/${trade.id}-${nanoid()}.${extension}`, bytes, input.mimeType);
+      const stored = await storagePut(`gold-journal/${ctx.user.openId}/trades/${trade.id}-${nanoid()}.${extension}`, bytes, input.mimeType);
       const db = await dbOrThrow();
       await db.update(trades).set({ screenshotKey: stored.key, screenshotName: input.fileName }).where(and(eq(trades.id, trade.id), eq(trades.userId, ctx.user.id)));
       return { url: stored.url };
     }),
   }),
   cash: router({
-    create: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), movementDate: z.number().int().positive(), type: z.enum(["DEPOSIT", "WITHDRAW"]), amount: z.number().positive(), note: optionalText(1000) })).mutation(async ({ ctx, input }) => {
+    create: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), movementDate: timestampInput, type: z.enum(["DEPOSIT", "WITHDRAW"]), amount: money(0.01), note: optionalText(1000) })).mutation(async ({ ctx, input }) => {
       await getOwnedAccount(ctx.user.id, input.accountId);
       const db = await dbOrThrow();
       await db.insert(cashMovements).values({ userId: ctx.user.id, accountId: input.accountId, movementDate: new Date(input.movementDate), type: input.type, amount: input.amount.toFixed(2), note: input.note });
@@ -323,7 +336,7 @@ export const goldRouter = router({
     }),
   }),
   skipped: router({
-    create: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), tradeDate: z.number().int().positive(), session: z.string().min(1).max(40), level: optionalText(100), timeframe: optionalText(20), direction: z.enum(["BUY", "SELL"]), skipReason: z.string().min(1).max(120), confidence: z.number().int().min(1).max(5), outcome: z.string().min(1).max(80), estimatedMissed: z.number(), notes: optionalText(3000) })).mutation(async ({ ctx, input }) => {
+    create: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), tradeDate: timestampInput, session: z.string().min(1).max(40), level: optionalText(100), timeframe: optionalText(20), direction: z.enum(["BUY", "SELL"]), skipReason: z.string().min(1).max(120), confidence: z.number().int().min(1).max(5), outcome: z.string().trim().min(1).max(80), estimatedMissed: money(), notes: optionalText(3000) })).mutation(async ({ ctx, input }) => {
       await getOwnedAccount(ctx.user.id, input.accountId);
       const db = await dbOrThrow();
       await db.insert(skippedTrades).values({ ...input, userId: ctx.user.id, tradeDate: new Date(input.tradeDate), estimatedMissed: input.estimatedMissed.toFixed(2) });
@@ -331,7 +344,7 @@ export const goldRouter = router({
     }),
   }),
   plans: router({
-    save: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), planDate: z.number().int().positive(), preBias: optionalText(40), marketContext: optionalText(3000), keyLevels: optionalText(3000), sessionFocus: z.array(z.string()).max(9), eventRisk: optionalText(1500), longScenario: optionalText(3000), shortScenario: optionalText(3000), noTradeCondition: optionalText(2000), invalidationLevel: optionalText(1000), riskLimit: optionalText(40), maxTrades: z.number().int().min(1).max(99).nullable(), sizingPlan: optionalText(2000), planNotes: optionalText(5000), rulesPlanned: z.array(z.object({ id: z.string(), text: z.string(), checked: z.boolean() })), emotionStart: z.array(z.string()), emotionEnd: z.array(z.string()), executionScore: z.number().int().min(1).max(5).nullable(), rulesFollowed: z.array(z.object({ id: z.string(), yes: z.boolean() })), whatWentWell: optionalText(5000), whatWentWrong: optionalText(5000), executionNotes: optionalText(5000), planDeviation: optionalText(5000), lessons: optionalText(2000), tomorrowFocus: optionalText(2000), overallRating: z.number().int().min(1).max(5).nullable() })).mutation(async ({ ctx, input }) => {
+    save: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), planDate: timestampInput, preBias: optionalText(40), marketContext: optionalText(3000), keyLevels: optionalText(3000), sessionFocus: z.array(z.string().trim().max(120)).max(9), eventRisk: optionalText(1500), longScenario: optionalText(3000), shortScenario: optionalText(3000), noTradeCondition: optionalText(2000), invalidationLevel: optionalText(1000), riskLimit: optionalText(40), maxTrades: z.number().int().min(1).max(99).nullable(), sizingPlan: optionalText(2000), planNotes: optionalText(5000), rulesPlanned: z.array(z.object({ id: z.string().trim().min(1).max(80), text: z.string().trim().max(500), checked: z.boolean() })).max(30), emotionStart: z.array(z.string().trim().max(80)).max(20), emotionEnd: z.array(z.string().trim().max(80)).max(20), executionScore: z.number().int().min(1).max(5).nullable(), rulesFollowed: z.array(z.object({ id: z.string().trim().min(1).max(80), yes: z.boolean() })).max(30), whatWentWell: optionalText(5000), whatWentWrong: optionalText(5000), executionNotes: optionalText(5000), planDeviation: optionalText(5000), lessons: optionalText(2000), tomorrowFocus: optionalText(2000), overallRating: z.number().int().min(1).max(5).nullable() })).mutation(async ({ ctx, input }) => {
       await getOwnedAccount(ctx.user.id, input.accountId);
       const db = await dbOrThrow();
       const record = { userId: ctx.user.id, accountId: input.accountId, planDate: new Date(input.planDate), preBias: input.preBias, marketContext: input.marketContext, keyLevels: input.keyLevels, sessionFocus: input.sessionFocus, eventRisk: input.eventRisk, longScenario: input.longScenario, shortScenario: input.shortScenario, noTradeCondition: input.noTradeCondition, invalidationLevel: input.invalidationLevel, riskLimit: input.riskLimit, maxTrades: input.maxTrades, sizingPlan: input.sizingPlan, planNotes: input.planNotes, rulesPlanned: input.rulesPlanned, emotionStart: input.emotionStart.join("|"), emotionEnd: input.emotionEnd.join("|"), executionScore: input.executionScore, rulesFollowed: input.rulesFollowed, whatWentWell: input.whatWentWell, whatWentWrong: input.whatWentWrong, executionNotes: input.executionNotes, planDeviation: input.planDeviation, lessons: input.lessons, tomorrowFocus: input.tomorrowFocus, overallRating: input.overallRating };

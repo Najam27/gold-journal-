@@ -93,8 +93,8 @@ export async function processMt5Payload(body: unknown) {
   }
 }
 
-export function registerMt5Ingest(app: Express) {
-  app.post("/api/mt5", async (req: Request, res: Response) => {
+export function registerMt5Ingest(app: Express, paths: string[] = ["/api/mt5"]) {
+  for (const path of paths) app.post(path, async (req: Request, res: Response) => {
     try {
       const outcome = await processMt5Payload(req.body);
       res.status(outcome.status).json(outcome.body);

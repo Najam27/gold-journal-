@@ -1,12 +1,7 @@
-import { createClient } from "@supabase/supabase-js";
 import { getUserByOpenId, upsertUser } from "./db";
+import { getSupabaseAdmin } from "./supabaseAdmin";
 
-export function getSupabaseAdmin() {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("Supabase Auth is not configured on the server.");
-  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-}
+export { getSupabaseAdmin } from "./supabaseAdmin";
 
 export async function authenticateSupabaseAccessToken(token: string) {
   const { data, error } = await getSupabaseAdmin().auth.getUser(token);

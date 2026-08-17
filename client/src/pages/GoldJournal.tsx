@@ -30,7 +30,7 @@ import { assessTraderGoal } from "@/lib/traderGoals";
 import { toast } from "sonner";
 import { Activity, BarChart3, Bell, BookOpen, Bot, CalendarDays, Check, ChevronDown, CircleDollarSign, Cloud, Download, FileSpreadsheet, FileText, Goal, ImagePlus, LogOut, Menu, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, RefreshCcw, Settings2, ShieldAlert, Target, Trash2, Wallet, Wifi, WifiOff, X, Zap } from "lucide-react";
 
-const logoUrl = "/manus-storage/gold-journal-au-mark_de0e8ecf.png";
+const logoUrl = "/gold-journal-mark.svg";
 type View = "trades" | "missed" | "analysis" | "goals" | "calendar" | "plan" | "mentor" | "mt5" | "options";
 type TradeForm = { tradeDate: string; session: string; direction: "" | "BUY" | "SELL"; result: "" | "WIN" | "LOSS" | "BREAK_EVEN" | "OPEN"; level: string; timeframe: string; setupQuality: string; executionType: string; marketCondition: string; biasAlignment: string; confirmationType: string; slPlacement: string; tpPlacement: string; mistake: string; holdQuality: string; patienceScore: string; risk: string; reward: string; pnl: string; notes: string; emotionBefore: string; emotionDuring: string; emotionAfter: string; mt5Ticket: string };
 
@@ -61,17 +61,8 @@ function journalStats(trades: any[], account: any, movements: any[]) {
   return { total: trades.length, wins: wins.length, losses: trades.filter(trade => trade.result === "LOSS").length, pnl, balance: toNumber(account?.startingBalance) + pnl + cash, winRate: closed.length ? wins.length / closed.length * 100 : 0 };
 }
 function goalState(goal: any, trades: any[]) {
-  const now = new Date(); const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const weekStart = new Date(dayStart.getTime() - ((dayStart.getDay() + 6) % 7) * 86_400_000); const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const since = goal.period === "DAILY" ? dayStart : goal.period === "WEEKLY" ? weekStart : monthStart;
-  const rows = trades.filter(trade => new Date(trade.tradeDate).getTime() >= since.getTime());
-  const wins = rows.filter(trade => trade.result === "WIN"); const losses = rows.filter(trade => trade.result === "LOSS");
-  const grossProfit = wins.reduce((sum, trade) => sum + Math.max(0, toNumber(trade.pnl)), 0); const grossLoss = Math.abs(losses.reduce((sum, trade) => sum + Math.min(0, toNumber(trade.pnl)), 0));
-  const values: Record<string, number> = { trade_count: rows.length, daily_loss: grossLoss, revenge_trades: 0, avg_patience: rows.length ? rows.reduce((sum, trade) => sum + toNumber(trade.patienceScore), 0) / rows.length : 0, win_rate: rows.length ? wins.length / rows.length * 100 : 0, avg_rr: rows.length ? rows.reduce((sum, trade) => sum + (toNumber(trade.risk) > 0 ? toNumber(trade.reward) / toNumber(trade.risk) : 0), 0) / rows.length : 0, weekly_drawdown: grossLoss, quality_setup: rows.length ? rows.filter(trade => trade.setupQuality === "A" || trade.setupQuality === "A+").length / rows.length * 100 : 0, screenshot_rate: rows.length ? rows.filter(trade => trade.hasScreenshot).length / rows.length * 100 : 0, consecutive_losses: 0, net_pnl: rows.reduce((sum, trade) => sum + toNumber(trade.pnl), 0), weekly_reviews: 0, profit_factor: grossLoss ? grossProfit / grossLoss : grossProfit ? 99 : 0 };
-  const value = values[goal.metric] ?? 0; const target = toNumber(goal.target); const inactive = rows.length === 0; let status = "PENDING";
-  if (!inactive && goal.comparison === "GTE") status = value >= target ? "MET" : value >= target * 0.8 ? "AT RISK" : "PENDING";
-  if (!inactive && goal.comparison === "LTE") status = value > target ? "BREACHED" : value >= target * 0.8 ? "AT RISK" : "MET";
-  return { value, target, status, percentage: target ? Math.min(100, value / target * 100) : 0 };
+  const entry = assessTraderGoal(goal, trades, []);
+  return { value: entry.value, target: entry.target, status: entry.status === "AT_RISK" ? "AT RISK" : entry.status, percentage: entry.percentage };
 }
 
 export default function GoldJournal() {
