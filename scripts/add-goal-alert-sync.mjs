@@ -1,0 +1,18 @@
+import { readFileSync, writeFileSync } from "node:fs";
+
+const file = "client/src/pages/GoldJournal.tsx";
+let source = readFileSync(file, "utf8");
+source = source.replace(
+  'const createTrade = trpc.trades.create.useMutation(); const updateTrade = trpc.trades.update.useMutation(); const deleteTrade = trpc.trades.delete.useMutation(); const uploadScreenshot = trpc.trades.uploadScreenshot.useMutation(); const clearAll = trpc.trades.clearAll.useMutation(); const createCash = trpc.cash.create.useMutation(); const createGoal = trpc.goals.create.useMutation(); const updateGoal = trpc.goals.update.useMutation(); const deleteGoal = trpc.goals.delete.useMutation(); const clearGoals = trpc.goals.clearAll.useMutation(); const createAccount = trpc.accounts.create.useMutation();',
+  'const createTrade = trpc.trades.create.useMutation(); const updateTrade = trpc.trades.update.useMutation(); const deleteTrade = trpc.trades.delete.useMutation(); const uploadScreenshot = trpc.trades.uploadScreenshot.useMutation(); const clearAll = trpc.trades.clearAll.useMutation(); const createCash = trpc.cash.create.useMutation(); const createGoal = trpc.goals.create.useMutation(); const updateGoal = trpc.goals.update.useMutation(); const deleteGoal = trpc.goals.delete.useMutation(); const clearGoals = trpc.goals.clearAll.useMutation(); const recordGoalAlerts = trpc.notifications.recordGoalAlerts.useMutation(); const createAccount = trpc.accounts.create.useMutation();',
+);
+source = source.replace(
+  'const data = journalQuery.data as any; const account = data?.activeAccount; const trades = data?.trades ?? []; const cashMovements = data?.cashMovements ?? []; const stats = journalStats(trades, account, cashMovements); const goalEntries = (data?.goals ?? []).map((goal: any) => assessTraderGoal(goal, trades, data?.dailyPlans ?? [])); const dangerGoals = goalEntries.filter((entry: any) => entry.status === "AT_RISK" || entry.status === "BREACHED");',
+  'const data = journalQuery.data as any; const account = data?.activeAccount; const trades = data?.trades ?? []; const cashMovements = data?.cashMovements ?? []; const stats = journalStats(trades, account, cashMovements); const goalEntries = useMemo(() => (data?.goals ?? []).map((goal: any) => assessTraderGoal(goal, trades, data?.dailyPlans ?? [])), [data?.goals, trades, data?.dailyPlans]); const dangerGoals = goalEntries.filter((entry: any) => entry.status === "AT_RISK" || entry.status === "BREACHED"); const goalAlertPayload = useMemo(() => goalEntries.filter((entry: any) => entry.goal.active && entry.goal.notify && ["AT_RISK", "BREACHED", "MET"].includes(entry.status) && entry.hasActivity).map((entry: any) => ({ goalId: entry.goal.id, status: entry.status, cycleKey: `${entry.goal.period}-${entry.periodLabel}`, message: `${entry.goal.name}: ${entry.status === "BREACHED" ? "threshold breached" : entry.status === "AT_RISK" ? "near threshold" : "target achieved"} (${entry.current} / ${entry.targetLabel}).` })), [goalEntries]);',
+);
+source = source.replace(
+  'useEffect(() => { setSelectedAccountId(account?.id); }, [account?.id]);',
+  'useEffect(() => { setSelectedAccountId(account?.id); }, [account?.id]);\n  useEffect(() => { if (!account?.id || !goalAlertPayload.length || recordGoalAlerts.isPending) return; void recordGoalAlerts.mutateAsync({ accountId: account.id, alerts: goalAlertPayload }).then(result => { if (result.recorded) void utils.notifications.get.invalidate(); }).catch(() => undefined); }, [account?.id, goalAlertPayload, recordGoalAlerts, utils.notifications.get]);',
+);
+if (!source.includes('recordGoalAlerts') || !source.includes('goalAlertPayload')) throw new Error("Goal alert synchronization was not added.");
+writeFileSync(file, source);

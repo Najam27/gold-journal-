@@ -1,0 +1,254 @@
+/* Final semantic UI system layer: presentation-only overrides for the established Gold Journal UI. */
+:root {
+  --gj-radius-widget: 0.875rem;
+  --gj-radius-control: 0.625rem;
+  --gj-space-page: clamp(0.875rem, 2vw, 2rem);
+  --gj-space-section: clamp(1rem, 2.2vw, 1.5rem);
+  --gj-focus: color-mix(in srgb, var(--ring) 72%, transparent);
+  --gj-chart-grid: color-mix(in srgb, var(--border) 76%, transparent);
+  --gj-chart-axis: var(--muted-foreground);
+  --gj-chart-tooltip: var(--popover);
+  --gj-fab-right: max(0.75rem, env(safe-area-inset-right));
+  --gj-fab-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+html,
+body,
+#root { min-height: 100%; }
+
+button,
+[role="button"],
+input,
+select,
+textarea,
+a { -webkit-tap-highlight-color: transparent; }
+
+button:focus-visible,
+[role="button"]:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--gj-focus);
+}
+
+.gj-main { padding-inline: var(--gj-space-page); }
+.view-wrap { width: min(100%, 92rem); }
+.trade-header,
+.section-heading { margin-block: var(--gj-space-section); }
+
+/* One layered surface treatment; nested blocks become calm, readable secondary surfaces. */
+.panel,
+.stat-card,
+.edge-table-card,
+.edge-callout,
+.professional-goal-card,
+.monthly-trade-overview,
+.week-summary-card,
+.pnl-day-card {
+  border-color: var(--gj-line);
+  border-radius: var(--gj-radius-widget);
+  background: var(--gj-panel);
+  box-shadow: 0 10px 26px var(--gj-shadow);
+}
+
+.panel::before,
+.stat-card::before,
+.edge-table-card::before { opacity: .32; }
+
+.panel:hover,
+.edge-table-card:hover,
+.edge-callout:hover,
+.monthly-trade-overview:hover,
+.stat-card:hover {
+  border-color: color-mix(in srgb, var(--gj-gold) 34%, var(--gj-line));
+  box-shadow: 0 16px 34px var(--gj-shadow);
+  transform: translateY(-2px);
+}
+
+.stat-card {
+  min-height: 0;
+  padding: clamp(0.875rem, 1.6vw, 1.125rem);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--gj-panel) 92%, var(--gj-gold) 8%), var(--gj-panel));
+}
+.stat-card p,
+.stat-card span { color: var(--gj-subtext); }
+.stat-card strong { color: var(--gj-text); font-size: clamp(1.125rem, 1.7vw, 1.375rem); }
+.stat-green strong,
+.positive { color: var(--profit) !important; }
+.stat-red strong,
+.negative { color: var(--loss) !important; }
+.stat-neutral strong { color: var(--gj-text); }
+
+.panel-title,
+.toolbar { border-color: var(--gj-line); }
+.panel-title { padding: clamp(0.875rem, 1.7vw, 1.125rem); }
+.panel-title span,
+.eyebrow,
+.section-label { color: var(--gj-gold-text); }
+
+/* Shared form and filter controls stay distinguishable in both themes. */
+.toolbar select,
+.field select,
+.mt5-settings select,
+.field input,
+.field textarea,
+.stacked-fields input,
+.stacked-fields textarea,
+.mt5-settings input,
+.key-panel input,
+.search-field,
+.plan-archive-search,
+.monthly-overview-head label {
+  border-color: var(--gj-line);
+  border-radius: var(--gj-radius-control);
+  background: var(--gj-control);
+  color: var(--gj-text);
+}
+.field,
+.mt5-settings label { color: var(--gj-subtext); }
+.field input::placeholder,
+.field textarea::placeholder,
+.stacked-fields input::placeholder,
+.stacked-fields textarea::placeholder,
+.journal-value-add input::placeholder { color: var(--gj-dim); opacity: 1; }
+.toolbar select:focus,
+.field select:focus,
+.field input:focus,
+.field textarea:focus,
+.stacked-fields input:focus,
+.stacked-fields textarea:focus,
+.mt5-settings input:focus,
+.key-panel input:focus,
+.search-field:focus-within,
+.plan-archive-search:focus-within { border-color: var(--ring); box-shadow: 0 0 0 3px var(--gj-focus); }
+
+/* Dense data keeps a local scroll region while table hierarchy remains calm and readable. */
+.trade-table-wrap,
+.edge-table-wrap,
+.pnl-week-calendar { scrollbar-color: var(--gj-dim) transparent; scrollbar-width: thin; }
+.trade-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-color: var(--gj-line);
+  background: var(--gj-panel);
+  color: var(--gj-dim);
+}
+.trade-table td { border-color: var(--gj-line); color: var(--gj-text); }
+.trade-table tbody tr:hover { background: color-mix(in srgb, var(--gj-gold) 6%, var(--gj-panel)); }
+.trade-header .header-actions > [data-slot="button"]:last-child { display: none; }
+.side-badge.buy,
+.result-badge.win { background: color-mix(in srgb, var(--profit) 14%, transparent); color: var(--profit); }
+.side-badge.sell,
+.result-badge.loss { background: color-mix(in srgb, var(--loss) 14%, transparent); color: var(--loss); }
+.result-badge.break_even { background: color-mix(in srgb, var(--break-even) 17%, transparent); color: var(--break-even); }
+.result-badge.open { background: color-mix(in srgb, var(--open-trade) 15%, transparent); color: var(--open-trade); }
+
+/* Recharts emits inline SVG attributes; target those rendered elements so the legacy chart follows the active theme. */
+.recharts-cartesian-grid line,
+.recharts-polar-grid line { stroke: var(--gj-chart-grid) !important; }
+.recharts-cartesian-axis-tick text,
+.recharts-cartesian-axis-tick tspan,
+.recharts-yAxis .recharts-text,
+.recharts-xAxis .recharts-text { fill: var(--gj-chart-axis) !important; }
+.recharts-bar-rectangle path { fill: var(--gj-gold) !important; }
+.recharts-default-tooltip { border-color: var(--gj-line) !important; border-radius: var(--gj-radius-control) !important; background: var(--gj-chart-tooltip) !important; color: var(--gj-text) !important; box-shadow: 0 14px 30px var(--gj-shadow) !important; }
+.recharts-tooltip-label,
+.recharts-tooltip-item { color: var(--gj-text) !important; }
+
+.button:active,
+.icon-button:active,
+.theme-toggle:active,
+.sidebar-nav button:active,
+.mobile-bottom-nav button:active { transform: scale(.97); }
+.button:disabled,
+.icon-button:disabled { opacity: .52; filter: saturate(.6); }
+
+/* Consistent state surfaces. */
+.empty-state,
+.page-loader,
+.query-error,
+.mentor-run { color: var(--gj-subtext); }
+.empty-state { min-height: min(17rem, 45vh); padding: clamp(1.25rem, 4vw, 2rem); }
+.empty-orbit,
+.mentor-icon { border-color: color-mix(in srgb, var(--gj-gold) 45%, var(--gj-line)); background: color-mix(in srgb, var(--gj-gold) 9%, var(--gj-panel-2)); color: var(--gj-gold); }
+.query-error,
+.goal-alert-strip,
+.plan-save-error { background: color-mix(in srgb, var(--destructive) 8%, var(--gj-panel)); }
+
+/* Responsive dialog model: enough room on desktop, viewport-safe on a phone. */
+[role="dialog"] { color: var(--gj-text); }
+.trade-dialog,
+.trade-view-dialog,
+.account-manager-dialog,
+.mt5-import-dialog,
+.option-manager-dialog,
+.bulk-pdf-dialog,
+.notification-dialog {
+  width: min(100% - 1.5rem, 60rem) !important;
+  max-height: min(90dvh, 52rem);
+  border-color: var(--gj-line) !important;
+  background: var(--gj-panel) !important;
+  color: var(--gj-text) !important;
+}
+.dialog-actions { border-top: 1px solid var(--gj-line); background: var(--gj-panel); }
+
+/* Current-header compression prevents clipped labels in the icon-rail range. */
+@media (min-width: 761px) and (max-width: 860px) {
+  .desktop-pagebar { gap: 0.75rem; }
+  .pagebar-actions { gap: 0.375rem; }
+  .sync-chip { width: 2.25rem; justify-content: center; padding-inline: 0; font-size: 0; }
+  .sync-chip svg { width: 0.95rem; height: 0.95rem; }
+  .pagebar-actions > .button:last-child { width: 2.5rem; min-width: 2.5rem; justify-content: center; padding-inline: 0; font-size: 0; }
+  .pagebar-actions > .button:last-child svg { width: 1rem; height: 1rem; }
+}
+
+/* A tokenized, collision-safe fixed-action stack. */
+.pwa-update-banner { right: var(--gj-fab-right); bottom: var(--gj-fab-bottom); }
+.account-rename-fab { right: var(--gj-fab-right); bottom: calc(var(--gj-fab-bottom) + 3rem); }
+.mt5-import-fab { right: var(--gj-fab-right); bottom: calc(var(--gj-fab-bottom) + 6rem); }
+.options-fab { right: var(--gj-fab-right); bottom: calc(var(--gj-fab-bottom) + 9rem); }
+.pwa-update-banner,
+.account-rename-fab,
+.mt5-import-fab,
+.options-fab,
+.notification-fab { border-color: var(--gj-line); background: var(--gj-popover, var(--gj-panel)); color: var(--gj-text); box-shadow: 0 10px 26px var(--gj-shadow); }
+
+@media (max-width: 760px) {
+  .gj-main { padding-inline: var(--gj-space-page); }
+  .mobile-topbar { margin-inline: calc(var(--gj-space-page) * -1); padding-inline: var(--gj-space-page); }
+  .header-actions { gap: 0.5rem; }
+  .toolbar { gap: 0.625rem; padding: 0.75rem; }
+  .toolbar-push { scrollbar-width: none; }
+  .toolbar-push::-webkit-scrollbar { display: none; }
+  .trade-dialog,
+  .trade-view-dialog { width: 100vw !important; max-height: 100dvh; border-radius: 0 !important; }
+  .dialog-actions { padding-block: 0.75rem; }
+  .account-rename-fab { bottom: calc(var(--gj-fab-bottom) + 4.25rem); }
+  .mt5-import-fab { bottom: calc(var(--gj-fab-bottom) + 7.5rem); }
+  .options-fab { bottom: calc(var(--gj-fab-bottom) + 10.75rem); }
+}
+
+@media (max-width: 480px) {
+  .header-actions .button { min-height: 2.5rem; }
+  .stats-grid,
+  .stats-grid.compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat-card { min-height: 5.75rem; padding: 0.75rem; }
+  .stat-card strong { font-size: 1rem; }
+  .stat-card p { margin-bottom: 0.45rem; font-size: 0.5625rem; }
+  .stat-card span { font-size: 0.5rem; }
+  .goal-command-strip,
+  .monthly-overview-head,
+  .automation-head { gap: 0.75rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel:hover,
+  .edge-table-card:hover,
+  .edge-callout:hover,
+  .monthly-trade-overview:hover,
+  .stat-card:hover { transform: none; }
+}

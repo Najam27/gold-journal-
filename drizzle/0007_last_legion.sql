@@ -1,0 +1,1 @@
+ALTER TABLE `gj_mt5_connections` ADD `journalDataResetAt` timestamp;

@@ -1,0 +1,899 @@
+# Active Frontend Component Map
+
+## Component exports and declarations
+pages/ComponentShowcase.tsx:176:export default function ComponentsShowcase() {
+pages/GoldJournal.tsx:41:export const JOURNAL_RETRY_EVENT = "gold-journal:retry";
+pages/GoldJournal.tsx:42:const OAUTH_RECOVERY_DEADLINE_MS = 3_500;
+pages/GoldJournal.tsx:44:export const MENTOR_LOCAL_KEY_NOTICE = "Your key stays only in this browser and is never sent to the cloud journal.";
+pages/GoldJournal.tsx:47:export function defaultTrade(): TradeForm { return { tradeDate: dateInput(), session: getPktSession(), direction: "", result: "", level: "", timeframe: "", setupQuality: "", executionType: "", marketCondition: "", biasAlignment: "", confirmationType: "", slPlacement: "", tpPlacement: "", mistake: "", holdQuality: "", patienceScore: "", risk: "", reward: "", pnl: "", notes: "", emotionBefore: "", emotionDuring: "", emotionAfter: "", mt5Ticket: "" }; }
+pages/GoldJournal.tsx:50:function GoldMark({ size = 34 }: { size?: number }) { return <div className="gold-mark" style={{ width: size, height: size }}><img src={logoUrl} alt="Gold Journal" /></div>; }
+pages/GoldJournal.tsx:51:function StatCard({ label, value, detail, tone = "gold" }: { label: string; value: string; detail: string; tone?: string }) { return <div className={`stat-card stat-${tone}`}><p>{label}</p><strong className="data-text">{value}</strong><span>{detail}</span></div>; }
+pages/GoldJournal.tsx:52:function EmptyState({ title, copy, action }: { title: string; copy: string; action?: React.ReactNode }) { return <div className="empty-state"><div className="empty-orbit"><GoldMark size={42} /></div><h3>{title}</h3><p>{copy}</p>{action}</div>; }
+pages/GoldJournal.tsx:53:function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="field"><span>{label}</span>{children}</label>; }
+pages/GoldJournal.tsx:54:function FormSection({ title, children }: { title: string; children: React.ReactNode }) { return <section className="form-section modal-section"><span className="section-label">{title}</span><div className="field-grid">{children}</div></section>; }
+pages/GoldJournal.tsx:89:export default function GoldJournal() {
+pages/GoldJournal.tsx:133:function AppSidebar({ account, accounts, stats, active, onView, collapsed, onCollapse, open, online, alertCount, user, onLogout, onInstall, onAccount }: any) {
+pages/GoldJournal.tsx:140:function MobileTopbar({ onMenu, onAdd }: any) { return <header className="mobile-topbar"><button onClick={onMenu}><Menu size={21} /></button><div><GoldMark size={27} /><strong>Gold Journal</strong></div><div className="mobile-top-actions"><ThemeToggle /><button className="quick-add" onClick={onAdd}><Plus size={19} /></button></div></header>; }
+pages/GoldJournal.tsx:141:function PageHeader({ view, online, onNew }: any) { const title = navItems.find(item => item.id === view)?.label || "Gold Journal"; return <header className="desktop-pagebar"><div><p>{view === "trades" ? "TRADING PERFORMANCE" : "GOLD JOURNAL"}</p><h1>{title}</h1></div><div className="pagebar-actions"><span className="sync-chip"><Cloud size={14} /> {online ? "Live cloud sync" : "Offline"}</span><ThemeToggle /><NotificationCenter triggerClassName="icon-button" /><Button onClick={onNew}><Plus size={16} /> New Trade</Button></div></header>; }
+pages/GoldJournal.tsx:142:function MobileNav({ active, onView }: { active: View; onView: (view: View) => void }) { return <nav className="mobile-bottom-nav">{navItems.slice(0, 5).map(item => { const Icon = item.icon; return <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => onView(item.id)}><Icon size={18} /><span>{item.label.replace(" Trades", "")}</span></button>; })}</nav>; }
+pages/GoldJournal.tsx:143:export function Loading({ onReconnect = startLogin, reconnectStatus = "ready" }: { onReconnect?: () => void; reconnectStatus?: "ready" | "checking" | "unavailable" }) { const [slow, setSlow] = useState(false); useEffect(() => { const timer = window.setTimeout(() => setSlow(true), 8_000); return () => window.clearTimeout(timer); }, []); return slow ? <SessionRecovery onRetry={() => window.dispatchEvent(new Event(JOURNAL_RETRY_EVENT))} onReconnect={onReconnect} reconnectStatus={reconnectStatus} /> : <div className="page-loader"><div /><span>Loading your secure journal…</span></div>; }
+pages/GoldJournal.tsx:144:export function QueryError({ error, onRetry }: { error: unknown; onRetry: () => void }) { const message = error instanceof Error ? error.message : "Your journal could not be loaded."; return <section className="panel query-error"><ShieldAlert size={25} /><div><span className="eyebrow">SYNC NEEDS ATTENTION</span><h2>We could not load this journal view.</h2><p>{message}</p><Button onClick={onRetry}><RefreshCcw size={15} /> Try again</Button></div></section>; }
+pages/GoldJournal.tsx:145:export function ServerPlanView({ account, plans, onSaved }: any) { const [planDate, setPlanDate] = useState(dateInput()); const [bias, setBias] = useState("Neutral"); const [keyLevels, setKeyLevels] = useState(""); const [sessionFocus, setSessionFocus] = useState<string[]>([]); const [notes, setNotes] = useState(""); const [plannedRules, setPlannedRules] = useState(() => defaultRules.map((text, index) => ({ id: String(index), text, checked: true }))); const [emotionStart, setEmotionStart] = useState(""); const [emotionEnd, setEmotionEnd] = useState(""); const [executionScore, setExecutionScore] = useState<number | null>(null); const [followedRules, setFollowedRules] = useState(() => defaultRules.map((_, index) => ({ id: String(index), yes: false }))); const [whatWentWell, setWhatWentWell] = useState(""); const [whatWentWrong, setWhatWentWrong] = useState(""); const [lessons, setLessons] = useState(""); const [overallRating, setOverallRating] = useState<number | null>(null); const savePlan = trpc.plans.save.useMutation(); const selectedPlan = plans.find((plan: any) => dateInput(new Date(plan.planDate)) === planDate); useEffect(() => { const planned = Array.isArray(selectedPlan?.rulesPlanned) && selectedPlan.rulesPlanned.length ? selectedPlan.rulesPlanned : defaultRules.map((text, index) => ({ id: String(index), text, checked: true })); const followed = Array.isArray(selectedPlan?.rulesFollowed) && selectedPlan.rulesFollowed.length ? selectedPlan.rulesFollowed : defaultRules.map((_, index) => ({ id: String(index), yes: false })); setBias(selectedPlan?.preBias || "Neutral"); setKeyLevels(selectedPlan?.keyLevels || ""); setSessionFocus(Array.isArray(selectedPlan?.sessionFocus) ? selectedPlan.sessionFocus : []); setNotes(selectedPlan?.planNotes || ""); setPlannedRules(planned); setEmotionStart(selectedPlan?.emotionStart || ""); setEmotionEnd(selectedPlan?.emotionEnd || ""); setExecutionScore(selectedPlan?.executionScore ?? null); setFollowedRules(followed); setWhatWentWell(selectedPlan?.whatWentWell || ""); setWhatWentWrong(selectedPlan?.whatWentWrong || ""); setLessons(selectedPlan?.lessons || ""); setOverallRating(selectedPlan?.overallRating ?? null); }, [planDate, selectedPlan?.id]); const toggleSession = (session: string) => setSessionFocus(current => current.includes(session) ? current.filter(item => item !== session) : [...current, session]); const togglePlanned = (id: string) => setPlannedRules(current => current.map(rule => rule.id === id ? { ...rule, checked: !rule.checked } : rule)); const toggleFollowed = (id: string) => setFollowedRules(current => current.map(rule => rule.id === id ? { ...rule, yes: !rule.yes } : rule)); const save = async () => { if (!account) return; await savePlan.mutateAsync({ accountId: account.id, planDate: new Date(`${planDate}T12:00:00`).getTime(), preBias: bias, keyLevels, sessionFocus, planNotes: notes, rulesPlanned: plannedRules, emotionStart: emotionStart.split(",").map(item => item.trim()).filter(Boolean), emotionEnd: emotionEnd.split(",").map(item => item.trim()).filter(Boolean), executionScore, rulesFollowed: followedRules, whatWentWell, whatWentWrong, lessons, overallRating }); toast.success(selectedPlan ? "Plan and execution review updated." : "Plan and execution review saved."); await onSaved(); }; return <><section className="section-heading"><div><span className="eyebrow">PROCESS OVER OUTCOME</span><h2>Plan & Execution</h2><p>Write the plan before the session, then complete the review without rewriting history.</p></div><div className="date-control"><Input type="date" value={planDate} onChange={event => setPlanDate(event.target.value)} /><Button variant="outline" onClick={() => setPlanDate(dateInput())}>Today</Button></div></section><div className="plan-layout"><section className="panel mini-calendar"><div className="panel-title"><div><span>MONTH SNAPSHOT</span><h3>{new Date(`${planDate}T12:00:00`).toLocaleString("en-US", { month: "long", year: "numeric" })}</h3></div></div><div className="mini-day-grid">{Array.from({ length: new Date(Number(planDate.slice(0, 4)), Number(planDate.slice(5, 7)), 0).getDate() }, (_, index) => { const day = index + 1; const value = `${planDate.slice(0, 8)}${String(day).padStart(2, "0")}`; const recorded = plans.some((plan: any) => dateInput(new Date(plan.planDate)) === value); return <button key={day} className={`${planDate === value ? "selected" : ""} ${recorded ? "recorded" : ""}`} onClick={() => setPlanDate(value)}>{day}</button>; })}</div><p className="plan-calendar-key"><i /> Saved plan / review</p></section><section className="panel plan-editor"><div className="plan-day-head"><div><span className="eyebrow">{selectedPlan ? "SAVED ENTRY" : "NEW ENTRY"}</span><h3>{new Date(`${planDate}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long" })}</h3></div><Button disabled={!account || savePlan.isPending} onClick={() => void save()}>{savePlan.isPending ? "Saving…" : selectedPlan ? "Update entry" : "Save entry"}</Button></div><div className="form-section"><span className="section-label">A. PRE-SESSION PLAN</span><Field label="Market bias"><div className="pill-options">{["Bullish", "Bearish", "Neutral", "No clear bias"].map(item => <button key={item} className={bias === item ? "selected" : ""} onClick={() => setBias(item)}>{item}</button>)}</div></Field><Field label="Key levels"><Textarea value={keyLevels} onChange={event => setKeyLevels(event.target.value)} rows={3} placeholder="Asia high/low, London open, HTF zones…" /></Field><Field label="Session focus"><div className="checkbox-cluster">{sessions.map(session => <label key={session}><input type="checkbox" checked={sessionFocus.includes(session)} onChange={() => toggleSession(session)} /> {session}</label>)}</div></Field><Field label="Plan notes"><Textarea value={notes} onChange={event => setNotes(event.target.value)} rows={4} placeholder="Write your game plan before the session begins…" /></Field><div className="rule-list">{plannedRules.map((rule: any, index: number) => <label key={rule.id}><input type="checkbox" checked={rule.checked} onChange={() => togglePlanned(rule.id)} /> <span>{index + 1}. {rule.text}</span></label>)}</div></div><div className="form-section"><span className="section-label">B. END-OF-DAY EXECUTION REVIEW</span><Field label="Emotion at start (comma separated)"><Input value={emotionStart} onChange={event => setEmotionStart(event.target.value)} placeholder="Calm, focused" /></Field><Field label="Emotion at end (comma separated)"><Input value={emotionEnd} onChange={event => setEmotionEnd(event.target.value)} placeholder="Disciplined, tired" /></Field><Field label="Execution score"><div className="pill-options">{[1, 2, 3, 4, 5].map(score => <button key={score} className={executionScore === score ? "selected" : ""} onClick={() => setExecutionScore(score)}>{score}/5</button>)}</div></Field><Field label="Overall day rating"><div className="pill-options">{[1, 2, 3, 4, 5].map(score => <button key={score} className={overallRating === score ? "selected" : ""} onClick={() => setOverallRating(score)}>{score}/5</button>)}</div></Field><div className="rule-list">{plannedRules.map((rule: any, index: number) => { const followed = followedRules.find((item: any) => item.id === rule.id)?.yes ?? false; return <label key={rule.id}><input type="checkbox" checked={followed} onChange={() => toggleFollowed(rule.id)} /> <span>{index + 1}. Followed: {rule.text}</span></label>; })}</div><Field label="What went well"><Textarea value={whatWentWell} onChange={event => setWhatWentWell(event.target.value)} rows={3} placeholder="Execution strengths and discipline wins…" /></Field><Field label="What went wrong"><Textarea value={whatWentWrong} onChange={event => setWhatWentWrong(event.target.value)} rows={3} placeholder="Mistakes, missed rules, or impulsive moments…" /></Field><Field label="Lesson for tomorrow"><Textarea value={lessons} onChange={event => setLessons(event.target.value)} rows={3} placeholder="One specific adjustment for the next session…" /></Field></div></section></div></>; }
+pages/GoldJournal.tsx:146:function ServerTradeLog({ stats, trades, allTrades, pagination, listLoading, listError, onRetry, account, dangerGoals, search, resultFilter, setSearch, setResultFilter, onPage, onNew, onDuplicate, onEdit, onDelete, onCash, onCsv, onExcel, onPdf, onClear }: any) { const openingBalance = stats.balance - allTrades.reduce((sum: number, trade: any) => sum + toNumber(trade.pnl), 0); const balanceById = new Map(buildRunningBalances(allTrades, openingBalance).map(row => [row.id, row.runningBalance])); const page = pagination?.page ?? 1; const pageSize = pagination?.pageSize ?? 12; const total = pagination?.total ?? 0; const pageCount = pagination?.pageCount ?? 1; return <><section className="trade-header"><div className="trade-title"><span className="eyebrow">{account?.name || "Loading account"}</span><h2>Execution, not memory.</h2><p>Every record is private to your account and updates across connected devices.</p></div><div className="header-actions"><Button variant="outline" onClick={() => onCash("DEPOSIT")}><CircleDollarSign size={15} /> Deposit</Button><Button variant="outline" onClick={() => onCash("WITHDRAW")}><Wallet size={15} /> Withdraw</Button><Button variant="outline" onClick={onDuplicate} disabled={!allTrades[0]}><RefreshCcw size={15} /> Duplicate last</Button><Button variant="outline" onClick={onPdf}><FileText size={15} /> PDF</Button><Button onClick={onNew}><Plus size={16} /> New Trade</Button></div></section><section className="stats-grid"><StatCard label="Balance" value={formatMoney(stats.balance)} detail="Starting balance + movements + P&L" /><StatCard label="Win rate" value={`${stats.winRate.toFixed(1)}%`} detail={`${stats.wins} wins · ${stats.losses} losses`} tone={stats.winRate >= 50 ? "green" : "neutral"} /><StatCard label="Total P&L" value={formatMoney(stats.pnl)} detail="Closed and open positions" tone={stats.pnl >= 0 ? "green" : "red"} /><StatCard label="Total trades" value={String(stats.total)} detail="Current account history" tone="neutral" /></section>{dangerGoals.length > 0 && <section className="goal-alert-strip"><ShieldAlert size={17} /><div><strong>{dangerGoals.some((entry: any) => entry.status === "BREACHED") ? "Goal breached" : "Goal at risk"}</strong><span>{dangerGoals.slice(0, 2).map((entry: any) => `${entry.goal.name}: ${entry.value.toFixed(1)} / ${entry.target}`).join(" · ")}</span></div></section>}<section className="panel trade-panel"><div className="toolbar"><div className="search-field"><Activity size={16} /><Input placeholder="Search session, level, note…" value={search} onChange={event => setSearch(event.target.value)} /></div><select value={resultFilter} onChange={event => setResultFilter(event.target.value)}><option value="ALL">All results</option>{results.map(result => <option key={result} value={result}>{result.replace("_", " ")}</option>)}</select><div className="toolbar-push"><Button variant="outline" onClick={onCsv}><Download size={14} /> CSV</Button><Button variant="outline" onClick={onExcel}><FileSpreadsheet size={14} /> Excel</Button><Button variant="outline" className="danger-button" onClick={onClear}><Trash2 size={14} /> Clear all</Button></div></div>{listError ? <QueryError error={listError} onRetry={onRetry} /> : listLoading && !trades.length ? <Loading /> : trades.length ? <><div className="trade-table-wrap"><table className="trade-table"><thead><tr><th>#</th><th>Date</th><th>Session</th><th>Side</th><th>Level</th><th>Setup</th><th>Risk</th><th>R:R</th><th>Result</th><th>P&L</th><th>Balance</th><th /></tr></thead><tbody>{trades.map((trade: any, index: number) => <tr key={trade.id}><td className="muted">{total - ((page - 1) * pageSize + index)}</td><td className="data-text">{formatDate(trade.tradeDate)}</td><td>{trade.session}</td><td><span className={`side-badge ${trade.direction.toLowerCase()}`}>{trade.direction}</span></td><td>{trade.level || "—"}</td><td>{trade.setupQuality || "—"}</td><td className="data-text">{formatMoney(trade.risk)}</td><td className="data-text">{formatRr(trade.risk, trade.reward)}</td><td><span className={`result-badge ${trade.result.toLowerCase()}`}>{trade.result.replace("_", " ")}</span></td><td className={`data-text pnl ${toNumber(trade.pnl) >= 0 ? "positive" : "negative"}`}>{formatMoney(trade.pnl)}</td><td className="data-text">{formatMoney(balanceById.get(trade.id) || 0)}</td><td><div className="row-actions"><button title="Edit trade" onClick={() => onEdit(trade)}><Settings2 size={16} /></button><button title="Delete trade" onClick={() => onDelete(trade.id)}><Trash2 size={16} /></button></div></td></tr>)}</tbody></table></div>{pageCount > 1 && <div className="table-pagination"><span>Page {page} of {pageCount} · {total} trades</span><div><Button variant="outline" size="sm" disabled={page === 1 || listLoading} onClick={() => onPage(page - 1)}>Previous</Button><Button variant="outline" size="sm" disabled={page === pageCount || listLoading} onClick={() => onPage(page + 1)}>Next</Button></div></div>}</> : <EmptyState title={search || resultFilter !== "ALL" ? "No trades match this filter." : "Your trade log is ready."} copy={search || resultFilter !== "ALL" ? "Clear or adjust the filters to see another part of your journal." : "Add the first completed trade to begin measuring performance, discipline, and risk."} action={!search && resultFilter === "ALL" ? <Button onClick={onNew}><Plus size={16} /> Log first trade</Button> : undefined} />}</section></>; }
+pages/GoldJournal.tsx:148:function TradeLog({ stats, trades, account, dangerGoals, search, resultFilter, setSearch, setResultFilter, onNew, onDuplicate, onEdit, onDelete, onCash, onCsv, onExcel, onPdf, onClear }: any) {
+pages/GoldJournal.tsx:158:function MissedView({ rows, account, refresh }: any) { const createSkipped = trpc.skipped.create.useMutation(); const [open, setOpen] = useState(false); const [form, setForm] = useState({ date: dateInput(), session: getPktSession(), direction: "BUY", reason: "Fear - SL looked too big", confidence: "3", outcome: "TP Hit - Full", missed: "", notes: "" }); return <><section className="section-heading"><div><span className="eyebrow">OPPORTUNITY REVIEW</span><h2>Missed / skipped trades</h2><p>Track what you saw, why you passed, and what happened afterwards.</p></div><Button onClick={() => setOpen(true)}><Plus size={16} /> Log Skipped Trade</Button></section><div className="stats-grid compact"><StatCard label="Total skipped" value={String(rows.length)} detail="Recorded opportunities" tone="neutral" /><StatCard label="Estimated missed" value={formatMoney(rows.reduce((sum: number, row: any) => sum + toNumber(row.estimatedMissed), 0))} detail="Potential, not realized" /><StatCard label="Top reason" value={rows[0]?.skipReason || "—"} detail="Based on entries" tone="neutral" /></div><section className="panel">{rows.length ? <div className="trade-table-wrap"><table className="trade-table"><thead><tr><th>Date</th><th>Session</th><th>Direction</th><th>Reason</th><th>Confidence</th><th>Outcome</th><th>Est. missed</th></tr></thead><tbody>{rows.map((row: any) => <tr key={row.id}><td className="data-text">{formatDate(row.tradeDate)}</td><td>{row.session}</td><td>{row.direction}</td><td>{row.skipReason}</td><td>{row.confidence}/5</td><td>{row.outcome}</td><td className="positive data-text">{formatMoney(row.estimatedMissed)}</td></tr>)}</tbody></table></div> : <EmptyState title="No skipped opportunities yet." copy="Logging a skipped setup turns a moment of uncertainty into reviewable evidence." />}</section><Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>Log skipped trade</DialogTitle><DialogDescription>Capture the missed opportunity without diluting the main trade log.</DialogDescription></DialogHeader><div className="stacked-fields"><Field label="Date"><Input type="date" value={form.date} onChange={event => setForm({ ...form, date: event.target.value })} /></Field><Field label="Session"><select value={form.session} onChange={event => setForm({ ...form, session: event.target.value })}>{sessions.map(item => <option key={item}>{item}</option>)}</select></Field><Field label="Skip reason"><Input value={form.reason} onChange={event => setForm({ ...form, reason: event.target.value })} /></Field><Field label="Outcome"><Input value={form.outcome} onChange={event => setForm({ ...form, outcome: event.target.value })} /></Field><Field label="Estimated $ missed"><Input type="number" value={form.missed} onChange={event => setForm({ ...form, missed: event.target.value })} /></Field><Field label="Notes"><Textarea value={form.notes} onChange={event => setForm({ ...form, notes: event.target.value })} /></Field></div><div className="dialog-actions"><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={async () => { if (!account) return; await createSkipped.mutateAsync({ accountId: account.id, tradeDate: new Date(`${form.date}T12:00:00`).getTime(), session: form.session, level: "", timeframe: "", direction: form.direction as "BUY" | "SELL", skipReason: form.reason, confidence: Number(form.confidence), outcome: form.outcome, estimatedMissed: Number(form.missed || 0), notes: form.notes }); toast.success("Skipped trade logged."); setOpen(false); refresh(); }}>Save skipped trade</Button></div></DialogContent></Dialog></>; }
+pages/GoldJournal.tsx:160:function AnalysisView({ trades, stats }: any) { const data = sessions.map(session => ({ session: session.replace("Post-", "P-"), pnl: trades.filter((trade: any) => trade.session === session).reduce((sum: number, trade: any) => sum + toNumber(trade.pnl), 0) })); return <><section className="section-heading"><div><span className="eyebrow">PATTERN RECOGNITION</span><h2>Performance analysis</h2><p>Use journal history to see where your edge is earned—or given back.</p></div></section><div className="analysis-grid"><section className="panel chart-panel"><div className="panel-title"><div><span>NET P&L BY SESSION</span><h3>Session performance</h3></div><BarChart3 size={18} /></div>{trades.length ? <ResponsiveContainer width="100%" height={300}><BarChart data={data}><CartesianGrid vertical={false} stroke="rgba(255,255,255,.06)" /><XAxis dataKey="session" tick={{ fill: "#7f8790", fontSize: 11 }} axisLine={false} tickLine={false} /><YAxis tick={{ fill: "#7f8790", fontSize: 11 }} axisLine={false} tickLine={false} /><Tooltip contentStyle={{ background: "#171d24", border: "1px solid #303a45", borderRadius: "10px" }} /><Bar dataKey="pnl" fill="#e9b64b" radius={[5, 5, 0, 0]} /></BarChart></ResponsiveContainer> : <EmptyState title="Charts appear with your data." copy="Complete trades will be grouped by session and execution context." />}</section><section className="panel insight-panel"><div className="panel-title"><div><span>QUICK READ</span><h3>Current signal</h3></div><Zap size={18} /></div><div className="insight-number data-text">{stats.winRate.toFixed(1)}%</div><p>Current win rate across {stats.total} recorded trades.</p><div className="metric-list"><span>Net P&L <b className="data-text">{formatMoney(stats.pnl)}</b></span><span>Wins / losses <b className="data-text">{stats.wins} / {stats.losses}</b></span></div></section></div><section className="panel heatmap-panel"><div className="panel-title"><div><span>PERFORMANCE HEATMAP</span><h3>By session</h3></div></div><div className="heatmap-table">{sessions.map(session => { const rows = trades.filter((trade: any) => trade.session === session); const rate = rows.length ? rows.filter((row: any) => row.result === "WIN").length / rows.length * 100 : 0; return <div key={session}><strong>{session}</strong><span>{rows.length} trades</span><i className={rate > 60 ? "good" : rate < 40 && rows.length ? "bad" : "neutral"} style={{ width: `${Math.max(10, rate)}%` }} /><b className="data-text">{rows.length ? `${rate.toFixed(0)}%` : "—"}</b><em className="data-text">{formatMoney(rows.reduce((sum: number, row: any) => sum + toNumber(row.pnl), 0))}</em></div>; })}</div></section></>; }
+pages/GoldJournal.tsx:162:function GoalsView({ goals, trades, onAdd, onToggle, onDelete }: any) { const groups = ["DAILY", "WEEKLY", "MONTHLY"].map(period => ({ period, entries: goals.filter((goal: any) => goal.period === period).map((goal: any) => ({ goal, ...goalState(goal, trades) })) })); const all = groups.flatMap(group => group.entries); return <><section className="section-heading"><div><span className="eyebrow">DISCIPLINE SYSTEM</span><h2>Goals</h2><p>Period-aware guardrails begin as pending—not failed—until data exists.</p></div><Button onClick={onAdd}><Plus size={16} /> Add Custom Goal</Button></section><div className="stats-grid compact"><StatCard label="Total active" value={String(all.filter((entry: any) => entry.goal.active).length)} detail="Across all periods" /><StatCard label="Met" value={String(all.filter((entry: any) => entry.status === "MET").length)} detail="Current period" tone="green" /><StatCard label="Breached" value={String(all.filter((entry: any) => entry.status === "BREACHED").length)} detail="Needs attention" tone="red" /><StatCard label="At risk" value={String(all.filter((entry: any) => entry.status === "AT RISK").length)} detail="Approaching limit" /></div>{groups.map(group => <section className="panel goals-panel" key={group.period}><div className="panel-title"><div><span>{group.period} GOALS</span><h3>{group.period.charAt(0) + group.period.slice(1).toLowerCase()} goals</h3></div><small>{group.period === "DAILY" ? "Resets midnight PKT" : group.period === "WEEKLY" ? "Resets Monday PKT" : "Resets 1st of month PKT"}</small></div><div className="goal-grid">{group.entries.map((entry: any) => <div className={`goal-card ${entry.status.toLowerCase()}`} key={entry.goal.id}><div className="goal-card-head"><div><strong>{entry.goal.name}</strong><p>{entry.goal.description}</p></div><span className={`goal-status ${entry.status.toLowerCase()}`}>{entry.status}</span></div><div className="goal-value data-text"><b>{entry.value.toFixed(entry.goal.metric.includes("rate") ? 1 : 2)}</b><span> / {entry.target}</span></div><div className="progress-track"><i style={{ width: `${entry.percentage}%` }} /></div><div className="goal-footer"><button onClick={() => onToggle(entry.goal)}>{entry.goal.active ? "Pause" : "Activate"}</button>{entry.goal.isCustom && <button className="delete-mini" onClick={() => onDelete(entry.goal)}><Trash2 size={14} /></button>}</div></div>)}</div></section>)}</>; }
+pages/GoldJournal.tsx:164:function CalendarView({ trades }: any) { const [month, setMonth] = useState(new Date()); const first = new Date(month.getFullYear(), month.getMonth(), 1); const last = new Date(month.getFullYear(), month.getMonth() + 1, 0); const days = Array.from({ length: last.getDate() }, (_, index) => new Date(month.getFullYear(), month.getMonth(), index + 1)); return <><section className="section-heading"><div><span className="eyebrow">P&L RHYTHM</span><h2>PnL Calendar</h2><p>Compact daily performance from the selected account.</p></div><div className="month-controls"><Button variant="outline" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}>Prev</Button><span>{month.toLocaleString("en-US", { month: "long", year: "numeric" })}</span><Button variant="outline" onClick={() => setMonth(new Date())}>This month</Button><Button variant="outline" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}>Next</Button></div></section><section className="panel calendar-panel"><div className="calendar-weekdays">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(day => <span key={day}>{day}</span>)}</div><div className="pnl-calendar">{Array.from({ length: first.getDay() }, (_, index) => <div className="calendar-blank" key={index} />)}{days.map(day => { const rows = trades.filter((trade: any) => new Date(trade.tradeDate).toDateString() === day.toDateString()); const pnl = rows.reduce((sum: number, trade: any) => sum + toNumber(trade.pnl), 0); return <div className={`day-cell ${rows.length ? pnl >= 0 ? "gain" : "loss" : ""}`} key={day.toISOString()}><span>{day.getDate()}</span>{rows.length ? <><strong className="data-text">{formatMoney(pnl)}</strong><small>{rows.length} trade{rows.length > 1 ? "s" : ""}</small></> : <small>No trades</small>}</div>; })}</div></section></>; }
+pages/GoldJournal.tsx:166:function PlanView({ account }: any) { const [planDate, setPlanDate] = useState(dateInput()); const [bias, setBias] = useState("Neutral"); const [notes, setNotes] = useState(""); const savePlan = trpc.plans.save.useMutation(); return <><section className="section-heading"><div><span className="eyebrow">PROCESS OVER OUTCOME</span><h2>Plan & Execution</h2><p>Write the plan before the session, then review execution without rewriting history.</p></div><div className="date-control"><Input type="date" value={planDate} onChange={event => setPlanDate(event.target.value)} /><Button variant="outline" onClick={() => setPlanDate(dateInput())}>Today</Button></div></section><div className="plan-layout"><section className="panel mini-calendar"><div className="panel-title"><div><span>MONTH SNAPSHOT</span><h3>{new Date(`${planDate}T12:00:00`).toLocaleString("en-US", { month: "long", year: "numeric" })}</h3></div></div><div className="mini-day-grid">{Array.from({ length: 30 }, (_, index) => <button key={index + 1} className={Number(planDate.slice(-2)) === index + 1 ? "selected" : ""} onClick={() => setPlanDate(`${planDate.slice(0, 8)}${String(index + 1).padStart(2, "0")}`)}>{index + 1}</button>)}</div></section><section className="panel plan-editor"><div className="plan-day-head"><div><span className="eyebrow">NEW ENTRY</span><h3>{new Date(`${planDate}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long" })}</h3></div><Button disabled={!account || savePlan.isPending} onClick={async () => { if (!account) return; await savePlan.mutateAsync({ accountId: account.id, planDate: new Date(`${planDate}T12:00:00`).getTime(), preBias: bias, keyLevels: "", sessionFocus: [], planNotes: notes, rulesPlanned: defaultRules.map((text, index) => ({ id: String(index), text, checked: true })), emotionStart: [], emotionEnd: [], executionScore: null, rulesFollowed: [], whatWentWell: "", whatWentWrong: "", lessons: "", overallRating: null }); toast.success("Plan saved for this day."); }}>Save plan</Button></div><div className="form-section"><span className="section-label">A1. TODAY'S BIAS</span><div className="pill-options">{["Bullish", "Bearish", "Neutral", "No clear bias"].map(item => <button key={item} className={bias === item ? "selected" : ""} onClick={() => setBias(item)}>{item}</button>)}</div></div><div className="form-section"><span className="section-label">A2. PLAN NOTES</span><Textarea value={notes} onChange={event => setNotes(event.target.value)} rows={5} placeholder="Write your game plan for today's session…" /></div><div className="form-section"><span className="section-label">A3. TRADING RULES</span><div className="rule-list">{defaultRules.map((rule, index) => <label key={rule}><input defaultChecked type="checkbox" /> <span>{index + 1}. {rule}</span></label>)}</div></div></section></div></>; }
+pages/GoldJournal.tsx:168:function MentorView({ trades, stats, account }: any) { const [key, setKey] = useState(() => localStorage.getItem("gj_openrouter_key") || ""); const [report, setReport] = useState(() => localStorage.getItem("gj_last_ai_report") || ""); const [busy, setBusy] = useState(false); const analyze = async () => { if (!key) { toast.error("Add an OpenRouter key first. It stays only in this browser."); return; } setBusy(true); try { const payload = { account: account?.name, summary: stats, trades: trades.slice(0, 30).map((trade: any) => ({ date: formatDate(trade.tradeDate), result: trade.result, pnl: toNumber(trade.pnl), session: trade.session, notes: sanitize(trade.notes), emotions: [sanitize(trade.emotionBefore), sanitize(trade.emotionDuring), sanitize(trade.emotionAfter)] })) }; const response = await fetch("https://openrouter.ai/api/v1/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ model: "openai/gpt-4o-mini", messages: [{ role: "system", content: "You are a brutally honest XAUUSD trading performance analyst. Analyze Roman Urdu and English notes. Return a concise report with Core Numbers, Emotional Analysis, Trade Behavior, Blind Spots, and exactly 3 next-week rules with RULE, WHY and MEASURE. If trades are under 20, begin with a reliability warning." }, { role: "user", content: JSON.stringify(payload) }] }) }); if (!response.ok) throw new Error(`OpenRouter ${response.status}: ${await response.text()}`); const result = await response.json(); const next = result.choices?.[0]?.message?.content || "No report returned."; setReport(next); localStorage.setItem("gj_last_ai_report", next); toast.success("Mentor report complete."); } catch (error: any) { toast.error(error.message || "AI analysis could not be completed."); } finally { setBusy(false); } }; return <><section className="section-heading"><div><span className="eyebrow">BEHAVIORAL INTELLIGENCE</span><h2>AI Mentor</h2><p>A data-bound review using your own OpenRouter key, saved only in this browser.</p></div></section><div className="mentor-grid"><section className="panel key-panel"><div className="panel-title"><div><span>PRIVATE LOCAL KEY</span><h3>OpenRouter connection</h3></div><ShieldAlert size={18} /></div><p>{MENTOR_LOCAL_KEY_NOTICE}</p><Input type="password" value={key} onChange={event => setKey(event.target.value)} placeholder="sk-or-v1-…" /><div className="key-actions"><Button onClick={() => { localStorage.setItem("gj_openrouter_key", key); toast.success("Key saved locally."); }}>Save key</Button><Button variant="outline" onClick={() => { localStorage.removeItem("gj_openrouter_key"); setKey(""); }}>Clear key</Button></div></section><section className="panel mentor-run"><div className="mentor-icon"><Bot size={30} /></div><h3>Trading report card</h3><p>The mentor receives aggregated numbers and recent notes to surface behavioral patterns.</p><Button size="lg" disabled={busy} onClick={analyze}>{busy ? "Reading your trades…" : "Analyze journal"}</Button></section></div>{report && <section className="panel report-panel"><div className="panel-title"><div><span>SAVED REPORT</span><h3>Gold Journal — Trading Report Card</h3></div><Button variant="outline" onClick={() => navigator.clipboard.writeText(report).then(() => toast.success("Report copied."))}>Copy Report</Button></div><pre>{report}</pre></section>}</>; }
+pages/GoldJournal.tsx:171:export function OptionsView({ user, account, accounts, onAccount, onCreate, onClear }: any) {
+pages/GoldJournal.tsx:184:function TradeDialog({ open, setOpen, form, setForm, editing, onSave, pending, screenshot, setScreenshot, progress }: any) { const fileRef = useRef<HTMLInputElement>(null); return <Dialog open={open} onOpenChange={setOpen}><DialogContent className="trade-dialog"><DialogHeader><DialogTitle>{editing ? "Edit trade" : "New trade"}</DialogTitle><DialogDescription>{editing ? "Update the journal detail and retain the original session." : "Session is detected from Pakistan Standard Time and can be overridden."}</DialogDescription></DialogHeader><div className="trade-form"><FormSection title="Trade details"><Field label="Date"><Input type="date" value={form.tradeDate} max={dateInput()} onChange={event => setForm({ ...form, tradeDate: event.target.value })} /></Field><Field label="Session"><select value={form.session} onChange={event => setForm({ ...form, session: event.target.value })}>{sessions.map(item => <option key={item}>{item}</option>)}</select></Field><Field label="Direction"><select value={form.direction} onChange={event => setForm({ ...form, direction: event.target.value })}><option>BUY</option><option>SELL</option></select></Field><Field label="Result"><select value={form.result} onChange={event => setForm({ ...form, result: event.target.value })}>{results.map(item => <option key={item} value={item}>{item.replace("_", " ")}</option>)}</select></Field></FormSection><FormSection title="Strategy"><Field label="Level"><select value={form.level} onChange={event => setForm({ ...form, level: event.target.value })}><option value="">Select level</option>{levels.map(item => <option key={item}>{item}</option>)}</select></Field><Field label="Timeframe"><select value={form.timeframe} onChange={event => setForm({ ...form, timeframe: event.target.value })}>{["1m", "5m", "15m", "H1", "4H"].map(item => <option key={item}>{item}</option>)}</select></Field><Field label="Setup quality"><select value={form.setupQuality} onChange={event => setForm({ ...form, setupQuality: event.target.value })}>{["A+", "A", "B"].map(item => <option key={item}>{item}</option>)}</select></Field><Field label="Confirmation"><Input value={form.confirmationType} placeholder="BOS, CHoCH…" onChange={event => setForm({ ...form, confirmationType: event.target.value })} /></Field></FormSection><FormSection title="Execution"><Field label="Execution type"><select value={form.executionType} onChange={event => setForm({ ...form, executionType: event.target.value })}>{executionTypes.map(item => <option key={item}>{item}</option>)}</select></Field><Field label="Market condition"><Input value={form.marketCondition} placeholder="Bullish, ranging…" onChange={event => setForm({ ...form, marketCondition: event.target.value })} /></Field><Field label="Patience 1–5"><Input type="number" min="1" max="5" value={form.patienceScore} onChange={event => setForm({ ...form, patienceScore: event.target.value })} /></Field></FormSection><FormSection title="Risk"><Field label="Risk $"><Input type="number" min="0" step="0.01" value={form.risk} onChange={event => setForm({ ...form, risk: event.target.value })} /></Field><Field label="Reward $"><Input type="number" min="0" step="0.01" value={form.reward} onChange={event => setForm({ ...form, reward: event.target.value })} /></Field><Field label="P&L $"><Input type="number" step="0.01" value={form.pnl} onChange={event => setForm({ ...form, pnl: event.target.value })} /></Field><div className="rr-live"><span>LIVE R:R</span><strong className="data-text">{formatRr(form.risk, form.reward)}</strong></div></FormSection><FormSection title="Screenshot"><div className="upload-box" onClick={() => fileRef.current?.click()}><ImagePlus size={20} /><div><strong>{screenshot ? screenshot.name : "Click to upload a screenshot"}</strong><span>JPG, PNG or WEBP · 5MB maximum</span></div><input ref={fileRef} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { const file = event.target.files?.[0]; if (!file) return; if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { toast.error("Use a JPG, PNG, or WEBP screenshot."); return; } if (file.size > 5 * 1024 * 1024) { toast.error("Screenshot must be 5MB or smaller."); return; } setScreenshot(file); }} /></div>{progress > 0 && <div className="upload-progress"><i style={{ width: `${progress}%` }} /></div>}</FormSection><FormSection title="Emotions"><Field label="Before trade"><Textarea value={form.emotionBefore} placeholder="Calm, focused, dar raha tha…" onChange={event => setForm({ ...form, emotionBefore: event.target.value })} /></Field><Field label="During trade"><Textarea value={form.emotionDuring} placeholder="What were you thinking?" onChange={event => setForm({ ...form, emotionDuring: event.target.value })} /></Field><Field label="After trade"><Textarea value={form.emotionAfter} placeholder="Satisfied, gussa aya, should have held…" onChange={event => setForm({ ...form, emotionAfter: event.target.value })} /></Field></FormSection><FormSection title="Notes"><Textarea value={form.notes} rows={4} placeholder="English + Roman Urdu supported…" onChange={event => setForm({ ...form, notes: event.target.value })} /></FormSection></div><div className="dialog-actions"><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button disabled={pending} onClick={onSave}>{pending ? "Saving…" : editing ? "Save changes" : "Save trade"}</Button></div></DialogContent></Dialog>; }
+pages/GoldJournal.tsx:185:function CashDialog({ type, setType, amount, setAmount, note, setNote, onSave, pending }: any) { return <Dialog open={Boolean(type)} onOpenChange={open => !open && setType(null)}><DialogContent><DialogHeader><DialogTitle>{type === "DEPOSIT" ? "Deposit funds" : "Withdraw funds"}</DialogTitle><DialogDescription>The cash movement recalculates balance immediately.</DialogDescription></DialogHeader><div className="stacked-fields"><Field label="Amount"><Input autoFocus type="number" min="0.01" value={amount} onChange={event => setAmount(event.target.value)} /></Field><Field label="Note"><Textarea value={note} onChange={event => setNote(event.target.value)} /></Field></div><div className="dialog-actions"><Button variant="outline" onClick={() => setType(null)}>Cancel</Button><Button disabled={pending || Number(amount) <= 0} onClick={onSave}>{pending ? "Saving…" : "Save movement"}</Button></div></DialogContent></Dialog>; }
+pages/GoldJournal.tsx:186:function GoalDialog({ open, setOpen, draft, setDraft, onSave }: any) { return <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>Add custom goal</DialogTitle><DialogDescription>Create a trackable goal for the active account.</DialogDescription></DialogHeader><div className="stacked-fields"><Field label="Name"><Input value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} /></Field><Field label="Description"><Input value={draft.description} onChange={event => setDraft({ ...draft, description: event.target.value })} /></Field><Field label="Period"><select value={draft.period} onChange={event => setDraft({ ...draft, period: event.target.value })}><option value="DAILY">Daily</option><option value="WEEKLY">Weekly</option><option value="MONTHLY">Monthly</option></select></Field><Field label="Metric"><select value={draft.metric} onChange={event => setDraft({ ...draft, metric: event.target.value })}><option value="trade_count">Trade count</option><option value="net_pnl">Net P&L</option><option value="win_rate">Win rate</option><option value="avg_rr">Average R:R</option></select></Field><Field label="Direction"><select value={draft.comparison} onChange={event => setDraft({ ...draft, comparison: event.target.value })}><option value="GTE">At least</option><option value="LTE">At most</option></select></Field><Field label="Target"><Input type="number" min="0" value={draft.target} onChange={event => setDraft({ ...draft, target: event.target.value })} /></Field></div><div className="dialog-actions"><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={onSave}>Add goal</Button></div></DialogContent></Dialog>; }
+pages/GoldJournal.tsx:187:function InstallDialog({ open, setOpen }: any) { return <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>Install Gold Journal</DialogTitle><DialogDescription>Add the journal to your device for a focused, standalone experience.</DialogDescription></DialogHeader><div className="install-instructions"><p><b>Android / Desktop:</b> use Install App in the browser menu or address bar.</p><p><b>iPhone / iPad:</b> tap Share, then choose <b>Add to Home Screen</b>.</p></div><Button onClick={() => setOpen(false)}>Done</Button></DialogContent></Dialog>; }
+pages/GoldJournal.tsx:188:function SplashScreen() { return <div className="splash-screen"><div className="splash-content"><GoldMark size={82} /><strong>GOLD JOURNAL</strong><span>PRIVATE TRADING INTELLIGENCE</span><div className="loading-line"><i /></div></div></div>; }
+pages/GoldJournal.tsx:189:export function LoginScreen() { const availability = trpc.auth.oauthStatus.useQuery(undefined, { retry: false, refetchOnWindowFocus: false }); const authRecovery = useOauthRecoveryState(availability); return <div className="login-screen"><div className="login-noise" /><section className="login-card"><div className="login-lockup"><GoldMark size={58} /><div><span>AU / XAUUSD</span><strong>Gold Journal</strong></div></div><span className="eyebrow">PRIVATE PERFORMANCE JOURNAL</span><h1>Trade with intent.<br /><em>Review with truth.</em></h1><p>Private execution records for disciplined decisions. Accounts stay isolated; every review is yours alone.</p><div className="instrument-readout"><span>XAUUSD</span><span className="data-text">PKT UTC+5</span><span className="data-text">RISK / REVIEW</span></div>{authRecovery.unavailable && <div className="login-service-alert" role="alert"><ShieldAlert size={16} /><div><strong>Secure sign-in is temporarily unavailable.</strong><p>Your journal remains private and unchanged. Recheck the sign-in service, then continue once it is available.</p></div></div>}<Button size="lg" disabled={authRecovery.checking} onClick={authRecovery.unavailable ? authRecovery.retry : startLogin}><ShieldAlert size={17} /> {authRecovery.checking ? "Checking secure sign-in…" : authRecovery.unavailable ? "Recheck sign-in service" : "Enter private journal"}</Button><small>Authenticated access · private account data · cloud-backed</small></section><div className="login-footnote"><span>GOLD JOURNAL</span><span>AU / XAUUSD JOURNAL</span></div></div>; }
+pages/Home.tsx:3:export default function Home() {
+pages/NotFound.tsx:6:export default function NotFound() {
+components/AIChatBox.tsx:113:export function AIChatBox({
+components/AccountRenameControl.tsx:11:export function AccountRenameControl() {
+components/BulkPdfExporter.tsx:22:export function pdfTradeCardFields(trade: any) { return [["Session", trade.session], ["Level", trade.level || "—"], ["Timeframe", trade.timeframe || "—"], ["Setup", trade.setupQuality || "—"], ["Risk", formatMoney(trade.risk)], ["Reward", formatMoney(trade.reward)], ["R:R", formatRr(trade.risk, trade.reward)], ["P&L", formatMoney(trade.pnl)]] as const; }
+components/BulkPdfExporter.tsx:24:export function BulkPdfExporter() {
+components/DashboardLayout.tsx:35:const SIDEBAR_WIDTH_KEY = "sidebar-width";
+components/DashboardLayout.tsx:36:const DEFAULT_WIDTH = 280;
+components/DashboardLayout.tsx:37:const MIN_WIDTH = 200;
+components/DashboardLayout.tsx:38:const MAX_WIDTH = 480;
+components/DashboardLayout.tsx:40:export default function DashboardLayout({
+components/DashboardLayout.tsx:103:function DashboardLayoutContent({
+components/DashboardLayoutSkeleton.tsx:3:export function DashboardLayoutSkeleton() {
+components/ManusDialog.tsx:21:export function ManusDialog({
+components/Map.tsx:89:const API_KEY = import.meta.env.VITE_FRONTEND_FORGE_API_KEY;
+components/Map.tsx:90:const FORGE_BASE_URL =
+components/Map.tsx:93:const MAPS_PROXY_URL = `${FORGE_BASE_URL}/v1/maps/proxy`;
+components/Map.tsx:119:export function MapView({
+components/TradingAutomationConsole.tsx:15:export function TradingAutomationConsole({ trades }: { trades: EdgeTrade[] }) {
+components/NotificationCenter.tsx:8:export function NotificationCenter({ triggerClassName = "notification-fab" }: { triggerClassName?: string }) {
+components/OptionListManager.tsx:12:export function OptionListManager() {
+components/PlanExecutionEditor.tsx:15:function Field({ label, children, className = "" }: { label: string; children: React.ReactNode; className?: string }) { return <label className={`field ${className}`}><span>{label}</span>{children}</label>; }
+components/PlanExecutionEditor.tsx:16:function Score({ label, value, onChange }: { label: string; value: number | null; onChange: (value: number) => void }) { return <Field label={label}><div className="score-strip">{[1, 2, 3, 4, 5].map(score => <button type="button" key={score} className={value === score ? "selected" : ""} onClick={() => onChange(score)} aria-label={`${label}: ${score} out of 5`}>{score}</button>)}</div></Field>; }
+components/PlanExecutionEditor.tsx:17:function Section({ number, title, copy, icon: Icon, children }: { number: string; title: string; copy: string; icon: typeof ClipboardCheck; children: React.ReactNode }) { return <section className="professional-plan-section"><header><Icon size={16} /><div><span>{number} · {title}</span><p>{copy}</p></div></header>{children}</section>; }
+components/PlanExecutionEditor.tsx:19:export function PlanExecutionEditor({ account, plans = [], tradingRules = [], onManageRules, onSaved }: any) {
+components/PwaUpdateBanner.tsx:5:export function PwaUpdateBanner() {
+components/ThemeToggle.tsx:5:export function ThemeToggle() {
+components/ui/accordion.tsx:7:function Accordion({
+components/ui/accordion.tsx:13:function AccordionItem({
+components/ui/accordion.tsx:26:function AccordionTrigger({
+components/ui/accordion.tsx:48:function AccordionContent({
+components/ui/alert-dialog.tsx:7:function AlertDialog({
+components/ui/alert-dialog.tsx:13:function AlertDialogTrigger({
+components/ui/alert-dialog.tsx:21:function AlertDialogPortal({
+components/ui/alert-dialog.tsx:29:function AlertDialogOverlay({
+components/ui/alert-dialog.tsx:45:function AlertDialogContent({
+components/ui/alert-dialog.tsx:64:function AlertDialogHeader({
+components/ui/alert-dialog.tsx:77:function AlertDialogFooter({
+components/ui/alert-dialog.tsx:93:function AlertDialogTitle({
+components/ui/alert-dialog.tsx:106:function AlertDialogDescription({
+components/ui/alert-dialog.tsx:119:function AlertDialogAction({
+components/ui/alert-dialog.tsx:131:function AlertDialogCancel({
+components/ui/alert.tsx:22:function Alert({
+components/ui/alert.tsx:37:function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/alert.tsx:50:function AlertDescription({
+components/ui/aspect-ratio.tsx:3:function AspectRatio({
+components/ui/avatar.tsx:6:function Avatar({
+components/ui/avatar.tsx:22:function AvatarImage({
+components/ui/avatar.tsx:35:function AvatarFallback({
+components/ui/badge.tsx:28:function Badge({
+components/ui/breadcrumb.tsx:7:function Breadcrumb({ ...props }: React.ComponentProps<"nav">) {
+components/ui/breadcrumb.tsx:11:function BreadcrumbList({ className, ...props }: React.ComponentProps<"ol">) {
+components/ui/breadcrumb.tsx:24:function BreadcrumbItem({ className, ...props }: React.ComponentProps<"li">) {
+components/ui/breadcrumb.tsx:34:function BreadcrumbLink({
+components/ui/breadcrumb.tsx:52:function BreadcrumbPage({ className, ...props }: React.ComponentProps<"span">) {
+components/ui/breadcrumb.tsx:65:function BreadcrumbSeparator({
+components/ui/breadcrumb.tsx:83:function BreadcrumbEllipsis({
+components/ui/button-group.tsx:24:function ButtonGroup({
+components/ui/button-group.tsx:40:function ButtonGroupText({
+components/ui/button-group.tsx:60:function ButtonGroupSeparator({
+components/ui/button.tsx:39:function Button({
+components/ui/calendar.tsx:12:function Calendar({
+components/ui/calendar.tsx:173:function CalendarDayButton({
+components/ui/card.tsx:5:function Card({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/card.tsx:18:function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/card.tsx:31:function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/card.tsx:41:function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/card.tsx:51:function CardAction({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/card.tsx:64:function CardContent({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/card.tsx:74:function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/carousel.tsx:31:const CarouselContext = React.createContext<CarouselContextProps | null>(null);
+components/ui/carousel.tsx:43:function Carousel({
+components/ui/carousel.tsx:133:function CarouselContent({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/carousel.tsx:154:function CarouselItem({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/carousel.tsx:172:function CarouselPrevious({
+components/ui/carousel.tsx:202:function CarouselNext({
+components/ui/chart.tsx:7:const THEMES = { light: "", dark: ".dark" } as const;
+components/ui/chart.tsx:23:const ChartContext = React.createContext<ChartContextProps | null>(null);
+components/ui/chart.tsx:35:function ChartContainer({
+components/ui/chart.tsx:70:const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
+components/ui/chart.tsx:103:const ChartTooltip = RechartsPrimitive.Tooltip;
+components/ui/chart.tsx:105:function ChartTooltipContent({
+components/ui/chart.tsx:251:const ChartLegend = RechartsPrimitive.Legend;
+components/ui/chart.tsx:253:function ChartLegendContent({
+components/ui/checkbox.tsx:7:function Checkbox({
+components/ui/collapsible.tsx:3:function Collapsible({
+components/ui/collapsible.tsx:9:function CollapsibleTrigger({
+components/ui/collapsible.tsx:20:function CollapsibleContent({
+components/ui/command.tsx:16:function Command({
+components/ui/command.tsx:32:function CommandDialog({
+components/ui/command.tsx:63:function CommandInput({
+components/ui/command.tsx:85:function CommandList({
+components/ui/command.tsx:101:function CommandEmpty({
+components/ui/command.tsx:113:function CommandGroup({
+components/ui/command.tsx:129:function CommandSeparator({
+components/ui/command.tsx:142:function CommandItem({
+components/ui/command.tsx:158:function CommandShortcut({
+components/ui/context-menu.tsx:7:function ContextMenu({
+components/ui/context-menu.tsx:13:function ContextMenuTrigger({
+components/ui/context-menu.tsx:21:function ContextMenuGroup({
+components/ui/context-menu.tsx:29:function ContextMenuPortal({
+components/ui/context-menu.tsx:37:function ContextMenuSub({
+components/ui/context-menu.tsx:43:function ContextMenuRadioGroup({
+components/ui/context-menu.tsx:54:function ContextMenuSubTrigger({
+components/ui/context-menu.tsx:78:function ContextMenuSubContent({
+components/ui/context-menu.tsx:94:function ContextMenuContent({
+components/ui/context-menu.tsx:112:function ContextMenuItem({
+components/ui/context-menu.tsx:135:function ContextMenuCheckboxItem({
+components/ui/context-menu.tsx:161:function ContextMenuRadioItem({
+components/ui/context-menu.tsx:185:function ContextMenuLabel({
+components/ui/context-menu.tsx:205:function ContextMenuSeparator({
+components/ui/context-menu.tsx:218:function ContextMenuShortcut({
+components/ui/dialog.tsx:7:const DialogCompositionContext = React.createContext<{
+components/ui/dialog.tsx:19:export const useDialogComposition = () =>
+components/ui/dialog.tsx:22:function Dialog({
+components/ui/dialog.tsx:56:function DialogTrigger({
+components/ui/dialog.tsx:62:function DialogPortal({
+components/ui/dialog.tsx:68:function DialogClose({
+components/ui/dialog.tsx:74:function DialogOverlay({
+components/ui/dialog.tsx:92:function DialogContent({
+components/ui/dialog.tsx:148:function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/dialog.tsx:158:function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/dialog.tsx:171:function DialogTitle({
+components/ui/dialog.tsx:184:function DialogDescription({
+components/ui/drawer.tsx:6:function Drawer({
+components/ui/drawer.tsx:12:function DrawerTrigger({
+components/ui/drawer.tsx:18:function DrawerPortal({
+components/ui/drawer.tsx:24:function DrawerClose({
+components/ui/drawer.tsx:30:function DrawerOverlay({
+components/ui/drawer.tsx:46:function DrawerContent({
+components/ui/drawer.tsx:73:function DrawerHeader({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/drawer.tsx:86:function DrawerFooter({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/drawer.tsx:96:function DrawerTitle({
+components/ui/drawer.tsx:109:function DrawerDescription({
+components/ui/dropdown-menu.tsx:7:function DropdownMenu({
+components/ui/dropdown-menu.tsx:13:function DropdownMenuPortal({
+components/ui/dropdown-menu.tsx:21:function DropdownMenuTrigger({
+components/ui/dropdown-menu.tsx:32:function DropdownMenuContent({
+components/ui/dropdown-menu.tsx:52:function DropdownMenuGroup({
+components/ui/dropdown-menu.tsx:60:function DropdownMenuItem({
+components/ui/dropdown-menu.tsx:83:function DropdownMenuCheckboxItem({
+components/ui/dropdown-menu.tsx:109:function DropdownMenuRadioGroup({
+components/ui/dropdown-menu.tsx:120:function DropdownMenuRadioItem({
+components/ui/dropdown-menu.tsx:144:function DropdownMenuLabel({
+components/ui/dropdown-menu.tsx:164:function DropdownMenuSeparator({
+components/ui/dropdown-menu.tsx:177:function DropdownMenuShortcut({
+components/ui/dropdown-menu.tsx:193:function DropdownMenuSub({
+components/ui/dropdown-menu.tsx:199:function DropdownMenuSubTrigger({
+components/ui/dropdown-menu.tsx:223:function DropdownMenuSubContent({
+components/ui/empty.tsx:5:function Empty({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/empty.tsx:18:function EmptyHeader({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/empty.tsx:46:function EmptyMedia({
+components/ui/empty.tsx:61:function EmptyTitle({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/empty.tsx:71:function EmptyDescription({ className, ...props }: React.ComponentProps<"p">) {
+components/ui/empty.tsx:84:function EmptyContent({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/field.tsx:8:function FieldSet({ className, ...props }: React.ComponentProps<"fieldset">) {
+components/ui/field.tsx:22:function FieldLegend({
+components/ui/field.tsx:42:function FieldGroup({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/field.tsx:79:function Field({
+components/ui/field.tsx:95:function FieldContent({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/field.tsx:108:function FieldLabel({
+components/ui/field.tsx:126:function FieldTitle({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/field.tsx:139:function FieldDescription({ className, ...props }: React.ComponentProps<"p">) {
+components/ui/field.tsx:154:function FieldSeparator({
+components/ui/field.tsx:184:function FieldError({
+components/ui/form.tsx:19:const Form = FormProvider;
+components/ui/form.tsx:28:const FormFieldContext = React.createContext<FormFieldContextValue>(
+components/ui/form.tsx:32:const FormField = <
+components/ui/form.tsx:72:const FormItemContext = React.createContext<FormItemContextValue>(
+components/ui/form.tsx:76:function FormItem({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/form.tsx:90:function FormLabel({
+components/ui/form.tsx:107:function FormControl({ ...props }: React.ComponentProps<typeof Slot>) {
+components/ui/form.tsx:126:function FormDescription({ className, ...props }: React.ComponentProps<"p">) {
+components/ui/form.tsx:139:function FormMessage({ className, ...props }: React.ComponentProps<"p">) {
+components/ui/hover-card.tsx:6:function HoverCard({
+components/ui/hover-card.tsx:12:function HoverCardTrigger({
+components/ui/hover-card.tsx:20:function HoverCardContent({
+components/ui/input-group.tsx:9:function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/input-group.tsx:58:function InputGroupAddon({
+components/ui/input-group.tsx:98:function InputGroupButton({
+components/ui/input-group.tsx:117:function InputGroupText({ className, ...props }: React.ComponentProps<"span">) {
+components/ui/input-group.tsx:129:function InputGroupInput({
+components/ui/input-group.tsx:145:function InputGroupTextarea({
+components/ui/input-otp.tsx:7:function InputOTP({
+components/ui/input-otp.tsx:27:function InputOTPGroup({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/input-otp.tsx:37:function InputOTPSlot({
+components/ui/input-otp.tsx:67:function InputOTPSeparator({ ...props }: React.ComponentProps<"div">) {
+components/ui/input.tsx:6:function Input({
+components/ui/item.tsx:8:function ItemGroup({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/item.tsx:19:function ItemSeparator({
+components/ui/item.tsx:54:function Item({
+components/ui/item.tsx:91:function ItemMedia({
+components/ui/item.tsx:106:function ItemContent({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/item.tsx:119:function ItemTitle({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/item.tsx:132:function ItemDescription({ className, ...props }: React.ComponentProps<"p">) {
+components/ui/item.tsx:146:function ItemActions({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/item.tsx:156:function ItemHeader({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/item.tsx:169:function ItemFooter({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/kbd.tsx:3:function Kbd({ className, ...props }: React.ComponentProps<"kbd">) {
+components/ui/kbd.tsx:18:function KbdGroup({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/label.tsx:6:function Label({
+components/ui/menubar.tsx:7:function Menubar({
+components/ui/menubar.tsx:23:function MenubarMenu({
+components/ui/menubar.tsx:29:function MenubarGroup({
+components/ui/menubar.tsx:35:function MenubarPortal({
+components/ui/menubar.tsx:41:function MenubarRadioGroup({
+components/ui/menubar.tsx:49:function MenubarTrigger({
+components/ui/menubar.tsx:65:function MenubarContent({
+components/ui/menubar.tsx:89:function MenubarItem({
+components/ui/menubar.tsx:112:function MenubarCheckboxItem({
+components/ui/menubar.tsx:138:function MenubarRadioItem({
+components/ui/menubar.tsx:162:function MenubarLabel({
+components/ui/menubar.tsx:182:function MenubarSeparator({
+components/ui/menubar.tsx:195:function MenubarShortcut({
+components/ui/menubar.tsx:211:function MenubarSub({
+components/ui/menubar.tsx:217:function MenubarSubTrigger({
+components/ui/menubar.tsx:241:function MenubarSubContent({
+components/ui/navigation-menu.tsx:8:function NavigationMenu({
+components/ui/navigation-menu.tsx:32:function NavigationMenuList({
+components/ui/navigation-menu.tsx:48:function NavigationMenuItem({
+components/ui/navigation-menu.tsx:65:function NavigationMenuTrigger({
+components/ui/navigation-menu.tsx:85:function NavigationMenuContent({
+components/ui/navigation-menu.tsx:102:function NavigationMenuViewport({
+components/ui/navigation-menu.tsx:124:function NavigationMenuLink({
+components/ui/navigation-menu.tsx:140:function NavigationMenuIndicator({
+components/ui/pagination.tsx:11:function Pagination({ className, ...props }: React.ComponentProps<"nav">) {
+components/ui/pagination.tsx:23:function PaginationContent({
+components/ui/pagination.tsx:36:function PaginationItem({ ...props }: React.ComponentProps<"li">) {
+components/ui/pagination.tsx:45:function PaginationLink({
+components/ui/pagination.tsx:68:function PaginationPrevious({
+components/ui/pagination.tsx:85:function PaginationNext({
+components/ui/pagination.tsx:102:function PaginationEllipsis({
+components/ui/popover.tsx:6:function Popover({
+components/ui/popover.tsx:12:function PopoverTrigger({
+components/ui/popover.tsx:18:function PopoverContent({
+components/ui/popover.tsx:40:function PopoverAnchor({
+components/ui/progress.tsx:6:function Progress({
+components/ui/radio-group.tsx:7:function RadioGroup({
+components/ui/radio-group.tsx:20:function RadioGroupItem({
+components/ui/resizable.tsx:7:function ResizablePanelGroup({
+components/ui/resizable.tsx:23:function ResizablePanel({
+components/ui/resizable.tsx:29:function ResizableHandle({
+components/ui/scroll-area.tsx:6:function ScrollArea({
+components/ui/scroll-area.tsx:29:function ScrollBar({
+components/ui/select.tsx:7:function Select({
+components/ui/select.tsx:13:function SelectGroup({
+components/ui/select.tsx:19:function SelectValue({
+components/ui/select.tsx:25:function SelectTrigger({
+components/ui/select.tsx:51:function SelectContent({
+components/ui/select.tsx:88:function SelectLabel({
+components/ui/select.tsx:101:function SelectItem({
+components/ui/select.tsx:125:function SelectSeparator({
+components/ui/select.tsx:138:function SelectScrollUpButton({
+components/ui/select.tsx:156:function SelectScrollDownButton({
+components/ui/separator.tsx:6:function Separator({
+components/ui/sheet.tsx:9:function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
+components/ui/sheet.tsx:13:function SheetTrigger({
+components/ui/sheet.tsx:19:function SheetClose({
+components/ui/sheet.tsx:25:function SheetPortal({
+components/ui/sheet.tsx:31:function SheetOverlay({
+components/ui/sheet.tsx:47:function SheetContent({
+components/ui/sheet.tsx:84:function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/sheet.tsx:94:function SheetFooter({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/sheet.tsx:104:function SheetTitle({
+components/ui/sheet.tsx:117:function SheetDescription({
+components/ui/sidebar.tsx:27:const SIDEBAR_COOKIE_NAME = "sidebar_state";
+components/ui/sidebar.tsx:28:const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
+components/ui/sidebar.tsx:29:const SIDEBAR_WIDTH = "16rem";
+components/ui/sidebar.tsx:30:const SIDEBAR_WIDTH_MOBILE = "18rem";
+components/ui/sidebar.tsx:31:const SIDEBAR_WIDTH_ICON = "3rem";
+components/ui/sidebar.tsx:32:const SIDEBAR_KEYBOARD_SHORTCUT = "b";
+components/ui/sidebar.tsx:44:const SidebarContext = React.createContext<SidebarContextProps | null>(null);
+components/ui/sidebar.tsx:55:function SidebarProvider({
+components/ui/sidebar.tsx:153:function Sidebar({
+components/ui/sidebar.tsx:263:function SidebarTrigger({
+components/ui/sidebar.tsx:289:function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
+components/ui/sidebar.tsx:314:function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
+components/ui/sidebar.tsx:328:function SidebarInput({
+components/ui/sidebar.tsx:342:function SidebarHeader({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/sidebar.tsx:353:function SidebarFooter({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/sidebar.tsx:364:function SidebarSeparator({
+components/ui/sidebar.tsx:378:function SidebarContent({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/sidebar.tsx:392:function SidebarGroup({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/sidebar.tsx:403:function SidebarGroupLabel({
+components/ui/sidebar.tsx:424:function SidebarGroupAction({
+components/ui/sidebar.tsx:447:function SidebarGroupContent({
+components/ui/sidebar.tsx:461:function SidebarMenu({ className, ...props }: React.ComponentProps<"ul">) {
+components/ui/sidebar.tsx:472:function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
+components/ui/sidebar.tsx:505:function SidebarMenuButton({
+components/ui/sidebar.tsx:555:function SidebarMenuAction({
+components/ui/sidebar.tsx:587:function SidebarMenuBadge({
+components/ui/sidebar.tsx:609:function SidebarMenuSkeleton({
+components/ui/sidebar.tsx:647:function SidebarMenuSub({ className, ...props }: React.ComponentProps<"ul">) {
+components/ui/sidebar.tsx:662:function SidebarMenuSubItem({
+components/ui/sidebar.tsx:676:function SidebarMenuSubButton({
+components/ui/skeleton.tsx:3:function Skeleton({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/slider.tsx:6:function Slider({
+components/ui/sonner.tsx:4:const Toaster = ({ ...props }: ToasterProps) => {
+components/ui/spinner.tsx:5:function Spinner({ className, ...props }: React.ComponentProps<"svg">) {
+components/ui/switch.tsx:6:function Switch({
+components/ui/table.tsx:5:function Table({ className, ...props }: React.ComponentProps<"table">) {
+components/ui/table.tsx:20:function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
+components/ui/table.tsx:30:function TableBody({ className, ...props }: React.ComponentProps<"tbody">) {
+components/ui/table.tsx:40:function TableFooter({ className, ...props }: React.ComponentProps<"tfoot">) {
+components/ui/table.tsx:53:function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
+components/ui/table.tsx:66:function TableHead({ className, ...props }: React.ComponentProps<"th">) {
+components/ui/table.tsx:79:function TableCell({ className, ...props }: React.ComponentProps<"td">) {
+components/ui/table.tsx:92:function TableCaption({
+components/ui/tabs.tsx:6:function Tabs({
+components/ui/tabs.tsx:19:function TabsList({
+components/ui/tabs.tsx:35:function TabsTrigger({
+components/ui/tabs.tsx:51:function TabsContent({
+components/ui/textarea.tsx:6:function Textarea({
+components/ui/toggle-group.tsx:10:const ToggleGroupContext = React.createContext<
+components/ui/toggle-group.tsx:17:function ToggleGroup({
+components/ui/toggle-group.tsx:43:function ToggleGroupItem({
+components/ui/toggle.tsx:29:function Toggle({
+components/ui/tooltip.tsx:6:function TooltipProvider({
+components/ui/tooltip.tsx:19:function Tooltip({
+components/ui/tooltip.tsx:29:function TooltipTrigger({
+components/ui/tooltip.tsx:35:function TooltipContent({
+components/TradeLogWithViewer.tsx:9:function StatCard({ label, value, detail, tone = "gold" }: { label: string; value: string; detail: string; tone?: string }) { return <div className={`stat-card stat-${tone}`}><p>{label}</p><strong className="data-text">{value}</strong><span>{detail}</span></div>; }
+components/TradeLogWithViewer.tsx:10:function EmptyState({ title, copy, action }: { title: string; copy: string; action?: React.ReactNode }) { return <div className="empty-state"><h3>{title}</h3><p>{copy}</p>{action}</div>; }
+components/TradeLogWithViewer.tsx:11:function Detail({ label, value }: { label: string; value: React.ReactNode }) { return <div className="trade-detail"><span>{label}</span><strong>{value || "—"}</strong></div>; }
+components/TradeLogWithViewer.tsx:13:function TradeCardDialog({ trade, balance, balanceLabel = "Running balance", open, onOpenChange }: any) {
+components/TradeLogWithViewer.tsx:19:function BaseTradeLogWithViewer({ stats, trades, allTrades, pagination, listLoading, listError, onRetry, account, dangerGoals, mt5LivePositions = [], mt5Summary, mt5Syncing = false, hasMt5Connection = false, search, resultFilter, setSearch, setResultFilter, onPage, onNew, onDuplicate, onEdit, onDelete, onCash, onCsv, onExcel, onPdf, onClear }: any) {
+components/TradeLogWithViewer.tsx:30:export function TradeLogWithViewer(props: any) { return <BaseTradeLogWithViewer {...props} />; }
+components/TradeDialogWithCustomOptions.tsx:11:function Field({ label, children, className = "" }: { label: string; children: React.ReactNode; className?: string }) {
+components/TradeDialogWithCustomOptions.tsx:15:function Section({ title, children }: { title: string; children: React.ReactNode }) {
+components/TradeDialogWithCustomOptions.tsx:19:function CustomSelect({ category, value, onChange, options, placeholder, multi = false }: { category: string; value: string; onChange: (value: string) => void; options: string[]; placeholder?: string; multi?: boolean }) {
+components/TradeDialogWithCustomOptions.tsx:63:export function TradeDialogWithCustomOptions({ open, setOpen, form, setForm, editing, onSave, pending, screenshot, setScreenshot, progress }: any) {
+components/MonthlyTradeOverview.tsx:9:export function MonthlyTradeOverview({ trades, selectedMonth, onMonthChange }: { trades: any[]; selectedMonth?: string; onMonthChange?: (month: string) => void }) {
+components/PnlCalendarWithWeeks.tsx:11:export function PnlCalendarWithWeeks({ trades }: { trades: any[] }) {
+components/Mt5LiveView.tsx:10:const EA_DOWNLOAD = "/manus-storage/GoldJournal_EA_6ebaf71a.mq5";
+components/Mt5LiveView.tsx:17:function CopyValue({ value, label }: { value: string; label: string }) { const copy = async () => { try { await navigator.clipboard.writeText(value); toast.success(`${label} copied.`); } catch { toast.error("Copy is unavailable in this browser."); } }; return <button className="mt5-copy" onClick={() => void copy()} aria-label={`Copy ${label}`} title={`Copy ${label}`}><Copy size={14} /></button>; }
+components/Mt5LiveView.tsx:19:function AccountMetric({ label, value, detail, tone = "neutral" }: { label: string; value: string; detail: string; tone?: string }) { return <article className={`mt5-account-metric ${tone}`}><span>{label}</span><strong className="data-text">{value}</strong><small>{detail}</small></article>; }
+components/Mt5LiveView.tsx:21:export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
+components/SessionRecovery.tsx:7:export function SessionRecovery({ onRetry, onReconnect, reconnectStatus = "ready" }: { onRetry: () => void; onReconnect: () => void; reconnectStatus?: ReconnectStatus }) {
+components/AnalysisEdge.tsx:7:function EdgeTable({ title, rows }: { title: string; rows: EdgeRow[] }) {
+components/AnalysisEdge.tsx:11:export function AnalysisEdge({ trades }: { trades: EdgeTrade[] }) {
+components/FlexibleGoalsView.tsx:42:function SummaryCard({ label, value, detail, tone = "neutral" }: { label: string; value: string; detail: string; tone?: string }) { return <article className={`control-summary-card ${tone}`}><span>{label}</span><strong className="data-text">{value}</strong><small>{detail}</small></article>; }
+components/FlexibleGoalsView.tsx:44:export function FlexibleGoalsView({ account, goals, trades, plans, pending, onCreate, onUpdate, onDelete, onClear }: { account: any; goals: GoalRow[]; trades: any[]; plans: any[]; pending?: boolean; onCreate: (draft: GoalPayload) => Promise<void>; onUpdate: (goal: GoalRow) => Promise<void>; onDelete: (goal: GoalRow) => Promise<void>; onClear: () => Promise<void> }) {
+components/MissedTradesView.tsx:20:function Field({ label, children }: { label: string; children: React.ReactNode }) {
+components/MissedTradesView.tsx:24:export function MissedTradesView({ rows, account, refresh }: any) {
+contexts/ThemeContext.tsx:11:const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
+contexts/ThemeContext.tsx:19:export function ThemeProvider({
+contexts/ThemeContext.tsx:60:export function useTheme() {
+hooks/useMobile.tsx:3:const MOBILE_BREAKPOINT = 768;
+hooks/useMobile.tsx:5:export function useIsMobile() {
+
+## Application style imports
+index.css:1:@import "tailwindcss";
+index.css:2:@import "tw-animate-css";
+index.css:3:@import "./gold-overrides.css";
+index.css:4:@import "./visual-upgrade.css";
+index.css:5:@import "./recovery-workstation.css";
+index.css:6:@import "./theme-audit.css";
+index.css:7:@import "./light-audit-fix.css";
+index.css:8:@import "./flexible-goals.css";
+index.css:9:@import "./mt5-live.css";
+main.tsx:9:import "./index.css";
+
+## Charts, dialogs, tables, forms, and navigation references
+pages/ComponentShowcase.tsx:57:  Dialog,
+pages/ComponentShowcase.tsx:58:  DialogContent,
+pages/ComponentShowcase.tsx:59:  DialogDescription,
+pages/ComponentShowcase.tsx:60:  DialogHeader,
+pages/ComponentShowcase.tsx:61:  DialogTitle,
+pages/ComponentShowcase.tsx:62:  DialogTrigger,
+pages/ComponentShowcase.tsx:65:  Drawer,
+pages/ComponentShowcase.tsx:66:  DrawerClose,
+pages/ComponentShowcase.tsx:67:  DrawerContent,
+pages/ComponentShowcase.tsx:68:  DrawerDescription,
+pages/ComponentShowcase.tsx:69:  DrawerFooter,
+pages/ComponentShowcase.tsx:70:  DrawerHeader,
+pages/ComponentShowcase.tsx:71:  DrawerTitle,
+pages/ComponentShowcase.tsx:72:  DrawerTrigger,
+pages/ComponentShowcase.tsx:111:  Popover,
+pages/ComponentShowcase.tsx:112:  PopoverContent,
+pages/ComponentShowcase.tsx:113:  PopoverTrigger,
+pages/ComponentShowcase.tsx:124:  Select,
+pages/ComponentShowcase.tsx:125:  SelectContent,
+pages/ComponentShowcase.tsx:126:  SelectItem,
+pages/ComponentShowcase.tsx:127:  SelectTrigger,
+pages/ComponentShowcase.tsx:128:  SelectValue,
+pages/ComponentShowcase.tsx:132:  Sheet,
+pages/ComponentShowcase.tsx:133:  SheetContent,
+pages/ComponentShowcase.tsx:134:  SheetDescription,
+pages/ComponentShowcase.tsx:135:  SheetHeader,
+pages/ComponentShowcase.tsx:136:  SheetTitle,
+pages/ComponentShowcase.tsx:137:  SheetTrigger,
+pages/ComponentShowcase.tsx:143:  Table,
+pages/ComponentShowcase.tsx:144:  TableBody,
+pages/ComponentShowcase.tsx:145:  TableCaption,
+pages/ComponentShowcase.tsx:146:  TableCell,
+pages/ComponentShowcase.tsx:147:  TableHead,
+pages/ComponentShowcase.tsx:148:  TableHeader,
+pages/ComponentShowcase.tsx:149:  TableRow,
+pages/ComponentShowcase.tsx:151:import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+pages/ComponentShowcase.tsx:156:  Tooltip,
+pages/ComponentShowcase.tsx:157:  TooltipContent,
+pages/ComponentShowcase.tsx:158:  TooltipTrigger,
+pages/ComponentShowcase.tsx:180:  const [selectedFruits, setSelectedFruits] = useState<string[]>([]);
+pages/ComponentShowcase.tsx:184:  const [selectedFramework, setSelectedFramework] = useState("");
+pages/ComponentShowcase.tsx:185:  const [selectedMonth, setSelectedMonth] = useState("");
+pages/ComponentShowcase.tsx:186:  const [selectedYear, setSelectedYear] = useState("");
+pages/ComponentShowcase.tsx:187:  const [dialogInput, setDialogInput] = useState("");
+pages/ComponentShowcase.tsx:188:  const [dialogOpen, setDialogOpen] = useState(false);
+pages/ComponentShowcase.tsx:196:  const handleDialogSubmit = () => {
+pages/ComponentShowcase.tsx:197:    console.log("Dialog submitted with value:", dialogInput);
+pages/ComponentShowcase.tsx:201:    setDialogInput("");
+pages/ComponentShowcase.tsx:202:    setDialogOpen(false);
+pages/ComponentShowcase.tsx:205:  const handleDialogKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+pages/ComponentShowcase.tsx:208:      handleDialogSubmit();
+pages/ComponentShowcase.tsx:313:                        Popover Foreground
+pages/ComponentShowcase.tsx:368:                    <p className="font-medium mb-1">Popover</p>
+pages/ComponentShowcase.tsx:370:                      Popover background with foreground text
+pages/ComponentShowcase.tsx:406:          {/* Form Inputs Section */}
+pages/ComponentShowcase.tsx:408:            <h3 className="text-2xl font-semibold">Form Inputs</h3>
+pages/ComponentShowcase.tsx:423:                  <Label>Select</Label>
+pages/ComponentShowcase.tsx:424:                  <Select>
+pages/ComponentShowcase.tsx:425:                    <SelectTrigger>
+pages/ComponentShowcase.tsx:426:                      <SelectValue placeholder="Select a fruit" />
+pages/ComponentShowcase.tsx:427:                    </SelectTrigger>
+pages/ComponentShowcase.tsx:428:                    <SelectContent>
+pages/ComponentShowcase.tsx:429:                      <SelectItem value="apple">Apple</SelectItem>
+pages/ComponentShowcase.tsx:430:                      <SelectItem value="banana">Banana</SelectItem>
+pages/ComponentShowcase.tsx:431:                      <SelectItem value="orange">Orange</SelectItem>
+pages/ComponentShowcase.tsx:432:                    </SelectContent>
+pages/ComponentShowcase.tsx:433:                  </Select>
+pages/ComponentShowcase.tsx:475:                  <Popover>
+pages/ComponentShowcase.tsx:476:                    <PopoverTrigger asChild>
+pages/ComponentShowcase.tsx:487:                          <span>Select date and time</span>
+pages/ComponentShowcase.tsx:490:                    </PopoverTrigger>
+pages/ComponentShowcase.tsx:491:                    <PopoverContent className="w-auto p-0" align="start">
+pages/ComponentShowcase.tsx:496:                          onSelect={setDatePickerDate}
+pages/ComponentShowcase.tsx:525:                    </PopoverContent>
+pages/ComponentShowcase.tsx:526:                  </Popover>
+pages/ComponentShowcase.tsx:529:                      Selected:{" "}
+pages/ComponentShowcase.tsx:538:                  <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
+pages/ComponentShowcase.tsx:539:                    <PopoverTrigger asChild>
+pages/ComponentShowcase.tsx:556:                          : "Select framework..."}
+pages/ComponentShowcase.tsx:559:                    </PopoverTrigger>
+pages/ComponentShowcase.tsx:560:                    <PopoverContent className="w-full p-0">
+pages/ComponentShowcase.tsx:578:                                onSelect={currentValue => {
+pages/ComponentShowcase.tsx:579:                                  setSelectedFramework(
+pages/ComponentShowcase.tsx:600:                    </PopoverContent>
+pages/ComponentShowcase.tsx:601:                  </Popover>
+pages/ComponentShowcase.tsx:604:                      Selected:{" "}
+pages/ComponentShowcase.tsx:625:                      <Select
+pages/ComponentShowcase.tsx:627:                        onValueChange={setSelectedMonth}
+pages/ComponentShowcase.tsx:629:                        <SelectTrigger id="month">
+pages/ComponentShowcase.tsx:630:                          <SelectValue placeholder="MM" />
+pages/ComponentShowcase.tsx:631:                        </SelectTrigger>
+pages/ComponentShowcase.tsx:632:                        <SelectContent>
+pages/ComponentShowcase.tsx:635:                              <SelectItem
+pages/ComponentShowcase.tsx:640:                              </SelectItem>
+pages/ComponentShowcase.tsx:643:                        </SelectContent>
+pages/ComponentShowcase.tsx:644:                      </Select>
+pages/ComponentShowcase.tsx:650:                      <Select
+pages/ComponentShowcase.tsx:652:                        onValueChange={setSelectedYear}
+pages/ComponentShowcase.tsx:654:                        <SelectTrigger id="year">
+pages/ComponentShowcase.tsx:655:                          <SelectValue placeholder="YYYY" />
+pages/ComponentShowcase.tsx:656:                        </SelectTrigger>
+pages/ComponentShowcase.tsx:657:                        <SelectContent>
+pages/ComponentShowcase.tsx:662:                            <SelectItem key={year} value={year.toString()}>
+pages/ComponentShowcase.tsx:664:                            </SelectItem>
+pages/ComponentShowcase.tsx:666:                        </SelectContent>
+pages/ComponentShowcase.tsx:667:                      </Select>
+pages/ComponentShowcase.tsx:672:                      Selected: {selectedYear}/{selectedMonth}/
+pages/ComponentShowcase.tsx:780:                  <Label>Table</Label>
+pages/ComponentShowcase.tsx:781:                  <Table>
+pages/ComponentShowcase.tsx:782:                    <TableCaption>A list of your recent invoices.</TableCaption>
+pages/ComponentShowcase.tsx:783:                    <TableHeader>
+pages/ComponentShowcase.tsx:784:                      <TableRow>
+pages/ComponentShowcase.tsx:785:                        <TableHead className="w-[100px]">Invoice</TableHead>
+pages/ComponentShowcase.tsx:786:                        <TableHead>Status</TableHead>
+pages/ComponentShowcase.tsx:787:                        <TableHead>Method</TableHead>
+pages/ComponentShowcase.tsx:788:                        <TableHead className="text-right">Amount</TableHead>
+pages/ComponentShowcase.tsx:789:                      </TableRow>
+pages/ComponentShowcase.tsx:790:                    </TableHeader>
+pages/ComponentShowcase.tsx:791:                    <TableBody>
+pages/ComponentShowcase.tsx:792:                      <TableRow>
+pages/ComponentShowcase.tsx:793:                        <TableCell className="font-medium">INV001</TableCell>
+pages/ComponentShowcase.tsx:794:                        <TableCell>Paid</TableCell>
+pages/ComponentShowcase.tsx:795:                        <TableCell>Credit Card</TableCell>
+pages/ComponentShowcase.tsx:796:                        <TableCell className="text-right">$250.00</TableCell>
+pages/ComponentShowcase.tsx:797:                      </TableRow>
+pages/ComponentShowcase.tsx:798:                      <TableRow>
+pages/ComponentShowcase.tsx:799:                        <TableCell className="font-medium">INV002</TableCell>
+pages/ComponentShowcase.tsx:800:                        <TableCell>Pending</TableCell>
+pages/ComponentShowcase.tsx:801:                        <TableCell>PayPal</TableCell>
+pages/ComponentShowcase.tsx:802:                        <TableCell className="text-right">$150.00</TableCell>
+pages/ComponentShowcase.tsx:803:                      </TableRow>
+pages/ComponentShowcase.tsx:804:                      <TableRow>
+pages/ComponentShowcase.tsx:805:                        <TableCell className="font-medium">INV003</TableCell>
+pages/ComponentShowcase.tsx:806:                        <TableCell>Unpaid</TableCell>
+pages/ComponentShowcase.tsx:807:                        <TableCell>Bank Transfer</TableCell>
+pages/ComponentShowcase.tsx:808:                        <TableCell className="text-right">$350.00</TableCell>
+pages/ComponentShowcase.tsx:809:                      </TableRow>
+pages/ComponentShowcase.tsx:810:                    </TableBody>
+pages/ComponentShowcase.tsx:811:                  </Table>
+pages/ComponentShowcase.tsx:890:          {/* Tabs Section */}
+pages/ComponentShowcase.tsx:892:            <h3 className="text-2xl font-semibold">Tabs</h3>
+pages/ComponentShowcase.tsx:893:            <Tabs defaultValue="account" className="w-full">
+pages/ComponentShowcase.tsx:894:              <TabsList className="grid w-full grid-cols-3">
+pages/ComponentShowcase.tsx:895:                <TabsTrigger value="account">Account</TabsTrigger>
+pages/ComponentShowcase.tsx:896:                <TabsTrigger value="password">Password</TabsTrigger>
+pages/ComponentShowcase.tsx:897:                <TabsTrigger value="settings">Settings</TabsTrigger>
+pages/ComponentShowcase.tsx:898:              </TabsList>
+pages/ComponentShowcase.tsx:899:              <TabsContent value="account">
+pages/ComponentShowcase.tsx:917:              </TabsContent>
+pages/ComponentShowcase.tsx:918:              <TabsContent value="password">
+pages/ComponentShowcase.tsx:940:              </TabsContent>
+pages/ComponentShowcase.tsx:941:              <TabsContent value="settings">
+pages/ComponentShowcase.tsx:955:              </TabsContent>
+pages/ComponentShowcase.tsx:956:            </Tabs>
+pages/ComponentShowcase.tsx:1017:          {/* Dialog, Sheet, Drawer Section */}
+pages/ComponentShowcase.tsx:1023:                  <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+pages/ComponentShowcase.tsx:1024:                    <DialogTrigger asChild>
+pages/ComponentShowcase.tsx:1025:                      <Button variant="outline">Open Dialog</Button>
+pages/ComponentShowcase.tsx:1026:                    </DialogTrigger>
+pages/ComponentShowcase.tsx:1027:                    <DialogContent>
+pages/ComponentShowcase.tsx:1028:                      <DialogHeader>
+pages/ComponentShowcase.tsx:1029:                        <DialogTitle>Test Input</DialogTitle>
+pages/ComponentShowcase.tsx:1030:                        <DialogDescription>
+pages/ComponentShowcase.tsx:1032:                        </DialogDescription>
+pages/ComponentShowcase.tsx:1033:                      </DialogHeader>
+pages/ComponentShowcase.tsx:1041:                            onChange={(e) => setDialogInput(e.target.value)}
+pages/ComponentShowcase.tsx:1042:                            onKeyDown={handleDialogKeyDown}
+pages/ComponentShowcase.tsx:1050:                          onClick={() => setDialogOpen(false)}
+pages/ComponentShowcase.tsx:1054:                        <Button onClick={handleDialogSubmit}>Submit</Button>
+pages/ComponentShowcase.tsx:1056:                    </DialogContent>
+pages/ComponentShowcase.tsx:1057:                  </Dialog>
+pages/ComponentShowcase.tsx:1059:                  <Sheet>
+pages/ComponentShowcase.tsx:1060:                    <SheetTrigger asChild>
+pages/ComponentShowcase.tsx:1061:                      <Button variant="outline">Open Sheet</Button>
+pages/ComponentShowcase.tsx:1062:                    </SheetTrigger>
+pages/ComponentShowcase.tsx:1063:                    <SheetContent>
+pages/ComponentShowcase.tsx:1064:                      <SheetHeader>
+pages/ComponentShowcase.tsx:1065:                        <SheetTitle>Edit profile</SheetTitle>
+pages/ComponentShowcase.tsx:1066:                        <SheetDescription>
+pages/ComponentShowcase.tsx:1069:                        </SheetDescription>
+pages/ComponentShowcase.tsx:1070:                      </SheetHeader>
+pages/ComponentShowcase.tsx:1071:                    </SheetContent>
+pages/ComponentShowcase.tsx:1072:                  </Sheet>
+pages/ComponentShowcase.tsx:1074:                  <Drawer>
+pages/ComponentShowcase.tsx:1075:                    <DrawerTrigger asChild>
+pages/ComponentShowcase.tsx:1076:                      <Button variant="outline">Open Drawer</Button>
+pages/ComponentShowcase.tsx:1077:                    </DrawerTrigger>
+pages/ComponentShowcase.tsx:1078:                    <DrawerContent>
+pages/ComponentShowcase.tsx:1079:                      <DrawerHeader>
+pages/ComponentShowcase.tsx:1080:                        <DrawerTitle>Are you absolutely sure?</DrawerTitle>
+pages/ComponentShowcase.tsx:1081:                        <DrawerDescription>
+pages/ComponentShowcase.tsx:1083:                        </DrawerDescription>
+pages/ComponentShowcase.tsx:1084:                      </DrawerHeader>
+pages/ComponentShowcase.tsx:1085:                      <DrawerFooter>
+pages/ComponentShowcase.tsx:1087:                        <DrawerClose asChild>
+pages/ComponentShowcase.tsx:1089:                        </DrawerClose>
+pages/ComponentShowcase.tsx:1090:                      </DrawerFooter>
+pages/ComponentShowcase.tsx:1091:                    </DrawerContent>
+pages/ComponentShowcase.tsx:1092:                  </Drawer>
+pages/ComponentShowcase.tsx:1094:                  <Popover>
+pages/ComponentShowcase.tsx:1095:                    <PopoverTrigger asChild>
+pages/ComponentShowcase.tsx:1096:                      <Button variant="outline">Open Popover</Button>
+pages/ComponentShowcase.tsx:1097:                    </PopoverTrigger>
+pages/ComponentShowcase.tsx:1098:                    <PopoverContent>
+pages/ComponentShowcase.tsx:1105:                    </PopoverContent>
+pages/ComponentShowcase.tsx:1106:                  </Popover>
+pages/ComponentShowcase.tsx:1108:                  <Tooltip>
+pages/ComponentShowcase.tsx:1109:                    <TooltipTrigger asChild>
+pages/ComponentShowcase.tsx:1111:                    </TooltipTrigger>
+pages/ComponentShowcase.tsx:1112:                    <TooltipContent>
+pages/ComponentShowcase.tsx:1114:                    </TooltipContent>
+pages/ComponentShowcase.tsx:1115:                  </Tooltip>
+pages/ComponentShowcase.tsx:1180:                  onSelect={setDate}
+pages/GoldJournal.tsx:6:import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+pages/GoldJournal.tsx:10:import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+pages/GoldJournal.tsx:15:import { setSelectedAccountId, subscribeSelectedAccount } from "@/lib/accountSelection";
+pages/GoldJournal.tsx:20:import { TradeDialogWithCustomOptions } from "@/components/TradeDialogWithCustomOptions";
+pages/GoldJournal.tsx:30:import { Activity, BarChart3, Bell, BookOpen, Bot, CalendarDays, Check, ChevronDown, CircleDollarSign, Cloud, Download, FileSpreadsheet, FileText, Goal, ImagePlus, LogOut, Menu, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, RefreshCcw, Settings2, ShieldAlert, Target, Trash2, Wallet, Wifi, WifiOff, X, Zap } from "lucide-react";
+pages/GoldJournal.tsx:34:type TradeForm = { tradeDate: string; session: string; direction: "" | "BUY" | "SELL"; result: "" | "WIN" | "LOSS" | "BREAK_EVEN" | "OPEN"; level: string; timeframe: string; setupQuality: string; executionType: string; marketCondition: string; biasAlignment: string; confirmationType: string; slPlacement: string; tpPlacement: string; mistake: string; holdQuality: string; patienceScore: string; risk: string; reward: string; pnl: string; notes: string; emotionBefore: string; emotionDuring: string; emotionAfter: string; mt5Ticket: string };
+pages/GoldJournal.tsx:37:  { id: "trades", label: "Trade Log", icon: BookOpen }, { id: "missed", label: "Missed Trades", icon: Target }, { id: "analysis", label: "Analysis", icon: BarChart3 },
+pages/GoldJournal.tsx:47:export function defaultTrade(): TradeForm { return { tradeDate: dateInput(), session: getPktSession(), direction: "", result: "", level: "", timeframe: "", setupQuality: "", executionType: "", marketCondition: "", biasAlignment: "", confirmationType: "", slPlacement: "", tpPlacement: "", mistake: "", holdQuality: "", patienceScore: "", risk: "", reward: "", pnl: "", notes: "", emotionBefore: "", emotionDuring: "", emotionAfter: "", mt5Ticket: "" }; }
+pages/GoldJournal.tsx:54:function FormSection({ title, children }: { title: string; children: React.ReactNode }) { return <section className="form-section modal-section"><span className="section-label">{title}</span><div className="field-grid">{children}</div></section>; }
+pages/GoldJournal.tsx:93:  const [tradeDialog, setTradeDialog] = useState(false); const [tradeForm, setTradeForm] = useState<TradeForm>(defaultTrade()); const [editing, setEditing] = useState<any>(); const [screenshot, setScreenshot] = useState<File>(); const [uploadProgress, setUploadProgress] = useState(0);
+pages/GoldJournal.tsx:94:  const [cashDialog, setCashDialog] = useState<"DEPOSIT" | "WITHDRAW" | null>(null); const [cashAmount, setCashAmount] = useState(""); const [cashNote, setCashNote] = useState(""); const [search, setSearch] = useState(""); const [resultFilter, setResultFilter] = useState("ALL"); const [tradePage, setTradePage] = useState(1);
+pages/GoldJournal.tsx:95:  const [missedDialog, setMissedDialog] = useState(false);
+pages/GoldJournal.tsx:102:  useEffect(() => { setSelectedAccountId(account?.id); }, [account?.id]);
+pages/GoldJournal.tsx:104:  useEffect(() => subscribeSelectedAccount(nextAccountId => { if (nextAccountId && nextAccountId !== accountId) setAccountId(nextAccountId); }), [accountId]);
+pages/GoldJournal.tsx:112:  const openNewTrade = (source?: any) => { const next = defaultTrade(); if (source) Object.assign(next, { ...source, tradeDate: dateInput(), session: getPktSession(), risk: source.risk ?? "", reward: source.reward ?? "", pnl: source.pnl ?? "", patienceScore: source.patienceScore ? String(source.patienceScore) : "", mt5Ticket: source.mt5Ticket ?? "" }); setEditing(undefined); setTradeForm(next); setScreenshot(undefined); setUploadProgress(0); setTradeDialog(true); };
+pages/GoldJournal.tsx:113:  const openEdit = (trade: any) => { setEditing(trade); setTradeForm({ tradeDate: dateInput(new Date(trade.tradeDate)), session: trade.session, direction: trade.direction, result: trade.result, level: trade.level || "", timeframe: trade.timeframe || "", setupQuality: trade.setupQuality || "", executionType: trade.executionType || "", marketCondition: trade.marketCondition || "", biasAlignment: trade.biasAlignment || "", confirmationType: trade.confirmationType || "", slPlacement: trade.slPlacement || "", tpPlacement: trade.tpPlacement || "", mistake: trade.mistake || "", holdQuality: trade.holdQuality || "", patienceScore: trade.patienceScore ? String(trade.patienceScore) : "", risk: trade.risk ?? "", reward: trade.reward ?? "", pnl: trade.pnl ?? "", notes: trade.notes || "", emotionBefore: trade.emotionBefore || "", emotionDuring: trade.emotionDuring || "", emotionAfter: trade.emotionAfter || "", mt5Ticket: trade.mt5Ticket ? String(trade.mt5Ticket) : "" }); setScreenshot(undefined); setTradeDialog(true); };
+pages/GoldJournal.tsx:114:  const submitTrade = async () => { if (!account) return; if (!tradeForm.direction || !tradeForm.result) { toast.error("Select a direction and result before saving a manual trade."); return; } const date = Date.parse(`${tradeForm.tradeDate}T12:00:00+05:00`); if (!Number.isFinite(date) || (!editing && isFuturePktDate(tradeForm.tradeDate))) { toast.error("Future trade dates are not allowed."); return; } const payload = { accountId: account.id, tradeDate: date, session: tradeForm.session, direction: tradeForm.direction, result: tradeForm.result, level: tradeForm.level, timeframe: tradeForm.timeframe, setupQuality: tradeForm.setupQuality, executionType: tradeForm.executionType, marketCondition: tradeForm.marketCondition, biasAlignment: tradeForm.biasAlignment, confirmationType: tradeForm.confirmationType, slPlacement: tradeForm.slPlacement, tpPlacement: tradeForm.tpPlacement, mistake: tradeForm.mistake, holdQuality: tradeForm.holdQuality, patienceScore: tradeForm.patienceScore ? Number(tradeForm.patienceScore) : null, risk: tradeForm.risk === "" ? null : Number(tradeForm.risk), reward: tradeForm.reward === "" ? null : Number(tradeForm.reward), pnl: Number(tradeForm.pnl || 0), notes: tradeForm.notes, emotionBefore: tradeForm.emotionBefore, emotionDuring: tradeForm.emotionDuring, emotionAfter: tradeForm.emotionAfter, mt5Ticket: tradeForm.mt5Ticket || undefined };
+pages/GoldJournal.tsx:115:    try { const result = editing ? await updateTrade.mutateAsync({ ...payload, tradeId: editing.id }) : await createTrade.mutateAsync(payload); const tradeId = editing?.id ?? result.id; if (screenshot) { const fileData = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(screenshot); }); setUploadProgress(50); try { await uploadScreenshot.mutateAsync({ tradeId, fileName: screenshot.name, mimeType: screenshot.type as "image/jpeg" | "image/png" | "image/webp", base64: fileData }); setUploadProgress(100); } catch { toast.warning("Trade saved but screenshot upload failed. Re-upload from edit."); } } toast.success(editing ? "Trade updated." : "Trade saved and balance recalculated."); setTradeDialog(false); refresh(); } catch (error: any) { toast.error(error.message || "Trade could not be saved."); } };
+pages/GoldJournal.tsx:126:  const TradeDialog = TradeDialogWithCustomOptions;
+pages/GoldJournal.tsx:130:  return <div className="gj-shell"><>{!isOnline && <div className="offline-banner"><WifiOff size={15} /> You are offline — showing last synced data.</div>}</><AppSidebar account={account} accounts={data?.accounts ?? []} stats={stats} active={view} onView={next => { setView(next); setMobileNav(false); }} collapsed={collapsed} onCollapse={() => setCollapsed(!collapsed)} open={mobileNav} online={isOnline} alertCount={dangerGoals.length} user={user} onLogout={logout} onInstall={requestInstall} onAccount={setAccountId} /><main className="gj-main"><MobileTopbar onMenu={() => setMobileNav(true)} onAdd={() => openNewTrade()} /><PageHeader view={view} online={isOnline} alerts={dangerGoals.length} onNew={() => openNewTrade()} />{journalQuery.isLoading ? <Loading onReconnect={reconnectSession} reconnectStatus={reconnectStatus} /> : journalQuery.isError ? <QueryError error={journalQuery.error} onRetry={retryJournal} /> : <div className="view-wrap">{view === "trades" && <TradeLog stats={stats} trades={pagedTrades} allTrades={trades} pagination={tradeListQuery.data} listLoading={tradeListQuery.isLoading || tradeListQuery.isFetching} listError={tradeListQuery.error} onRetry={() => void tradeListQuery.refetch()} account={account} dangerGoals={dangerGoals} mt5LivePositions={mt5Workspace.data?.openPositions ?? []} mt5Summary={activeMt5Connection} mt5Syncing={mt5Workspace.isFetching} hasMt5Connection={(mt5Workspace.data?.connections?.length ?? 0) > 0} search={search} resultFilter={resultFilter} setSearch={setSearch} setResultFilter={setResultFilter} onPage={setTradePage} onNew={() => openNewTrade()} onDuplicate={() => openNewTrade(trades[0])} onEdit={openEdit} onDelete={async id => { if (!window.confirm("Delete this trade and remove its screenshot reference?")) return; await deleteTrade.mutateAsync({ tradeId: id }); toast.success("Trade deleted."); refresh(); }} onCash={setCashDialog} onCsv={exportCsv} onExcel={exportExcel} onPdf={exportPdf} onClear={async () => { if (!account || !window.confirm("Permanently delete every trade in the active account?")) return; await clearAll.mutateAsync({ accountId: account.id, confirmed: true }); refresh(); }} />}{view === "missed" && <MissedView rows={data?.skippedTrades ?? []} account={account} refresh={refresh} />}{view === "analysis" && <AnalysisView trades={trades} stats={stats} />}{view === "goals" && <GoalsView account={account} goals={data?.goals ?? []} trades={trades} plans={data?.dailyPlans ?? []} pending={createGoal.isPending || updateGoal.isPending || deleteGoal.isPending || clearGoals.isPending} onCreate={async draft => { if (!account) return; await createGoal.mutateAsync({ accountId: account.id, ...draft }); toast.success("Goal created."); refresh(); }} onUpdate={async goal => { if (!account) return; await updateGoal.mutateAsync({ accountId: account.id, ...goal }); toast.success("Goal updated."); refresh(); }} onDelete={async goal => { await deleteGoal.mutateAsync({ goalId: goal.id }); toast.success("Goal deleted."); refresh(); }} onClear={async () => { if (!account) return; await clearGoals.mutateAsync({ accountId: account.id, confirmed: true }); refresh(); }} />}{view === "calendar" && <CalendarView trades={trades} />}{view === "plan" && <PlanView account={account} plans={data?.dailyPlans ?? []} onSaved={refresh} />}{view === "mentor" && <MentorView trades={trades} stats={stats} account={account} />}{view === "mt5" && <Mt5LiveView account={account} accounts={data?.accounts ?? []} onJournalNow={(position: any) => openNewTrade({ direction: position.direction, risk: String(position.riskUsd ?? ""), reward: String(position.rewardUsd ?? ""), pnl: String(position.realizedPnl ?? ""), result: position.result, mt5Ticket: position.ticket, notes: "MT5 trade auto-filled. Add your analysis details below." })} />}{view === "options" && <OptionsView user={user} account={account} accounts={data?.accounts ?? []} onAccount={setAccountId} onCreate={async name => { const result = await createAccount.mutateAsync({ name, startingBalance: 0 }); setAccountId(result.id); toast.success("New trading account created."); refresh(); }} onClear={async () => { if (!account || !window.confirm("Clear all active-account trades?")) return; await clearAll.mutateAsync({ accountId: account.id, confirmed: true }); refresh(); }} />}</div>}</main><MobileNav active={view} onView={setView} /><TradeDialog open={tradeDialog} setOpen={setTradeDialog} form={tradeForm} setForm={setTradeForm} editing={editing} onSave={submitTrade} pending={createTrade.isPending || updateTrade.isPending} screenshot={screenshot} setScreenshot={setScreenshot} progress={uploadProgress} /><CashDialog type={cashDialog} setType={setCashDialog} amount={cashAmount} setAmount={setCashAmount} note={cashNote} setNote={setCashNote} onSave={async () => { if (!account || !cashDialog || Number(cashAmount) <= 0) return; await createCash.mutateAsync({ accountId: account.id, movementDate: Date.now(), type: cashDialog, amount: Number(cashAmount), note: cashNote }); toast.success("Cash movement saved."); setCashDialog(null); setCashAmount(""); setCashNote(""); refresh(); }} pending={createCash.isPending} /><InstallDialog open={installHelp} setOpen={setInstallHelp} /></div>;
+pages/GoldJournal.tsx:133:function AppSidebar({ account, accounts, stats, active, onView, collapsed, onCollapse, open, online, alertCount, user, onLogout, onInstall, onAccount }: any) {
+pages/GoldJournal.tsx:158:function MissedView({ rows, account, refresh }: any) { const createSkipped = trpc.skipped.create.useMutation(); const [open, setOpen] = useState(false); const [form, setForm] = useState({ date: dateInput(), session: getPktSession(), direction: "BUY", reason: "Fear - SL looked too big", confidence: "3", outcome: "TP Hit - Full", missed: "", notes: "" }); return <><section className="section-heading"><div><span className="eyebrow">OPPORTUNITY REVIEW</span><h2>Missed / skipped trades</h2><p>Track what you saw, why you passed, and what happened afterwards.</p></div><Button onClick={() => setOpen(true)}><Plus size={16} /> Log Skipped Trade</Button></section><div className="stats-grid compact"><StatCard label="Total skipped" value={String(rows.length)} detail="Recorded opportunities" tone="neutral" /><StatCard label="Estimated missed" value={formatMoney(rows.reduce((sum: number, row: any) => sum + toNumber(row.estimatedMissed), 0))} detail="Potential, not realized" /><StatCard label="Top reason" value={rows[0]?.skipReason || "—"} detail="Based on entries" tone="neutral" /></div><section className="panel">{rows.length ? <div className="trade-table-wrap"><table className="trade-table"><thead><tr><th>Date</th><th>Session</th><th>Direction</th><th>Reason</th><th>Confidence</th><th>Outcome</th><th>Est. missed</th></tr></thead><tbody>{rows.map((row: any) => <tr key={row.id}><td className="data-text">{formatDate(row.tradeDate)}</td><td>{row.session}</td><td>{row.direction}</td><td>{row.skipReason}</td><td>{row.confidence}/5</td><td>{row.outcome}</td><td className="positive data-text">{formatMoney(row.estimatedMissed)}</td></tr>)}</tbody></table></div> : <EmptyState title="No skipped opportunities yet." copy="Logging a skipped setup turns a moment of uncertainty into reviewable evidence." />}</section><Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>Log skipped trade</DialogTitle><DialogDescription>Capture the missed opportunity without diluting the main trade log.</DialogDescription></DialogHeader><div className="stacked-fields"><Field label="Date"><Input type="date" value={form.date} onChange={event => setForm({ ...form, date: event.target.value })} /></Field><Field label="Session"><select value={form.session} onChange={event => setForm({ ...form, session: event.target.value })}>{sessions.map(item => <option key={item}>{item}</option>)}</select></Field><Field label="Skip reason"><Input value={form.reason} onChange={event => setForm({ ...form, reason: event.target.value })} /></Field><Field label="Outcome"><Input value={form.outcome} onChange={event => setForm({ ...form, outcome: event.target.value })} /></Field><Field label="Estimated $ missed"><Input type="number" value={form.missed} onChange={event => setForm({ ...form, missed: event.target.value })} /></Field><Field label="Notes"><Textarea value={form.notes} onChange={event => setForm({ ...form, notes: event.target.value })} /></Field></div><div className="dialog-actions"><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={async () => { if (!account) return; await createSkipped.mutateAsync({ accountId: account.id, tradeDate: new Date(`${form.date}T12:00:00`).getTime(), session: form.session, level: "", timeframe: "", direction: form.direction as "BUY" | "SELL", skipReason: form.reason, confidence: Number(form.confidence), outcome: form.outcome, estimatedMissed: Number(form.missed || 0), notes: form.notes }); toast.success("Skipped trade logged."); setOpen(false); refresh(); }}>Save skipped trade</Button></div></DialogContent></Dialog></>; }
+pages/GoldJournal.tsx:160:function AnalysisView({ trades, stats }: any) { const data = sessions.map(session => ({ session: session.replace("Post-", "P-"), pnl: trades.filter((trade: any) => trade.session === session).reduce((sum: number, trade: any) => sum + toNumber(trade.pnl), 0) })); return <><section className="section-heading"><div><span className="eyebrow">PATTERN RECOGNITION</span><h2>Performance analysis</h2><p>Use journal history to see where your edge is earned—or given back.</p></div></section><div className="analysis-grid"><section className="panel chart-panel"><div className="panel-title"><div><span>NET P&L BY SESSION</span><h3>Session performance</h3></div><BarChart3 size={18} /></div>{trades.length ? <ResponsiveContainer width="100%" height={300}><BarChart data={data}><CartesianGrid vertical={false} stroke="rgba(255,255,255,.06)" /><XAxis dataKey="session" tick={{ fill: "#7f8790", fontSize: 11 }} axisLine={false} tickLine={false} /><YAxis tick={{ fill: "#7f8790", fontSize: 11 }} axisLine={false} tickLine={false} /><Tooltip contentStyle={{ background: "#171d24", border: "1px solid #303a45", borderRadius: "10px" }} /><Bar dataKey="pnl" fill="#e9b64b" radius={[5, 5, 0, 0]} /></BarChart></ResponsiveContainer> : <EmptyState title="Charts appear with your data." copy="Complete trades will be grouped by session and execution context." />}</section><section className="panel insight-panel"><div className="panel-title"><div><span>QUICK READ</span><h3>Current signal</h3></div><Zap size={18} /></div><div className="insight-number data-text">{stats.winRate.toFixed(1)}%</div><p>Current win rate across {stats.total} recorded trades.</p><div className="metric-list"><span>Net P&L <b className="data-text">{formatMoney(stats.pnl)}</b></span><span>Wins / losses <b className="data-text">{stats.wins} / {stats.losses}</b></span></div></section></div><section className="panel heatmap-panel"><div className="panel-title"><div><span>PERFORMANCE HEATMAP</span><h3>By session</h3></div></div><div className="heatmap-table">{sessions.map(session => { const rows = trades.filter((trade: any) => trade.session === session); const rate = rows.length ? rows.filter((row: any) => row.result === "WIN").length / rows.length * 100 : 0; return <div key={session}><strong>{session}</strong><span>{rows.length} trades</span><i className={rate > 60 ? "good" : rate < 40 && rows.length ? "bad" : "neutral"} style={{ width: `${Math.max(10, rate)}%` }} /><b className="data-text">{rows.length ? `${rate.toFixed(0)}%` : "—"}</b><em className="data-text">{formatMoney(rows.reduce((sum: number, row: any) => sum + toNumber(row.pnl), 0))}</em></div>; })}</div></section></>; }
+pages/GoldJournal.tsx:182:  return <><section className="section-heading"><div><span className="eyebrow">CONTROL CENTER</span><h2>Options</h2><p>Manage accounts, reusable journal lists, and security-sensitive actions.</p></div></section><div className="options-grid"><section className="panel profile-panel"><span className="section-label">PROFILE</span><div className="profile-row"><span className="avatar large">{initials(user?.name)}</span><div><strong>{user?.name || "Gold Trader"}</strong><p>{user?.email || "Authenticated account"}</p></div></div><div className="profile-meta"><span>Provider <b>Secure cloud sign-in</b></span><span>Data scope <b>Private to this account</b></span></div></section><section className="panel account-panel"><span className="section-label">TRADING ACCOUNTS</span><div className="account-list">{accounts.map((item: any) => <button key={item.id} className={item.id === account?.id ? "current" : ""} onClick={() => onAccount(item.id)}><span><Wallet size={15} /> {item.name}</span>{item.id === account?.id && <Check size={15} />}</button>)}</div><div className="inline-form"><Input value={name} onChange={event => setName(event.target.value)} placeholder="New account name" /><Button disabled={!name.trim()} onClick={() => { onCreate(name.trim()); setName(""); }}><Plus size={15} /> Add</Button></div></section><section className="panel list-manager"><span className="section-label">RULES & DROPDOWNS</span><p>Create custom rules and values for future trade, plan, and review entries. Disabling an item keeps existing records intact.</p><div className="inline-form option-page-create"><select value={category} onChange={event => setCategory(event.target.value)}>{["Trading rule", "Session", "Level", "Timeframe", "Setup quality", "Execution type", "Market condition", "Mistake", "Confirmation"].map(item => <option key={item}>{item}</option>)}</select><Input value={optionValue} onChange={event => setOptionValue(event.target.value)} placeholder="New rule or dropdown value" /><Button disabled={addOption.isPending || !optionValue.trim()} onClick={createOption}><Plus size={15} /> Add</Button></div><div className="option-page-groups">{Object.keys(optionGroups).length ? Object.entries(optionGroups).map(([group, items]) => <div key={group}><strong>{group}</strong><div className="option-pills">{(items as any[]).map(item => <label className={item.active ? "active" : "inactive"} key={item.id}><input type="checkbox" checked={item.active} disabled={toggleOption.isPending} onChange={async event => { await toggleOption.mutateAsync({ optionId: item.id, active: event.target.checked }); await utils.optionLists.list.invalidate(); }} />{item.value}</label>)}</div></div>) : <p className="muted">No custom journal values yet. Add one above to make it available for future entries.</p>}</div></section><section className="panel danger-zone"><span className="section-label">DANGER ZONE</span><h3>Clear active account trades</h3><p>This permanently removes the current account's trade log. Cash movements are retained separately.</p><Button variant="outline" className="danger-button" onClick={() => setConfirmClear(true)}><Trash2 size={15} /> Clear all trades</Button></section></div><Dialog open={confirmClear} onOpenChange={setConfirmClear}><DialogContent><DialogHeader><DialogTitle>Clear active account trades?</DialogTitle><DialogDescription>This permanently removes every trade in {account?.name || "the active account"}. Cash movements remain. This cannot be undone.</DialogDescription></DialogHeader><div className="dialog-actions"><Button variant="outline" onClick={() => setConfirmClear(false)}>Cancel</Button><Button className="danger-button" onClick={() => { onClear(); setConfirmClear(false); }}>Confirm clear</Button></div></DialogContent></Dialog></>; }
+pages/GoldJournal.tsx:184:function TradeDialog({ open, setOpen, form, setForm, editing, onSave, pending, screenshot, setScreenshot, progress }: any) { const fileRef = useRef<HTMLInputElement>(null); return <Dialog open={open} onOpenChange={setOpen}><DialogContent className="trade-dialog"><DialogHeader><DialogTitle>{editing ? "Edit trade" : "New trade"}</DialogTitle><DialogDescription>{editing ? "Update the journal detail and retain the original session." : "Session is detected from Pakistan Standard Time and can be overridden."}</DialogDescription></DialogHeader><div className="trade-form"><FormSection title="Trade details"><Field label="Date"><Input type="date" value={form.tradeDate} max={dateInput()} onChange={event => setForm({ ...form, tradeDate: event.target.value })} /></Field><Field label="Session"><select value={form.session} onChange={event => setForm({ ...form, session: event.target.value })}>{sessions.map(item => <option key={item}>{item}</option>)}</select></Field><Field label="Direction"><select value={form.direction} onChange={event => setForm({ ...form, direction: event.target.value })}><option>BUY</option><option>SELL</option></select></Field><Field label="Result"><select value={form.result} onChange={event => setForm({ ...form, result: event.target.value })}>{results.map(item => <option key={item} value={item}>{item.replace("_", " ")}</option>)}</select></Field></FormSection><FormSection title="Strategy"><Field label="Level"><select value={form.level} onChange={event => setForm({ ...form, level: event.target.value })}><option value="">Select level</option>{levels.map(item => <option key={item}>{item}</option>)}</select></Field><Field label="Timeframe"><select value={form.timeframe} onChange={event => setForm({ ...form, timeframe: event.target.value })}>{["1m", "5m", "15m", "H1", "4H"].map(item => <option key={item}>{item}</option>)}</select></Field><Field label="Setup quality"><select value={form.setupQuality} onChange={event => setForm({ ...form, setupQuality: event.target.value })}>{["A+", "A", "B"].map(item => <option key={item}>{item}</option>)}</select></Field><Field label="Confirmation"><Input value={form.confirmationType} placeholder="BOS, CHoCH…" onChange={event => setForm({ ...form, confirmationType: event.target.value })} /></Field></FormSection><FormSection title="Execution"><Field label="Execution type"><select value={form.executionType} onChange={event => setForm({ ...form, executionType: event.target.value })}>{executionTypes.map(item => <option key={item}>{item}</option>)}</select></Field><Field label="Market condition"><Input value={form.marketCondition} placeholder="Bullish, ranging…" onChange={event => setForm({ ...form, marketCondition: event.target.value })} /></Field><Field label="Patience 1–5"><Input type="number" min="1" max="5" value={form.patienceScore} onChange={event => setForm({ ...form, patienceScore: event.target.value })} /></Field></FormSection><FormSection title="Risk"><Field label="Risk $"><Input type="number" min="0" step="0.01" value={form.risk} onChange={event => setForm({ ...form, risk: event.target.value })} /></Field><Field label="Reward $"><Input type="number" min="0" step="0.01" value={form.reward} onChange={event => setForm({ ...form, reward: event.target.value })} /></Field><Field label="P&L $"><Input type="number" step="0.01" value={form.pnl} onChange={event => setForm({ ...form, pnl: event.target.value })} /></Field><div className="rr-live"><span>LIVE R:R</span><strong className="data-text">{formatRr(form.risk, form.reward)}</strong></div></FormSection><FormSection title="Screenshot"><div className="upload-box" onClick={() => fileRef.current?.click()}><ImagePlus size={20} /><div><strong>{screenshot ? screenshot.name : "Click to upload a screenshot"}</strong><span>JPG, PNG or WEBP · 5MB maximum</span></div><input ref={fileRef} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { const file = event.target.files?.[0]; if (!file) return; if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { toast.error("Use a JPG, PNG, or WEBP screenshot."); return; } if (file.size > 5 * 1024 * 1024) { toast.error("Screenshot must be 5MB or smaller."); return; } setScreenshot(file); }} /></div>{progress > 0 && <div className="upload-progress"><i style={{ width: `${progress}%` }} /></div>}</FormSection><FormSection title="Emotions"><Field label="Before trade"><Textarea value={form.emotionBefore} placeholder="Calm, focused, dar raha tha…" onChange={event => setForm({ ...form, emotionBefore: event.target.value })} /></Field><Field label="During trade"><Textarea value={form.emotionDuring} placeholder="What were you thinking?" onChange={event => setForm({ ...form, emotionDuring: event.target.value })} /></Field><Field label="After trade"><Textarea value={form.emotionAfter} placeholder="Satisfied, gussa aya, should have held…" onChange={event => setForm({ ...form, emotionAfter: event.target.value })} /></Field></FormSection><FormSection title="Notes"><Textarea value={form.notes} rows={4} placeholder="English + Roman Urdu supported…" onChange={event => setForm({ ...form, notes: event.target.value })} /></FormSection></div><div className="dialog-actions"><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button disabled={pending} onClick={onSave}>{pending ? "Saving…" : editing ? "Save changes" : "Save trade"}</Button></div></DialogContent></Dialog>; }
+pages/GoldJournal.tsx:185:function CashDialog({ type, setType, amount, setAmount, note, setNote, onSave, pending }: any) { return <Dialog open={Boolean(type)} onOpenChange={open => !open && setType(null)}><DialogContent><DialogHeader><DialogTitle>{type === "DEPOSIT" ? "Deposit funds" : "Withdraw funds"}</DialogTitle><DialogDescription>The cash movement recalculates balance immediately.</DialogDescription></DialogHeader><div className="stacked-fields"><Field label="Amount"><Input autoFocus type="number" min="0.01" value={amount} onChange={event => setAmount(event.target.value)} /></Field><Field label="Note"><Textarea value={note} onChange={event => setNote(event.target.value)} /></Field></div><div className="dialog-actions"><Button variant="outline" onClick={() => setType(null)}>Cancel</Button><Button disabled={pending || Number(amount) <= 0} onClick={onSave}>{pending ? "Saving…" : "Save movement"}</Button></div></DialogContent></Dialog>; }
+pages/GoldJournal.tsx:186:function GoalDialog({ open, setOpen, draft, setDraft, onSave }: any) { return <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>Add custom goal</DialogTitle><DialogDescription>Create a trackable goal for the active account.</DialogDescription></DialogHeader><div className="stacked-fields"><Field label="Name"><Input value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} /></Field><Field label="Description"><Input value={draft.description} onChange={event => setDraft({ ...draft, description: event.target.value })} /></Field><Field label="Period"><select value={draft.period} onChange={event => setDraft({ ...draft, period: event.target.value })}><option value="DAILY">Daily</option><option value="WEEKLY">Weekly</option><option value="MONTHLY">Monthly</option></select></Field><Field label="Metric"><select value={draft.metric} onChange={event => setDraft({ ...draft, metric: event.target.value })}><option value="trade_count">Trade count</option><option value="net_pnl">Net P&L</option><option value="win_rate">Win rate</option><option value="avg_rr">Average R:R</option></select></Field><Field label="Direction"><select value={draft.comparison} onChange={event => setDraft({ ...draft, comparison: event.target.value })}><option value="GTE">At least</option><option value="LTE">At most</option></select></Field><Field label="Target"><Input type="number" min="0" value={draft.target} onChange={event => setDraft({ ...draft, target: event.target.value })} /></Field></div><div className="dialog-actions"><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={onSave}>Add goal</Button></div></DialogContent></Dialog>; }
+pages/GoldJournal.tsx:187:function InstallDialog({ open, setOpen }: any) { return <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>Install Gold Journal</DialogTitle><DialogDescription>Add the journal to your device for a focused, standalone experience.</DialogDescription></DialogHeader><div className="install-instructions"><p><b>Android / Desktop:</b> use Install App in the browser menu or address bar.</p><p><b>iPhone / iPad:</b> tap Share, then choose <b>Add to Home Screen</b>.</p></div><Button onClick={() => setOpen(false)}>Done</Button></DialogContent></Dialog>; }
+components/AIChatBox.tsx:126:  const inputAreaRef = useRef<HTMLFormElement>(null);
+components/AIChatBox.tsx:154:    const viewport = scrollAreaRef.current?.querySelector(
+components/AIChatBox.tsx:168:  const handleSubmit = (e: React.FormEvent) => {
+components/AccountRenameControl.test.tsx:5:import { setSelectedAccountId } from "@/lib/accountSelection";
+components/AccountRenameControl.test.tsx:25:vi.mock("@/components/ui/dialog", () => ({ Dialog: ({ children }: any) => <>{children}</>, DialogContent: ({ children }: any) => <div>{children}</div>, DialogDescription: ({ children }: any) => <p>{children}</p>, DialogHeader: ({ children }: any) => <div>{children}</div>, DialogTitle: ({ children }: any) => <h2>{children}</h2> }));
+components/AccountRenameControl.test.tsx:31:  beforeEach(() => { mocks.queryInputs.length = 0; setSelectedAccountId(undefined); });
+components/AccountRenameControl.test.tsx:34:    setSelectedAccountId(12);
+components/AccountRenameControl.test.tsx:38:    await act(async () => { setSelectedAccountId(24); });
+components/AccountRenameControl.tsx:6:import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+components/AccountRenameControl.tsx:9:import { getSelectedAccountId, setSelectedAccountId, subscribeSelectedAccount } from "@/lib/accountSelection";
+components/AccountRenameControl.tsx:13:  const [selectedAccountId, setLocalSelectedAccountId] = useState<number | undefined>(() => getSelectedAccountId());
+components/AccountRenameControl.tsx:26:  useEffect(() => subscribeSelectedAccount(setLocalSelectedAccountId), []);
+components/AccountRenameControl.tsx:39:    try { const result = await create.mutateAsync({ name: trimmed, startingBalance: 0 }); setNewName(""); setSelectedAccountId(result.id); await refresh(); toast.success("New trading account created."); } catch (error: any) { toast.error(error.message || "Account could not be created."); }
+components/AccountRenameControl.tsx:43:    try { const result = await remove.mutateAsync({ accountId: removalTarget.id, confirmed: true }); setSelectedAccountId(result.replacementAccountId); setRemovalTarget(null); await refresh(); toast.success("Account and its journal records were removed."); } catch (error: any) { toast.error(error.message || "Account could not be removed."); }
+components/AccountRenameControl.tsx:46:  return <><button className="account-rename-fab" onClick={() => setOpen(true)} title="Manage trading accounts"><Wallet size={15} /><span>Manage accounts</span></button><Dialog open={open} onOpenChange={setOpen}><DialogContent className="account-manager-dialog"><DialogHeader><DialogTitle>Trading accounts</DialogTitle><DialogDescription>Create separate journals, switch the active account, rename it, or remove an account only after confirmation.</DialogDescription></DialogHeader><div className="manager-account-list">{accounts.map((item: any) => <button className={item.id === account.id ? "current" : ""} key={item.id} onClick={() => setSelectedAccountId(item.id)}><span><Wallet size={15} />{item.name}</span>{item.id === account.id && <Check size={15} />}</button>)}</div><div className="manager-create-row"><Input value={newName} maxLength={100} onChange={event => setNewName(event.target.value)} placeholder="New account name" /><Button disabled={create.isPending || !newName.trim()} onClick={addAccount}><Plus size={15} />{create.isPending ? "Adding…" : "Add account"}</Button></div><div className="manager-rename-row"><Input value={name} maxLength={100} onChange={event => setName(event.target.value)} placeholder="Active account name" /><Button variant="outline" disabled={rename.isPending || !name.trim()} onClick={saveName}><Pencil size={14} />{rename.isPending ? "Saving…" : "Rename"}</Button></div><div className="manager-danger"><div><strong>Remove active account</strong><p>Trade records, cash movements, goals, plans, and skipped trades in this account will be permanently removed. At least one other account must remain.</p></div><Button variant="outline" className="danger-button" disabled={accounts.length < 2} onClick={() => setRemovalTarget(account)}><Trash2 size={14} /> Remove</Button></div>{removalTarget && <div className="manager-confirm"><strong>Remove “{removalTarget.name}”?</strong><p>This cannot be undone. A different account will become active.</p><div className="dialog-actions"><Button variant="outline" onClick={() => setRemovalTarget(null)}>Keep account</Button><Button className="danger-button" disabled={remove.isPending} onClick={removeAccount}>{remove.isPending ? "Removing…" : "Confirm removal"}</Button></div></div>}</DialogContent></Dialog></>;
+components/BulkPdfExporter.test.tsx:7:vi.mock("@/lib/accountSelection", () => ({ getSelectedAccountId: () => 3, subscribeSelectedAccount: () => () => {} }));
+components/BulkPdfExporter.test.tsx:11:vi.mock("@/components/ui/dialog", () => ({ Dialog: ({ children }: any) => <>{children}</>, DialogContent: ({ children }: any) => <div>{children}</div>, DialogDescription: ({ children }: any) => <p>{children}</p>, DialogHeader: ({ children }: any) => <div>{children}</div>, DialogTitle: ({ children }: any) => <h2>{children}</h2> }));
+components/BulkPdfExporter.test.tsx:22:    expect(document.querySelector(".pdf-selection-summary")?.textContent).toContain("1 recent preview trade");
+components/BulkPdfExporter.tsx:5:import { getSelectedAccountId, subscribeSelectedAccount } from "@/lib/accountSelection";
+components/BulkPdfExporter.tsx:10:import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+components/BulkPdfExporter.tsx:28:  const [accountId, setAccountId] = useState<number | undefined>(() => getSelectedAccountId());
+components/BulkPdfExporter.tsx:34:  useEffect(() => subscribeSelectedAccount(setAccountId), []);
+components/BulkPdfExporter.tsx:49:      const reportSelected = selectBulkPdfTrades(reportTrades, account.id, allTime ? undefined : from, allTime ? undefined : to);
+components/BulkPdfExporter.tsx:50:      const reportSummary = summarizeBulkPdfTrades(reportSelected);
+components/BulkPdfExporter.tsx:51:      if (!reportSelected.length) { toast.error("No trades match this export range."); return; }
+components/BulkPdfExporter.tsx:62:      for (let index = 0; index < reportSelected.length; index += 1) {
+components/BulkPdfExporter.tsx:63:        const trade: any = reportSelected[index];
+components/BulkPdfExporter.tsx:65:        sectionTitle(pdf, `Trade card ${String(index + 1).padStart(2, "0")} / ${String(reportSelected.length).padStart(2, "0")}`, `${formatDate(trade.tradeDate)} · ${trade.direction} · ${trade.result.replace("_", " ")}`);
+components/BulkPdfExporter.tsx:74:      pdf.addPage(); setPageBackground(pdf); sectionTitle(pdf, "Selected-period analysis", "Performance snapshot");
+components/BulkPdfExporter.tsx:75:      const sessions = Array.from(new Set(reportSelected.map((trade: any) => trade.session || "Unspecified")));
+components/BulkPdfExporter.tsx:77:      sessions.forEach((session, index) => { const rows = reportSelected.filter((trade: any) => (trade.session || "Unspecified") === session); const pnl = rows.reduce((sum: number, trade: any) => sum + toNumber(trade.pnl), 0); const y = 58 + index * 11; const pnlColor = pnl >= 0 ? colors.green : colors.red; pdf.setTextColor(...colors.text); pdf.setFontSize(10); pdf.text(session, page.margin, y); pdf.setTextColor(pnlColor[0], pnlColor[1], pnlColor[2]); pdf.text(formatMoney(pnl), 115, y); pdf.setTextColor(...colors.muted); pdf.text(`${rows.length} trade${rows.length === 1 ? "" : "s"}`, 155, y); });
+components/BulkPdfExporter.tsx:81:      const daily = new Map<string, number>(); reportSelected.forEach((trade: any) => { const key = dateInput(trade.tradeDate); daily.set(key, (daily.get(key) || 0) + toNumber(trade.pnl)); });
+components/BulkPdfExporter.tsx:83:      pdf.setTextColor(...colors.muted); pdf.setFontSize(9); pdf.text("Selected date", page.margin, 45); pdf.text("Trades", 95, 45); pdf.text("Daily P&L", 145, 45);
+components/BulkPdfExporter.tsx:84:      entries.forEach(([day, pnl], index) => { const y = 55 + (index % 20) * 10; if (index === 20) { pdf.addPage(); setPageBackground(pdf); sectionTitle(pdf, "P&L calendar", "Daily performance (continued)"); } const pnlColor = pnl >= 0 ? colors.green : colors.red; pdf.setTextColor(...colors.text); pdf.setFontSize(9); pdf.text(day, page.margin, index < 20 ? y : 55 + (index - 20) * 10); const count = reportSelected.filter((trade: any) => dateInput(trade.tradeDate) === day).length; pdf.text(String(count), 95, index < 20 ? y : 55 + (index - 20) * 10); pdf.setTextColor(pnlColor[0], pnlColor[1], pnlColor[2]); pdf.text(formatMoney(pnl), 145, index < 20 ? y : 55 + (index - 20) * 10); });
+components/BulkPdfExporter.tsx:92:  return <Dialog open={open} onOpenChange={setOpen}><DialogContent className="bulk-pdf-dialog"><DialogHeader><DialogTitle>Bulk trade-log PDF</DialogTitle><DialogDescription>Download selected trade cards with screenshot evidence, period analysis, and a P&L calendar. The report contains only the active account.</DialogDescription></DialogHeader><div className="pdf-range-mode"><button className={allTime ? "active" : ""} onClick={() => setAllTime(true)}>Whole trade log</button><button className={!allTime ? "active" : ""} onClick={setCustom}><CalendarRange size={14} /> Custom date range</button></div>{!allTime && <div className="pdf-date-range"><label>From<Input type="date" value={from} onChange={event => setFrom(event.target.value)} /></label><label>To<Input type="date" value={to} onChange={event => setTo(event.target.value)} /></label></div>}<div className="pdf-selection-summary"><span><b>{selected.length}</b> recent preview trade{selected.length === 1 ? "" : "s"}</span><span>Recent P&L <b className={summary.pnl >= 0 ? "positive" : "negative"}>{formatMoney(summary.pnl)}</b></span></div><div className="pdf-export-includes"><ImageIcon size={15} /><span>The report fetches every page only when you download it. Every selected trade becomes a card; available screenshot evidence is attached, followed by analysis and daily P&L calendar pages.</span></div><div className="dialog-actions"><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button disabled={busy || !account} onClick={createPdf}><FileDown size={15} />{busy ? "Building report…" : "Download bulk PDF"}</Button></div></DialogContent></Dialog>;
+components/DashboardLayout.tsx:10:  Sidebar,
+components/DashboardLayout.tsx:11:  SidebarContent,
+components/DashboardLayout.tsx:12:  SidebarFooter,
+components/DashboardLayout.tsx:13:  SidebarHeader,
+components/DashboardLayout.tsx:14:  SidebarInset,
+components/DashboardLayout.tsx:15:  SidebarMenu,
+components/DashboardLayout.tsx:16:  SidebarMenuButton,
+components/DashboardLayout.tsx:17:  SidebarMenuItem,
+components/DashboardLayout.tsx:18:  SidebarProvider,
+components/DashboardLayout.tsx:19:  SidebarTrigger,
+components/DashboardLayout.tsx:20:  useSidebar,
+components/DashboardLayout.tsx:45:  const [sidebarWidth, setSidebarWidth] = useState(() => {
+components/DashboardLayout.tsx:84:    <SidebarProvider
+components/DashboardLayout.tsx:91:      <DashboardLayoutContent setSidebarWidth={setSidebarWidth}>
+components/DashboardLayout.tsx:94:    </SidebarProvider>
+components/DashboardLayout.tsx:100:  setSidebarWidth: (width: number) => void;
+components/DashboardLayout.tsx:105:  setSidebarWidth,
+components/DashboardLayout.tsx:109:  const { state, toggleSidebar } = useSidebar();
+components/DashboardLayout.tsx:129:        setSidebarWidth(newWidth);
+components/DashboardLayout.tsx:141:      document.body.style.userSelect = "none";
+components/DashboardLayout.tsx:148:      document.body.style.userSelect = "";
+components/DashboardLayout.tsx:150:  }, [isResizing, setSidebarWidth]);
+components/DashboardLayout.tsx:155:        <Sidebar
+components/DashboardLayout.tsx:160:          <SidebarHeader className="h-16 justify-center">
+components/DashboardLayout.tsx:163:                onClick={toggleSidebar}
+components/DashboardLayout.tsx:172:                    Navigation
+components/DashboardLayout.tsx:177:          </SidebarHeader>
+components/DashboardLayout.tsx:179:          <SidebarContent className="gap-0">
+components/DashboardLayout.tsx:180:            <SidebarMenu className="px-2 py-1">
+components/DashboardLayout.tsx:184:                  <SidebarMenuItem key={item.path}>
+components/DashboardLayout.tsx:185:                    <SidebarMenuButton
+components/DashboardLayout.tsx:195:                    </SidebarMenuButton>
+components/DashboardLayout.tsx:196:                  </SidebarMenuItem>
+components/DashboardLayout.tsx:199:            </SidebarMenu>
+components/DashboardLayout.tsx:200:          </SidebarContent>
+components/DashboardLayout.tsx:202:          <SidebarFooter className="p-3">
+components/DashboardLayout.tsx:231:          </SidebarFooter>
+components/DashboardLayout.tsx:232:        </Sidebar>
+components/DashboardLayout.tsx:243:      <SidebarInset>
+components/DashboardLayout.tsx:247:              <SidebarTrigger className="h-9 w-9 rounded-lg bg-background" />
+components/DashboardLayout.tsx:259:      </SidebarInset>
+components/DashboardLayoutSkeleton.tsx:6:      {/* Sidebar skeleton */}
+components/ManusDialog.tsx:5:  Dialog,
+components/ManusDialog.tsx:6:  DialogContent,
+components/ManusDialog.tsx:7:  DialogDescription,
+components/ManusDialog.tsx:8:  DialogFooter,
+components/ManusDialog.tsx:9:  DialogTitle,
+components/ManusDialog.tsx:12:interface ManusDialogProps {
+components/ManusDialog.tsx:21:export function ManusDialog({
+components/ManusDialog.tsx:28:}: ManusDialogProps) {
+components/ManusDialog.tsx:50:    <Dialog
+components/ManusDialog.tsx:54:      <DialogContent className="py-5 bg-[#f8f8f7] rounded-[20px] w-[400px] shadow-[0px_4px_11px_0px_rgba(0,0,0,0.08)] border border-[rgba(0,0,0,0.08)] backdrop-blur-2xl p-0 gap-0 text-center">
+components/ManusDialog.tsx:60:                alt="Dialog graphic"
+components/ManusDialog.tsx:68:            <DialogTitle className="text-xl font-semibold text-[#34322d] leading-[26px] tracking-[-0.44px]">
+components/ManusDialog.tsx:70:            </DialogTitle>
+components/ManusDialog.tsx:72:          <DialogDescription className="text-sm text-[#858481] leading-5 tracking-[-0.154px]">
+components/ManusDialog.tsx:74:          </DialogDescription>
+components/ManusDialog.tsx:77:        <DialogFooter className="px-5 py-5">
+components/ManusDialog.tsx:85:        </DialogFooter>
+components/ManusDialog.tsx:86:      </DialogContent>
+components/ManusDialog.tsx:87:    </Dialog>
+components/NotificationCenter.test.tsx:11:vi.mock("@/components/ui/dialog", () => ({ Dialog: ({ children }: any) => <>{children}</>, DialogContent: ({ children }: any) => <div>{children}</div>, DialogDescription: ({ children }: any) => <p>{children}</p>, DialogHeader: ({ children }: any) => <div>{children}</div>, DialogTitle: ({ children }: any) => <h2>{children}</h2> }));
+components/NotificationCenter.tsx:6:import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+components/NotificationCenter.tsx:21:  return <><button className={triggerClassName} onClick={() => setOpen(true)} title="Notifications"><Bell size={16} />{unread ? <i>{unread > 9 ? "9+" : unread}</i> : null}</button><Dialog open={open} onOpenChange={setOpen}><DialogContent className="notification-dialog"><DialogHeader><DialogTitle>Journal notifications</DialogTitle><DialogDescription>Control goal alerts and review account-specific journal notifications.</DialogDescription></DialogHeader><section className="notification-settings"><span><Settings2 size={15} /> Alert settings</span><label><input type="checkbox" checked={settings.goalAlerts} onChange={event => saveSettings({ goalAlerts: event.target.checked })} /> Goal alerts</label><label><input type="checkbox" checked={settings.emailAlerts} onChange={event => saveSettings({ emailAlerts: event.target.checked })} /> Email alerts</label></section><section className="notification-history"><div className="notification-history-head"><span>RECENT ACTIVITY</span>{unread ? <Button variant="outline" size="sm" disabled={markRead.isPending} onClick={async () => { await Promise.all(history.filter((entry: any) => !entry.readAt).map((entry: any) => markRead.mutateAsync({ notificationId: entry.id }))); await utils.notifications.get.invalidate(); }}><CheckCheck size={14} /> Mark all read</Button> : null}</div>{history.length ? history.map((entry: any) => <button className={entry.readAt ? "read" : "unread"} key={entry.id} onClick={async () => { if (!entry.readAt) { await markRead.mutateAsync({ notificationId: entry.id }); await utils.notifications.get.invalidate(); } }}><strong>{notificationTitle(entry)}</strong><p>{entry.message || "A journal notification is available."}</p><small>{new Date(entry.createdAt).toLocaleString()}</small></button>) : <p className="muted">No notifications yet. Goal alerts will appear here when recorded.</p>}</section></DialogContent></Dialog></>;
+components/OptionListManager.tsx:6:import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+components/OptionListManager.tsx:24:  return <><button className="options-fab" onClick={() => setOpen(true)} title="Configure journal lists"><ListChecks size={15} /><span>Rules & lists</span></button><Dialog open={open} onOpenChange={setOpen}><DialogContent className="option-manager-dialog"><DialogHeader><DialogTitle>Rules & dropdown lists</DialogTitle><DialogDescription>Create reusable trading rules and values for your journal. Toggle an item off to preserve its history without showing it in future selections.</DialogDescription></DialogHeader><div className="option-create"><select value={category} onChange={event => setCategory(event.target.value)}>{categories.map(item => <option key={item}>{item}</option>)}</select><Input value={value} maxLength={160} placeholder="Add a rule or option" onChange={event => setValue(event.target.value)} /><Button disabled={add.isPending || !value.trim()} onClick={create}><Plus size={15} /> {add.isPending ? "Saving…" : "Add"}</Button></div><div className="option-groups">{Object.keys(groups).length ? Object.entries(groups).map(([group, items]) => <section key={group}><span>{group}</span><div>{(items as any[]).map(item => <label key={item.id} className={item.active ? "active" : "inactive"}><input type="checkbox" checked={item.active} disabled={setActive.isPending} onChange={async event => { await setActive.mutateAsync({ optionId: item.id, active: event.target.checked }); await utils.optionLists.list.invalidate(); }} />{item.value}</label>)}</div></section>) : <p className="muted">No custom values yet. Add a trading rule, setup level, or execution label above.</p>}</div></DialogContent></Dialog></>;
+components/PlanExecutionEditor.tsx:38:  const removeSelected = async () => { if (!account || !selectedPlan || !window.confirm(`Remove the saved protocol for ${new Date(`${planDate}T12:00:00`).toLocaleDateString("en-GB")}?`)) return; try { await removePlan.mutateAsync({ accountId: account.id, planId: selectedPlan.id, confirmed: true }); await onSaved(); beginNew(); toast.success("Session protocol removed."); } catch (error) { toast.error(error instanceof Error ? error.message : "Protocol could not be removed."); } };
+components/PlanExecutionEditor.tsx:43:  return <><section className="section-heading professional-plan-heading"><div><span className="eyebrow">SESSION PROTOCOL</span><h2>Plan & Execution</h2><p>Define scenarios and hard limits before the session. Review adherence, deviation, and one next-session improvement after it closes.</p></div><div className="date-control"><Button variant="outline" onClick={beginNew}><Plus size={15} /> New protocol</Button><Input type="date" value={planDate} onChange={event => setPlanDate(event.target.value)} /><Button variant="outline" onClick={() => setPlanDate(dateInput())}>Today</Button></div></section><div className="plan-layout professional-plan-layout"><section className="panel mini-calendar"><div className="panel-title"><div><span>SESSION ARCHIVE</span><h3>{new Date(`${planDate}T12:00:00`).toLocaleString("en-US", { month: "long", year: "numeric" })}</h3></div></div><label className="plan-archive-search"><Search size={14} /><Input value={archiveSearch} onChange={event => setArchiveSearch(event.target.value)} placeholder="Search saved protocols" aria-label="Search saved protocols" /></label>{archiveSearch && <div className="plan-search-results">{archivedPlans.length ? archivedPlans.map((plan: any) => <button key={plan.id} className={dateInput(new Date(plan.planDate)) === planDate ? "selected" : ""} onClick={() => setPlanDate(dateInput(new Date(plan.planDate)))}><strong>{new Date(plan.planDate).toLocaleDateString("en-GB")}</strong><span>{plan.preBias || "Neutral"} · {plan.keyLevels || plan.marketContext || "Saved protocol"}</span></button>) : <p>No saved protocol matches this search.</p>}</div>}<div className="mini-day-grid">{Array.from({ length: daysInMonth }, (_, index) => { const day = index + 1; const value = `${planDate.slice(0, 8)}${String(day).padStart(2, "0")}`; const recorded = plans.some((plan: any) => dateInput(new Date(plan.planDate)) === value); return <button key={day} className={`${planDate === value ? "selected" : ""} ${recorded ? "recorded" : ""}`} onClick={() => setPlanDate(value)}>{day}</button>; })}</div><p className="plan-calendar-key"><i /> Saved session protocol</p><div className="session-readiness"><ShieldCheck size={17} /><div><strong>{selectedPlan ? "Saved record loaded" : "Prepare before the open"}</strong><span>{selectedPlan ? "Update only what actually changed." : "The plan becomes your review baseline."}</span></div></div></section><section className="panel plan-editor professional-plan-editor"><div className="plan-day-head"><div><span className="eyebrow">{selectedPlan ? "SAVED SESSION RECORD" : "NEW SESSION RECORD"}</span><h3>{new Date(`${planDate}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long" })}</h3></div><div className="plan-entry-actions"><Button variant="outline" disabled={!selectedPlan || removePlan.isPending} onClick={() => void removeSelected()}><Trash2 size={15} /> {removePlan.isPending ? "Removing…" : "Remove"}</Button><Button disabled={!account || savePlan.isPending} onClick={() => void save()}>{savePlan.isPending ? "Saving…" : selectedPlan ? "Update protocol" : "Save protocol"}</Button></div></div>{saveError && <p className="plan-save-error" role="alert">{saveError}</p>}<Section number="01" title="PRE-MARKET BRIEF" copy="Context, bias, event exposure, and the levels that define the day." icon={ClipboardCheck}><div className="field-grid"><Field label="Market context" className="field-span-full"><Textarea value={marketContext} onChange={event => setMarketContext(event.target.value)} rows={2} placeholder="Overnight structure, DXY / yields context, Asia range, liquidity condition…" /></Field><Field label="Working bias"><div className="pill-options">{["Bullish", "Bearish", "Neutral", "Wait for confirmation"].map(value => <button type="button" key={value} className={bias === value ? "selected" : ""} onClick={() => setBias(value)}>{value}</button>)}</div></Field><Field label="Session focus"><div className="checkbox-cluster">{sessions.map(value => <label key={value}><input type="checkbox" checked={sessionFocus.includes(value)} onChange={() => toggleSession(value)} /> {value}</label>)}</div></Field><Field label="Event / news risk" className="field-span-full"><Textarea value={eventRisk} onChange={event => setEventRisk(event.target.value)} rows={2} placeholder="High-impact release time, spread / volatility risk, or 'No scheduled risk'." /></Field><Field label="Key levels" className="field-span-full"><Textarea value={keyLevels} onChange={event => setKeyLevels(event.target.value)} rows={3} placeholder="Asia high/low, London open, HTF zones, premium / discount, liquidity pools…" /></Field></div></Section><Section number="02" title="SCENARIO MAP" copy="Write decision triggers, not predictions. Include a valid long, valid short, and a reason to stay flat." icon={Target}><div className="field-grid"><Field label="Long thesis" className="field-span-full"><Textarea value={longScenario} onChange={event => setLongScenario(event.target.value)} rows={3} placeholder="Only long if price accepts above ___, confirms ___, with target at ___." /></Field><Field label="Short thesis" className="field-span-full"><Textarea value={shortScenario} onChange={event => setShortScenario(event.target.value)} rows={3} placeholder="Only short if price rejects ___, confirms ___, with target at ___." /></Field><Field label="No-trade condition"><Textarea value={noTradeCondition} onChange={event => setNoTradeCondition(event.target.value)} rows={2} placeholder="Stand aside if structure is choppy, event risk is unresolved, or no A setup appears." /></Field><Field label="Bias invalidation"><Textarea value={invalidationLevel} onChange={event => setInvalidationLevel(event.target.value)} rows={2} placeholder="The market condition that invalidates today’s bias." /></Field></div></Section><Section number="03" title="RISK & EXECUTION LIMITS" copy="Set the ceiling before price moves. These fields are the reference for deviation review." icon={ShieldCheck}><div className="field-grid"><Field label="Session loss limit ($)"><Input inputMode="decimal" value={riskLimit} onChange={event => setRiskLimit(event.target.value)} placeholder="e.g. 150" /></Field><Field label="Maximum trades"><Input type="number" min="1" max="99" value={maxTrades} onChange={event => setMaxTrades(event.target.value)} placeholder="e.g. 3" /></Field><Field label="Sizing rule"><Textarea value={sizingPlan} onChange={event => setSizingPlan(event.target.value)} rows={2} placeholder="Risk 0.5R on A setup; reduce after first loss; no size increase after loss." /></Field><Field label="Session thesis / game plan"><Textarea value={notes} onChange={event => setNotes(event.target.value)} rows={2} placeholder="The one execution priority that matters today." /></Field>{checklist("Entry protocol", plannedCount, plannedRules.map(rule => <label key={rule.id}><input type="checkbox" checked={rule.checked} onChange={() => togglePlanned(rule.id)} /><span>{rule.text}</span></label>))}</div></Section><Section number="04" title="AFTER CLOSE SCORECARD" copy="Record adherence before explaining P&L. A disciplined loss is not the same as a process failure." icon={CheckCircle2}><div className="field-grid"><Field label="Opening state"><Input value={emotionStart} onChange={event => setEmotionStart(event.target.value)} placeholder="Calm, focused, tired, hesitant…" /></Field><Field label="Closing state"><Input value={emotionEnd} onChange={event => setEmotionEnd(event.target.value)} placeholder="Disciplined, frustrated, neutral…" /></Field><Score label="Execution quality" value={executionScore} onChange={setExecutionScore} /><Score label="Session rating" value={overallRating} onChange={setOverallRating} /><Field label="Execution narrative" className="field-span-full"><Textarea value={executionNotes} onChange={event => setExecutionNotes(event.target.value)} rows={3} placeholder="What happened relative to the scenario map, entries, management, and exits?" /></Field><Field label="Plan deviation" className="field-span-full"><Textarea value={planDeviation} onChange={event => setPlanDeviation(event.target.value)} rows={2} placeholder="State the deviation and why it happened. Write 'None' if execution followed the plan." /></Field>{checklist("Rule adherence", followedCount, plannedRules.map(rule => { const followed = followedRules.find(item => item.id === rule.id)?.yes ?? false; return <label key={rule.id}><input type="checkbox" checked={followed} onChange={() => toggleFollowed(rule.id)} /><span>{rule.text}</span></label>; }))}<Field label="What went well"><Textarea value={whatWentWell} onChange={event => setWhatWentWell(event.target.value)} rows={3} placeholder="One execution strength to preserve." /></Field><Field label="What needs work"><Textarea value={whatWentWrong} onChange={event => setWhatWentWrong(event.target.value)} rows={3} placeholder="One process weakness, not a vague outcome complaint." /></Field><Field label="Lesson"><Textarea value={lessons} onChange={event => setLessons(event.target.value)} rows={3} placeholder="A precise rule, trigger, or setup observation." /></Field><Field label="Tomorrow’s focus"><Textarea value={tomorrowFocus} onChange={event => setTomorrowFocus(event.target.value)} rows={3} placeholder="One controllable adjustment for the next session." /></Field></div></Section><div className="plan-save-footer"><CircleAlert size={15} /><span>Save your plan before the first trade and update the review after the session—do not rewrite the original thesis.</span></div></section></div></>;
+components/ui/alert-dialog.tsx:2:import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
+components/ui/alert-dialog.tsx:7:function AlertDialog({
+components/ui/alert-dialog.tsx:9:}: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
+components/ui/alert-dialog.tsx:10:  return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />;
+components/ui/alert-dialog.tsx:13:function AlertDialogTrigger({
+components/ui/alert-dialog.tsx:15:}: React.ComponentProps<typeof AlertDialogPrimitive.Trigger>) {
+components/ui/alert-dialog.tsx:17:    <AlertDialogPrimitive.Trigger data-slot="alert-dialog-trigger" {...props} />
+components/ui/alert-dialog.tsx:21:function AlertDialogPortal({
+components/ui/alert-dialog.tsx:23:}: React.ComponentProps<typeof AlertDialogPrimitive.Portal>) {
+components/ui/alert-dialog.tsx:25:    <AlertDialogPrimitive.Portal data-slot="alert-dialog-portal" {...props} />
+components/ui/alert-dialog.tsx:29:function AlertDialogOverlay({
+components/ui/alert-dialog.tsx:32:}: React.ComponentProps<typeof AlertDialogPrimitive.Overlay>) {
+components/ui/alert-dialog.tsx:34:    <AlertDialogPrimitive.Overlay
+components/ui/alert-dialog.tsx:45:function AlertDialogContent({
+components/ui/alert-dialog.tsx:48:}: React.ComponentProps<typeof AlertDialogPrimitive.Content>) {
+components/ui/alert-dialog.tsx:50:    <AlertDialogPortal>
+components/ui/alert-dialog.tsx:51:      <AlertDialogOverlay />
+components/ui/alert-dialog.tsx:52:      <AlertDialogPrimitive.Content
+components/ui/alert-dialog.tsx:60:    </AlertDialogPortal>
+components/ui/alert-dialog.tsx:64:function AlertDialogHeader({
+components/ui/alert-dialog.tsx:77:function AlertDialogFooter({
+components/ui/alert-dialog.tsx:93:function AlertDialogTitle({
+components/ui/alert-dialog.tsx:96:}: React.ComponentProps<typeof AlertDialogPrimitive.Title>) {
+components/ui/alert-dialog.tsx:98:    <AlertDialogPrimitive.Title
+components/ui/alert-dialog.tsx:106:function AlertDialogDescription({
+components/ui/alert-dialog.tsx:109:}: React.ComponentProps<typeof AlertDialogPrimitive.Description>) {
+components/ui/alert-dialog.tsx:111:    <AlertDialogPrimitive.Description
+components/ui/alert-dialog.tsx:119:function AlertDialogAction({
+components/ui/alert-dialog.tsx:122:}: React.ComponentProps<typeof AlertDialogPrimitive.Action>) {
+components/ui/alert-dialog.tsx:124:    <AlertDialogPrimitive.Action
+components/ui/alert-dialog.tsx:131:function AlertDialogCancel({
+components/ui/alert-dialog.tsx:134:}: React.ComponentProps<typeof AlertDialogPrimitive.Cancel>) {
+components/ui/alert-dialog.tsx:136:    <AlertDialogPrimitive.Cancel
+components/ui/alert-dialog.tsx:144:  AlertDialog,
+components/ui/alert-dialog.tsx:145:  AlertDialogPortal,
+components/ui/alert-dialog.tsx:146:  AlertDialogOverlay,
+components/ui/alert-dialog.tsx:147:  AlertDialogTrigger,
+components/ui/alert-dialog.tsx:148:  AlertDialogContent,
+components/ui/alert-dialog.tsx:149:  AlertDialogHeader,
+components/ui/alert-dialog.tsx:150:  AlertDialogFooter,
+components/ui/alert-dialog.tsx:151:  AlertDialogTitle,
+components/ui/alert-dialog.tsx:152:  AlertDialogDescription,
+components/ui/alert-dialog.tsx:153:  AlertDialogAction,
+components/ui/alert-dialog.tsx:154:  AlertDialogCancel,
+components/ui/carousel.tsx:62:  const onSelect = React.useCallback((api: CarouselApi) => {
+components/ui/carousel.tsx:96:    onSelect(api);
+components/ui/carousel.tsx:97:    api.on("reInit", onSelect);
+components/ui/carousel.tsx:98:    api.on("select", onSelect);
+components/ui/carousel.tsx:101:      api?.off("select", onSelect);
+components/ui/carousel.tsx:103:  }, [api, onSelect]);
+components/ui/chart.tsx:6:// Format: { THEME_NAME: CSS_SELECTOR }
+components/ui/chart.tsx:9:export type ChartConfig = {
+components/ui/chart.tsx:19:type ChartContextProps = {
+components/ui/chart.tsx:20:  config: ChartConfig;
+components/ui/chart.tsx:23:const ChartContext = React.createContext<ChartContextProps | null>(null);
+components/ui/chart.tsx:25:function useChart() {
+components/ui/chart.tsx:26:  const context = React.useContext(ChartContext);
+components/ui/chart.tsx:29:    throw new Error("useChart must be used within a <ChartContainer />");
+components/ui/chart.tsx:35:function ChartContainer({
+components/ui/chart.tsx:42:  config: ChartConfig;
+components/ui/chart.tsx:44:    typeof RechartsPrimitive.ResponsiveContainer
+components/ui/chart.tsx:51:    <ChartContext.Provider value={{ config }}>
+components/ui/chart.tsx:61:        <ChartStyle id={chartId} config={config} />
+components/ui/chart.tsx:62:        <RechartsPrimitive.ResponsiveContainer>
+components/ui/chart.tsx:64:        </RechartsPrimitive.ResponsiveContainer>
+components/ui/chart.tsx:66:    </ChartContext.Provider>
+components/ui/chart.tsx:70:const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
+components/ui/chart.tsx:103:const ChartTooltip = RechartsPrimitive.Tooltip;
+components/ui/chart.tsx:105:function ChartTooltipContent({
+components/ui/chart.tsx:113:  labelFormatter,
+components/ui/chart.tsx:119:}: React.ComponentProps<typeof RechartsPrimitive.Tooltip> &
+components/ui/chart.tsx:127:  const { config } = useChart();
+components/ui/chart.tsx:142:    if (labelFormatter) {
+components/ui/chart.tsx:145:          {labelFormatter(value, payload)}
+components/ui/chart.tsx:157:    labelFormatter,
+components/ui/chart.tsx:251:const ChartLegend = RechartsPrimitive.Legend;
+components/ui/chart.tsx:253:function ChartLegendContent({
+components/ui/chart.tsx:264:  const { config } = useChart();
+components/ui/chart.tsx:311:  config: ChartConfig,
+components/ui/chart.tsx:349:  ChartContainer,
+components/ui/chart.tsx:350:  ChartTooltip,
+components/ui/chart.tsx:351:  ChartTooltipContent,
+components/ui/chart.tsx:352:  ChartLegend,
+components/ui/chart.tsx:353:  ChartLegendContent,
+components/ui/chart.tsx:354:  ChartStyle,
+components/ui/command.tsx:9:  Dialog,
+components/ui/command.tsx:10:  DialogContent,
+components/ui/command.tsx:11:  DialogDescription,
+components/ui/command.tsx:12:  DialogHeader,
+components/ui/command.tsx:13:  DialogTitle,
+components/ui/command.tsx:32:function CommandDialog({
+components/ui/command.tsx:39:}: React.ComponentProps<typeof Dialog> & {
+components/ui/command.tsx:46:    <Dialog {...props}>
+components/ui/command.tsx:47:      <DialogHeader className="sr-only">
+components/ui/command.tsx:48:        <DialogTitle>{title}</DialogTitle>
+components/ui/command.tsx:49:        <DialogDescription>{description}</DialogDescription>
+components/ui/command.tsx:50:      </DialogHeader>
+components/ui/command.tsx:51:      <DialogContent
+components/ui/command.tsx:58:      </DialogContent>
+components/ui/command.tsx:59:    </Dialog>
+components/ui/command.tsx:176:  CommandDialog,
+components/ui/dialog.tsx:2:import * as DialogPrimitive from "@radix-ui/react-dialog";
+components/ui/dialog.tsx:7:const DialogCompositionContext = React.createContext<{
+components/ui/dialog.tsx:19:export const useDialogComposition = () =>
+components/ui/dialog.tsx:20:  React.useContext(DialogCompositionContext);
+components/ui/dialog.tsx:22:function Dialog({
+components/ui/dialog.tsx:24:}: React.ComponentProps<typeof DialogPrimitive.Root>) {
+components/ui/dialog.tsx:50:    <DialogCompositionContext.Provider value={contextValue}>
+components/ui/dialog.tsx:51:      <DialogPrimitive.Root data-slot="dialog" {...props} />
+components/ui/dialog.tsx:52:    </DialogCompositionContext.Provider>
+components/ui/dialog.tsx:56:function DialogTrigger({
+components/ui/dialog.tsx:58:}: React.ComponentProps<typeof DialogPrimitive.Trigger>) {
+components/ui/dialog.tsx:59:  return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />;
+components/ui/dialog.tsx:62:function DialogPortal({
+components/ui/dialog.tsx:64:}: React.ComponentProps<typeof DialogPrimitive.Portal>) {
+components/ui/dialog.tsx:65:  return <DialogPrimitive.Portal data-slot="dialog-portal" {...props} />;
+components/ui/dialog.tsx:68:function DialogClose({
+components/ui/dialog.tsx:70:}: React.ComponentProps<typeof DialogPrimitive.Close>) {
+components/ui/dialog.tsx:71:  return <DialogPrimitive.Close data-slot="dialog-close" {...props} />;
+components/ui/dialog.tsx:74:function DialogOverlay({
+components/ui/dialog.tsx:77:}: React.ComponentProps<typeof DialogPrimitive.Overlay>) {
+components/ui/dialog.tsx:79:    <DialogPrimitive.Overlay
+components/ui/dialog.tsx:90:DialogOverlay.displayName = "DialogOverlay";
+components/ui/dialog.tsx:92:function DialogContent({
+components/ui/dialog.tsx:98:}: React.ComponentProps<typeof DialogPrimitive.Content> & {
+components/ui/dialog.tsx:101:  const { isComposing } = useDialogComposition();
+components/ui/dialog.tsx:122:    <DialogPortal data-slot="dialog-portal">
+components/ui/dialog.tsx:123:      <DialogOverlay />
+components/ui/dialog.tsx:124:      <DialogPrimitive.Content
+components/ui/dialog.tsx:135:          <DialogPrimitive.Close
+components/ui/dialog.tsx:141:          </DialogPrimitive.Close>
+components/ui/dialog.tsx:143:      </DialogPrimitive.Content>
+components/ui/dialog.tsx:144:    </DialogPortal>
+components/ui/dialog.tsx:148:function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/dialog.tsx:158:function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
+components/ui/dialog.tsx:171:function DialogTitle({
+components/ui/dialog.tsx:174:}: React.ComponentProps<typeof DialogPrimitive.Title>) {
+components/ui/dialog.tsx:176:    <DialogPrimitive.Title
+components/ui/dialog.tsx:184:function DialogDescription({
+components/ui/dialog.tsx:187:}: React.ComponentProps<typeof DialogPrimitive.Description>) {
+components/ui/dialog.tsx:189:    <DialogPrimitive.Description
+components/ui/dialog.tsx:198:  Dialog,
+components/ui/dialog.tsx:199:  DialogClose,
+components/ui/dialog.tsx:200:  DialogContent,
+components/ui/dialog.tsx:201:  DialogDescription,
+components/ui/dialog.tsx:202:  DialogFooter,
+components/ui/dialog.tsx:203:  DialogHeader,
+components/ui/dialog.tsx:204:  DialogOverlay,
+components/ui/dialog.tsx:205:  DialogPortal,
+components/ui/dialog.tsx:206:  DialogTitle,
+components/ui/dialog.tsx:207:  DialogTrigger
+components/ui/drawer.tsx:2:import { Drawer as DrawerPrimitive } from "vaul";
+components/ui/drawer.tsx:6:function Drawer({
+components/ui/drawer.tsx:8:}: React.ComponentProps<typeof DrawerPrimitive.Root>) {
+components/ui/drawer.tsx:9:  return <DrawerPrimitive.Root data-slot="drawer" {...props} />;
+components/ui/drawer.tsx:12:function DrawerTrigger({

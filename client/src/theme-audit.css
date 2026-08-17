@@ -1,0 +1,2 @@
+.page-loader { color: var(--gj-subtext); }.page-loader > div { border-color: color-mix(in srgb, var(--gj-gold) 24%, var(--gj-line)); border-top-color: var(--gj-gold); }
+html:not(.dark) .page-loader { color: #4e5f70; }.dark .page-loader { color: #a9b4be; }

@@ -1,0 +1,56 @@
+# Existing MT5 Regression Matrix
+server/goldRouter.test.ts:26:const validTrade = { accountId: 12, tradeDate: Date.now(), session: "London", direction: "BUY", result: "WIN", patienceScore: null, risk: null, reward: null, pnl: 0 };
+server/goldRouter.test.ts:47:    await expect(caller.journal.get({ accountId: 12 })).resolves.toMatchObject({ activeAccount: { id: 12 }, trades: [{ result: "WIN" }] });
+server/goldRouter.test.ts:125:    await expect(caller.plans.remove({ accountId: 12, planId: 44, confirmed: true })).resolves.toEqual({ success: true });
+server/goldRouter.test.ts:141:      .mockImplementationOnce(() => limitedRows([{ id: 88, userId: 7, accountId: 12, active: true, notify: true }]))
+server/goldRouter.test.ts:147:    await expect(caller.notifications.recordGoalAlerts({ accountId: 12, alerts: [{ goalId: 88, status: "AT_RISK", cycleKey: "DAILY-2026-08-12", message: "Loss ceiling is near." }] })).resolves.toEqual({ recorded: 1 });
+server/goldRouter.test.ts:148:    expect(values).toHaveBeenCalledWith(expect.objectContaining({ userId: 7, accountId: 12, type: "GOAL_AT_RISK_88_DAILY-2026-08-12" }));
+server/goldRouter.test.ts:151:    select.mockImplementationOnce(() => limitedRows([])).mockImplementationOnce(() => limitedRows([{ id: 88, userId: 7, accountId: 12, active: true, notify: true }])).mockImplementationOnce(() => limitedRows([{ id: 901 }]));
+server/goldRouter.test.ts:152:    await expect(caller.notifications.recordGoalAlerts({ accountId: 12, alerts: [{ goalId: 88, status: "AT_RISK", cycleKey: "DAILY-2026-08-12", message: "Loss ceiling is near." }] })).resolves.toEqual({ recorded: 0 });
+server/goldRouter.test.ts:160:      .mockImplementationOnce(() => limitedRows([{ id: 89, userId: 7, accountId: 12, active: false, notify: true }]))
+server/goldRouter.test.ts:161:      .mockImplementationOnce(() => limitedRows([{ id: 90, userId: 7, accountId: 12, active: true, notify: false }]));
+server/goldRouter.test.ts:166:    await expect(caller.notifications.recordGoalAlerts({ accountId: 12, alerts: [{ goalId: 89, status: "BREACHED", cycleKey: "DAILY-2026-08-12", message: "Inactive ceiling breached." }, { goalId: 90, status: "MET", cycleKey: "DAILY-2026-08-12", message: "Silent target achieved." }] })).resolves.toEqual({ recorded: 0 });
+server/goldRouter.test.ts:170:  it("reconciles stored MT5 positions into only the owned account with an active connection", async () => {
+server/goldRouter.test.ts:176:    await expect(caller.mt5.syncTradeLog({ accountId: 12 })).resolves.toEqual({ synchronized: 3 });
+server/goldRouter.test.ts:190:  it("rejects a connection mutation when the connection is unavailable to the explicitly selected account", async () => {
+server/goldRouter.test.ts:196:    await expect(caller.mt5.setConnectionActive({ accountId: 25, connectionId: 44, active: false })).rejects.toThrow("unavailable");
+server/mt5Ingest.test.ts:3:const mocks = vi.hoisted(() => ({ getActive: vi.fn(), touch: vi.fn(), open: vi.fn(), close: vi.fn(), summary: vi.fn(), completeHistory: vi.fn(), historyAttempt: vi.fn(), historyAccepted: vi.fn(), historyFailure: vi.fn() }));
+server/mt5Ingest.test.ts:4:vi.mock("./mt5Db", () => ({ getActiveMt5Connection: mocks.getActive, touchMt5Connection: mocks.touch, upsertMt5OpenPosition: mocks.open, upsertMt5ClosedPosition: mocks.close, updateMt5AccountSummary: mocks.summary, completeMt5HistorySync: mocks.completeHistory, recordMt5HistoryAttempt: mocks.historyAttempt, recordMt5HistoryAccepted: mocks.historyAccepted, recordMt5HistoryFailure: mocks.historyFailure }));
+server/mt5Ingest.test.ts:9:const openPayload = (api_key = key("open")) => ({ event: "open" as const, api_key, ticket: "123456789", symbol: "XAUUSD", direction: "Buy", lots: 0.01, open_price: 3285.5, sl_price: 3275, tp_price: 3310, risk_usd: 45, reward_usd: 200, rr_ratio: 4.44, floating_pnl: 12.5, open_time: "2026-07-11 09:30:00" });
+server/mt5Ingest.test.ts:15:    mocks.getActive.mockResolvedValue({ id: 44, userId: 77, accountId: 12, active: true });
+server/mt5Ingest.test.ts:21:    mocks.historyAttempt.mockResolvedValue(undefined);
+server/mt5Ingest.test.ts:22:    mocks.historyAccepted.mockResolvedValue(undefined);
+server/mt5Ingest.test.ts:23:    mocks.historyFailure.mockResolvedValue(undefined);
+server/mt5Ingest.test.ts:26:  it("authorizes by active API key, touches the connection, and upserts an open position under its account", async () => {
+server/mt5Ingest.test.ts:30:    expect(mocks.open).toHaveBeenCalledWith(77, 12, expect.objectContaining({ ticket: 123456789n, direction: "BUY", floatingPnl: 12.5, symbol: "XAUUSD" }));
+server/mt5Ingest.test.ts:43:  it("uses the authenticated connection broker offset for offset-free MQL timestamps", async () => {
+server/mt5Ingest.test.ts:44:    mocks.getActive.mockResolvedValue({ id: 44, userId: 77, accountId: 12, active: true, brokerUtcOffsetMinutes: 120 });
+server/mt5Ingest.test.ts:54:  it("rejects an unknown API key without touching a connection or writing a position", async () => {
+server/mt5Ingest.test.ts:64:    expect(mocks.close).toHaveBeenCalledWith(77, 12, expect.objectContaining({ ticket: 123456789n, result: "WIN", realizedPnl: 168, closePrice: 3308 }));
+server/mt5Ingest.test.ts:73:    const { floating_pnl, api_key: _nestedApiKeyMustBeAbsent, ...position } = openPayload(key("history"));
+server/mt5Ingest.test.ts:75:    await expect(processMt5Payload({ event: "history_batch", api_key: key("history"), positions: [closed], complete: true })).resolves.toEqual({ status: 200, body: { ok: true, event: "history_batch", synced: 1, complete: true } });
+server/mt5Ingest.test.ts:76:    expect(mocks.close).toHaveBeenCalledWith(77, 12, expect.objectContaining({ ticket: 123456789n, result: "WIN" }));
+server/mt5Ingest.test.ts:77:    expect(mocks.historyAttempt).toHaveBeenCalledWith(44, 1);
+server/mt5Ingest.test.ts:78:    expect(mocks.historyAccepted).toHaveBeenCalledWith(44, 1, true);
+server/mt5Ingest.test.ts:82:  it("derives the target account from the authenticated connection even when a payload attempts to supply another account", async () => {
+server/mt5Ingest.test.ts:83:    await expect(processMt5Payload({ ...openPayload(key("spoofed-account")), accountId: 999 })).resolves.toMatchObject({ status: 200 });
+server/mt5Ingest.test.ts:84:    expect(mocks.open).toHaveBeenCalledWith(77, 12, expect.objectContaining({ ticket: 123456789n }));
+server/mt5Ingest.test.ts:88:  it("keeps identical tickets independent when separate API keys resolve to separate accounts", async () => {
+server/mt5Ingest.test.ts:89:    mocks.getActive.mockImplementation(async (apiKey: string) => apiKey === key("account-b") ? { id: 45, userId: 77, accountId: 13, active: true } : { id: 44, userId: 77, accountId: 12, active: true });
+server/mt5Ingest.test.ts:92:    expect(mocks.open).toHaveBeenCalledWith(77, 12, expect.objectContaining({ ticket: 123456789n }));
+server/mt5Ingest.test.ts:93:    expect(mocks.open).toHaveBeenCalledWith(77, 13, expect.objectContaining({ ticket: 123456789n }));
+server/mt5Db.lifecycle.test.ts:15:const key = (accountId: number, ticket: bigint) => `${accountId}:${ticket}`;
+server/mt5Db.lifecycle.test.ts:16:const open = (ticket = 1001n) => ({ ticket, symbol: "XAUUSD", direction: "BUY" as const, lots: 0.01, openPrice: 3200, slPrice: 3190, tpPrice: 3220, riskUsd: 10, rewardUsd: 20, rrRatio: 2, floatingPnl: 1, openTime: new Date("2026-08-17T08:00:00Z") });
+server/mt5Db.lifecycle.test.ts:17:const close = (ticket = 1001n) => ({ ...open(ticket), closePrice: 3210, realizedPnl: 10, result: "WIN" as const, closeTime: new Date("2026-08-17T09:00:00Z") });
+server/mt5Db.lifecycle.test.ts:27:      const targetKey = key(record.accountId, record.ticket ?? record.mt5Ticket);
+client/src/components/TradeLogWithViewer.test.tsx:29:    render(<TradeLogWithViewer stats={{ balance: 5000, winRate: 0, wins: 0, losses: 0, pnl: 0, total: 0 }} trades={[]} allTrades={[]} pagination={{ page: 1, pageSize: 12, total: 0, pageCount: 1 }} listLoading={false} account={{ name: "Primary" }} dangerGoals={[]} hasMt5Connection mt5Syncing mt5Summary={{ balance: "5120.50", equity: "5168.25", floatingPnl: "47.75", currency: "USD" }} mt5LivePositions={[{ ticket: "91001", symbol: "XAUUSD", direction: "BUY", floatingPnl: "47.75" }]} search="" resultFilter="ALL" setSearch={vi.fn()} setResultFilter={vi.fn()} onPage={vi.fn()} onNew={vi.fn()} onDuplicate={vi.fn()} onEdit={vi.fn()} onDelete={vi.fn()} onCash={vi.fn()} onCsv={vi.fn()} onExcel={vi.fn()} onPdf={vi.fn()} onClear={vi.fn()} />);
+client/src/components/Mt5LiveView.test.tsx:10:      workspace: {
+client/src/components/Mt5LiveView.test.tsx:13:            connections: [{ id: 1, accountId: 12, accountName: "GFT 10K", label: "GFT Live", apiKey: "mt5_secret_connection_key_abcdefghijk", active: true, brokerUtcOffsetMinutes: 180, lastPing: new Date(), mt5Login: "90123456", brokerServer: "Broker-Live", currency: "USD", balance: "10000.00", equity: "10042.50", margin: "250.00", freeMargin: "9792.50", floatingPnl: "42.50", lastHistorySync: new Date(), historySyncedCount: 6 }],
+client/src/components/Mt5LiveView.test.tsx:14:            openPositions: [{ ticket: "123456789", symbol: "XAUUSD", direction: "BUY", lots: "0.01", openPrice: "3285.50", slPrice: "3275.00", tpPrice: "3310.00", riskUsd: "45.00", rewardUsd: "200.00", rrRatio: "4.44", floatingPnl: "12.50", openTime: new Date(), status: "OPEN" }],
+client/src/components/Mt5LiveView.test.tsx:15:            closedPositions: [{ ticket: "987654321", symbol: "XAUUSD", direction: "SELL", lots: "0.01", openPrice: "3300.00", closePrice: "3280.00", riskUsd: "50.00", rewardUsd: "100.00", rrRatio: "2.00", realizedPnl: "40.00", result: "WIN", closeTime: new Date(), journaled: false }],
+client/src/components/Mt5LiveView.test.tsx:21:      history: {
+client/src/components/Mt5LiveView.test.tsx:23:          data: { positions: [{ ticket: "987654321", symbol: "XAUUSD", direction: "SELL", lots: "0.01", openPrice: "3300.00", closePrice: "3280.00", riskUsd: "50.00", rewardUsd: "100.00", rrRatio: "2.00", realizedPnl: "40.00", result: "WIN", closeTime: new Date(), journaled: false }], total: 42, page: 1, pageSize: 20, pageCount: 3 },
+client/src/components/Mt5LiveView.test.tsx:32:    useUtils: () => ({ mt5: { workspace: { invalidate: mocks.invalidate }, history: { invalidate: mocks.invalidate } } }),
+client/src/components/Mt5LiveView.test.tsx:46:    expect(screen.queryByText("mt5_secret_connection_key_abcdefghijk")).toBeNull();
+client/src/lib/accountScope.test.ts:5:  it("invalidates journal, paginated trades, MT5 workspace/history, notifications, and option lists", async () => {
+client/src/lib/accountScope.test.ts:10:      mt5: { workspace: { invalidate: invalidations[2] }, history: { invalidate: invalidations[3] } },

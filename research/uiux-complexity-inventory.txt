@@ -1,0 +1,47 @@
+--- stylesheet line counts ---
+    73 client/src/flexible-goals.css
+    59 client/src/gold-overrides.css
+   181 client/src/index.css
+     4 client/src/light-audit-fix.css
+    85 client/src/mt5-live.css
+     9 client/src/recovery-workstation.css
+     2 client/src/theme-audit.css
+    56 client/src/visual-upgrade.css
+   469 total
+
+--- largest frontend implementation files ---
+82285 client/src/pages/GoldJournal.tsx
+58315 client/src/pages/ComponentShowcase.tsx
+21947 client/src/components/ui/sidebar.tsx
+19043 client/src/components/PlanExecutionEditor.tsx
+18402 client/src/components/FlexibleGoalsView.tsx
+17596 client/src/components/Mt5LiveView.tsx
+12888 client/src/components/BulkPdfExporter.tsx
+12240 client/src/lib/traderGoals.ts
+12009 client/src/components/TradeLogWithViewer.tsx
+11724 client/src/components/TradeDialogWithCustomOptions.tsx
+10851 client/src/components/AIChatBox.tsx
+10113 client/src/components/ui/chart.tsx
+8998 client/src/components/DashboardLayout.tsx
+8434 client/src/components/ui/dropdown-menu.tsx
+8405 client/src/components/ui/menubar.tsx
+8284 client/src/components/ui/context-menu.tsx
+7663 client/src/components/ui/calendar.tsx
+6680 client/src/components/ui/navigation-menu.tsx
+6297 client/src/components/ui/select.tsx
+6057 client/src/components/ui/field.tsx
+6024 client/src/components/ui/dialog.tsx
+6005 client/src/components/MissedTradesView.tsx
+5603 client/src/components/ui/carousel.tsx
+5359 client/src/components/PnlCalendarWithWeeks.tsx
+5140 client/src/components/AccountRenameControl.tsx
+5066 client/src/components/ui/input-group.tsx
+4932 client/src/components/Map.tsx
+4838 client/src/components/ui/command.tsx
+4513 client/src/components/ui/item.tsx
+4358 client/src/components/MonthlyTradeOverview.tsx
+4255 client/src/components/ui/drawer.tsx
+4107 client/src/components/ui/sheet.tsx
+3866 client/src/components/ui/alert-dialog.tsx
+3801 client/src/components/ui/form.tsx
+3551 client/src/components/AnalysisEdge.tsx

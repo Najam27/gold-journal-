@@ -1,89 +1,53 @@
 # Gold Journal
 
-Gold Journal is a private, installable progressive web application for discretionary XAUUSD traders. It provides an account-scoped trade log, missed-trade review, strategy-edge analysis, risk and behavior controls, a P&L calendar, daily planning, an AI mentor, MT5 synchronization, custom option lists, and secure export-ready architecture.
+Gold Journal is the complete trading-journal application ported from [Najam27/MyGoldJournal](https://github.com/Najam27/MyGoldJournal). The target repository now contains the source repository’s full UI, feature pages, reusable components, validation, tRPC contracts, MT5 workflows, tests, PWA assets, and export functionality.
 
-## Stack
+The runtime keeps the source application architecture while moving persistence and screenshot storage to **Supabase PostgreSQL and Supabase Storage**. Netlify serves the Vite frontend and exposes the copied Express/tRPC backend through a serverless function.
 
-The frontend is React 19 with TypeScript and Vite. Supabase provides Auth, PostgreSQL, Storage, and Row Level Security. Netlify serves the SPA and the protected MT5 Function. Zod validates browser-bound and server-bound input. Vitest covers deterministic core behavior, including the PKT session classifier and blank-form validation.
+## Included source features
 
-The app intentionally has a local preview mode when Supabase variables are absent. Local preview uses browser storage, never fabricates trades, and is useful for visual QA. Production must use Supabase and the migration in `supabase/migrations/0001_gold_journal.sql`.
-
-## Local development
-
-```bash
-pnpm install
-cp .env.example .env.local
-pnpm dev
-```
-
-The browser-safe variables are:
-
-| Variable | Where | Purpose |
-| --- | --- | --- |
-| `VITE_SUPABASE_URL` | Browser | Supabase project URL |
-| `VITE_SUPABASE_ANON_KEY` | Browser | Supabase anonymous client key |
-| `SUPABASE_URL` | Netlify Functions only | Server-side Supabase URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Netlify Functions only | Privileged server key; never prefix with `VITE_` |
-
-Never commit `.env.local`, service-role keys, MT5 raw keys, or OpenRouter keys. The OpenRouter key is intentionally local-browser-only for the AI Mentor and is not persisted to Supabase.
+The copied implementation includes Trade Log with search, filtering, pagination, manual entry, editing, deletion, duplicate entry, screenshots, CSV/Excel/PDF export, account balance and cash movements; Missed Trades; Analysis Edge; configurable Goals and goal alerts; P&L Calendar; Plan & Execution; AI Mentor privacy behavior; MT5 Live telemetry, history, reconciliation, and journal linking; Options; notification center; account switching; responsive sidebar/mobile navigation; dark/light themes; offline state; installable PWA behavior; and the complete source test suite.
 
 ## Supabase setup
 
-Create a Supabase project, enable email/password Auth, and run the SQL migration in the Supabase SQL editor or through the Supabase CLI. The migration creates the account-scoped domain tables, indexes, update triggers, private screenshot bucket, and RLS policies. Every business row is protected through `trading_accounts.owner_id` and the `public.owns_account(account_id)` security-definer helper.
+Create a Supabase project and open the SQL Editor. Run the complete migration at `supabase/migrations/0001_source_gold_journal.sql`. It creates all source-compatible `users`, `gj_*` application tables, indexes, constraints, and the private `trade-screenshots` Storage bucket. The Netlify backend uses the Supabase transaction-pooler `DATABASE_URL` for Drizzle PostgreSQL access and the service-role key for private screenshot uploads and signed URLs.
 
-The private screenshot bucket is `trade-screenshots`. Production upload code should use paths beginning with the authenticated user ID and should return short-lived signed URLs only. Do not expose object paths or signed URLs in exports.
+The source application’s authentication contract remains the source OAuth/session contract. Supabase is the persistent data and storage layer; the Netlify function must receive the source OAuth/session environment variables as well as the Supabase variables.
 
-## MT5 setup
+## Environment variables
 
-The MT5 ingestion endpoint is `/.netlify/functions/mt5`. The Expert Advisor must send an API key, connection ID, account metrics, and position objects. Each position must contain a stable ticket, direction, status, and timestamps. Broker timestamps default to UTC+3 and are converted to UTC before PKT classification. The function hashes the API key, authenticates requests, limits requests by source IP, validates payloads, upserts positions by `(account_id, mt5_position_ticket)`, and reconciles closed positions to an existing journal trade by ticket.
+Copy `.env.example` to `.env` for local work. In Netlify, configure the same values in **Site configuration → Environment variables**. Never expose `DATABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET`, `MT5_ENCRYPTION_KEY`, or `BUILT_IN_FORGE_API_KEY` with a `VITE_` prefix.
 
-A production EA source file should be placed beside the function or distributed from the MT5 Live page. The key is revealed once in the application and must never be stored in browser storage or logs.
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | Supabase PostgreSQL transaction-pooler URL, normally port 6543 |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only private Storage/database key |
+| `SUPABASE_STORAGE_BUCKET` | Private screenshot bucket; use `trade-screenshots` |
+| `JWT_SECRET` | Session cookie signing secret |
+| `VITE_APP_ID`, `OAUTH_SERVER_URL`, `VITE_OAUTH_PORTAL_URL` | Source authentication flow |
+| `OWNER_OPEN_ID`, `OWNER_NAME` | Source owner configuration |
+| `MT5_ENCRYPTION_KEY` | Server-only MT5 secret encryption key |
+| `BUILT_IN_FORGE_API_URL`, `BUILT_IN_FORGE_API_KEY` | Optional source service integrations |
+| `VITE_ANALYTICS_ENDPOINT`, `VITE_ANALYTICS_WEBSITE_ID` | Optional Umami analytics |
 
 ## Netlify deployment
 
-Netlify uses the configuration in `netlify.toml`:
+The repository includes `netlify.toml`. Netlify should use the `pnpm build` command, publish `dist/public`, and use `netlify/functions` for the API. The redirect from `/api/*` to `/.netlify/functions/api/:splat` keeps the copied source tRPC, OAuth, storage, and MT5 routes available under the same API path expected by the source UI.
+
+Connect the GitHub repository, set the environment variables, deploy, then run the Supabase migration once. Do not commit `.env` files or any Supabase service-role key.
+
+## Local verification
 
 ```bash
-pnpm build
-```
-
-The publish directory is `dist`, SPA routing falls back to `index.html`, and serverless functions are read from `netlify/functions`. Configure the browser-safe `VITE_` variables as Netlify environment variables for the build. Configure `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as function runtime variables only. Deploying a new version should invalidate the static asset bundle; the service worker caches static assets only and never caches authenticated HTML, Supabase responses, private API data, or signed storage URLs.
-
-## Verification
-
-```bash
-pnpm lint
+pnpm install
+pnpm check
 pnpm test
 pnpm build
 ```
 
-The regression suite proves that 05:30 PKT is Asian, 01:30 PKT is Post-NY, key boundaries are covered, and blank direction/result or skipped-trade required fields are rejected. Production QA should additionally verify account switching, RLS with two users, MT5 retry and reconciliation, private screenshot URLs, light and dark themes, and the four target viewport sizes: 375×812, 768×1024, 1280×720, and 1600×1000.
+The copied source baseline was verified before porting with 42 Vitest files and 129 tests. After the Supabase/Postgres conversion, the same checks pass locally, including the source UI tests and MT5 lifecycle tests.
 
-## Manual QA checklist
+## MT5
 
-| Area | Check |
-| --- | --- |
-| Auth | Register, sign in, restore a session, sign out, and receive generic auth errors |
-| Isolation | A second user cannot select, update, delete, or infer another account's rows |
-| Manual trade | New form starts blank for direction/result and refuses incomplete saves |
-| PKT | Date changes recompute session using Asia/Karachi rather than browser timezone |
-| Missed trades | Cancel discards the draft; required direction, reason, confidence, and outcome are enforced |
-| Account manager | Create, switch, rename/archive with a destructive confirmation and valid replacement |
-| Analysis | Only completed real data is used; insufficient samples are labeled inconclusive |
-| Goals | Loss limits display as negative P&L floors and statuses use current account data |
-| Planning | Active trading rules populate the protocol checklist; archive search works |
-| MT5 | Keys are one-time, payloads are idempotent by ticket, and broker metrics remain separate from journal balance |
-| Privacy | Internal IDs, storage paths, owner IDs, raw keys, and signed URLs are absent from user-facing views and exports |
-| PWA | Install manifest works, offline state is clear, static updates activate without caching private data |
-| Responsive | No critical control is hidden or horizontally clipped at all required viewport sizes |
-
-## Repository layout
-
-```text
-src/                 React application and domain logic
-src/lib/              Supabase client, data service, time, types, Zod schemas
-src/test/             Vitest regression tests
-netlify/functions/   Protected serverless ingestion
-supabase/migrations/ Database schema, indexes, RLS, and private storage policies
-public/              PWA manifest, icons, and service worker
-```
+The source MT5 implementation remains intact. Create the connection from the MT5 Live view, configure the EA with the returned API key, and point it at the deployed Netlify endpoint. MT5 account metrics, live positions, history, ticket reconciliation, UTC offset handling, and journal linking remain source features. Keep the generated API key private and configure the broker timestamp offset explicitly.

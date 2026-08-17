@@ -1,0 +1,23 @@
+{
+  "name": "Gold Journal",
+  "short_name": "GoldJournal",
+  "description": "Private trading performance journal.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#10141a",
+  "theme_color": "#10141a",
+  "icons": [
+    {
+      "src": "/manus-storage/gold-journal-au-mark_de0e8ecf.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/manus-storage/gold-journal-au-mark_de0e8ecf.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

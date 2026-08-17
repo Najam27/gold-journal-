@@ -1,0 +1,4 @@
+html:not(.dark) .goal-alert-strip { border-color: #d98b83 !important; background: #fff1ef !important; color: #7e211b !important; }
+html:not(.dark) .goal-alert-strip > svg { color: #b5352c !important; }
+html:not(.dark) .goal-alert-strip strong { color: #7e211b !important; opacity: 1 !important; }
+html:not(.dark) .goal-alert-strip span { color: #6d3b37 !important; opacity: 1 !important; }

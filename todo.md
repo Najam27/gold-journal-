@@ -1,0 +1,229 @@
+# Project TODO
+
+- [x] Establish the Gold Journal visual system: dark #10141a palette, gold accents, Inter UI typography, DM Mono data typography, responsive spacing, and accessible motion.
+- [x] Create the Gold Journal application shell: splash screen, desktop sidebar, mobile drawer, mobile bottom navigation, account switcher, sync indicator, and install-app affordance.
+- [x] Model cloud-backed accounts, trades, cash movements, goals, skipped trades, daily plans, option lists, and notifications with ownership enforced in every server query.
+- [x] Implement secure authenticated account management with a first-account setup flow, account switching, renaming, and creation.
+- [x] Harden query-level Trade Log pagination by clamping the requested page before fetching rows, while retaining searchable/filterable rows, stat strip, running balance, per-row actions, and safe destructive confirmation.
+- [x] Implement New Trade, Edit Trade, Deposit, and Withdraw workflows with DD/MM/YYYY dates, PKT session detection, live R:R calculation, validations, and field reset behavior.
+- [x] Implement private trade screenshot upload, signed viewing URLs, type/size validation, and upload progress. Screenshot deletion is deliberately constrained by the available storage interface, which exposes no safe delete operation.
+- [x] Implement goals with default goal calculations, custom goals, status/alert strips, notification-center controls, and responsive goal tables.
+- [x] Add explicit save failure handling to the complete Plan & Execution workflow, which otherwise loads saved entries and provides a full editable execution-review journey; Missed Trades logging and the P&L Calendar are complete.
+- [x] Add explicit page-level journal query error/recovery handling to Analysis and related journal views; session charts, heatmap, and empty/loading states are complete.
+- [x] Implement the AI Mentor screen with locally stored user-provided OpenRouter key controls, payload preparation, analysis state, saved reports, and safe no-key/error states.
+- [x] Implement MT5 bridge configuration, connection status, import history, and clear feedback for bridge failures and successful imports.
+- [x] Implement Options management for profile, data reset confirmations, dropdown lists, and trading-rule configuration.
+- [x] Add installable PWA configuration: manifest, service worker that caches static assets only, update banner, offline banner, Android/desktop install prompt, and iOS guidance.
+- [x] Restrict the service worker to caching true static assets only, excluding HTML documents, APIs, and private storage paths.
+- [x] Add automated tests for formatting, risk/reward calculation, session detection, goal calculation primitives, and core protected server workflows.
+- [x] Add automated goal-calculation tests covering GTE/LTE status transitions, percentage logic, and no-activity pending state.
+- [x] Add protected workflow tests for Gold Journal account ownership, bootstrap behavior, and trade mutation authorization boundaries.
+- [x] Add intermediate GTE/LTE percentage assertions to the goal-calculation test suite.
+- [x] Add trade update/delete authorization-boundary tests for anonymous and non-owner access attempts.
+- [x] Model option lists and notification preferences/history in protected cloud-backed workflows.
+- [x] Add an end-to-end account renaming flow with validation, loading/error handling, and refresh behavior.
+- [x] Wire the rename workflow and tests to the currently selected account after switching.
+- [x] Add client-level selected-account state coverage proving a switch updates the rename target.
+- [x] Verify responsive desktop/mobile UI, database migrations, PWA assets, test suite, type checks, and production build. Authenticated end-to-end browser automation remains blocked by the external OAuth human-verification step.
+- [x] Complete a no-mutation end-to-end review of every authenticated Gold Journal view, key dialog, account-switching flow, and PWA state.
+- [x] Add a clear multi-account manager for creating, switching, renaming, and confirmed removal of trading accounts.
+- [x] Add a safe protected account-removal procedure that prevents accidental deletion and chooses a replacement active account.
+- [x] Expand the MT5 view with an account-import workflow, connection prerequisites, configurable bridge settings, and import-result guidance.
+- [x] Integrate MT5 connection status, persisted bridge configuration, import outcomes, and next-step guidance directly into the MT5 application view.
+- [x] Add MT5 in-view account preparation and target-account selection before importing trades.
+- [x] Add automated coverage for MT5 account preparation, bridge configuration persistence, and success/failure result handling.
+- [x] Add MT5 workflow integration tests for persisted bridge settings, target-account selection, and import outcome feedback.
+- [x] Add a mounted MT5 page test for persisted settings, target selection, and rendered bridge success/failure feedback.
+- [x] Add a mounted MT5 successful-sync test that verifies status, latest-import details, counts, and the target account name.
+- [x] Add a persistent MT5 import-run history with timestamp, target account, imported/skipped counts, and status, then render it in the MT5 view.
+- [x] Add mounted MT5 view coverage for rendering past import runs.
+- [x] Integrate protected dropdown-list and trading-rule controls directly into the Options page and replace static list pills.
+- [x] Add mounted Options-page coverage for profile display, confirmed reset controls, and in-page rule configuration.
+- [x] Add Options reset confirmation coverage proving clearing proceeds only after explicit confirmation.
+- [x] Add a bulk PDF export dialog supporting a custom from/to date range or the full active-account trade log.
+- [x] Generate card-style PDF pages for every selected trade, including signed screenshot evidence where available.
+- [x] Add selected-period performance analysis and a P&L calendar summary to the bulk PDF report.
+- [x] Add tests for date-range selection and PDF report data preparation without leaking cross-account data.
+- [x] Audit every primary application view at phone, tablet, laptop, and wide-desktop breakpoints for overflow, interaction reachability, and readable data density. The finalized source-labeled view × breakpoint matrix preserves agent observations, shell checks, and trader sign-off separately.
+- [x] Add an intentional light theme with semantic surface, text, border, and status tokens that preserve contrast across cards, tables, dialogs, charts, and floating controls.
+- [x] Add a visible theme switch and ensure shared header controls, form elements, export dialog, and responsive navigation patterns follow the active theme.
+- [x] Add responsive/theme regression checks for the document theme class, local persistence, and semantic light/dark palette declarations.
+- [x] Fix account selector and native option-menu contrast so account names and choices remain readable in dark mode.
+- [x] Finish an authenticated dark-mode audit across shared cards, tables, dialogs, and form fields, then document the reviewed breakpoints and any further fixes.
+- [x] Expand the accessible per-trade card-view action to cover every persisted trade field, including record metadata, alongside signed screenshot evidence.
+- [x] Add persistent custom-value controls for every configurable New Trade journal option, making added values available in future entries.
+- [x] Add a complete in-app MT5 bridge setup process covering local bridge installation, terminal preparation, account mapping, connection testing, and import execution.
+- [x] Add clear MT5 bridge diagnostics and recovery guidance for unavailable bridge, browser security, incorrect URL, invalid response, and empty-import outcomes.
+- [x] Complete New Trade fields from the supplied reference, including direction versus bias, SL/TP placement, mistake, hold quality, and structured screenshot/notes/emotion inputs.
+- [x] Add a weekly P&L summary at the end of each week in the P&L Calendar.
+- [x] Add a searchable month picker to the monthly trading overview above the Trade Log controls, retaining trade, win/loss, win-rate, P&L, and risk/reward metrics.
+- [x] Redesign the P&L Calendar as a week-card layout with a dedicated weekly summary card beside each calendar week.
+- [x] Add an accessible hover and focus interaction that lifts populated day cards and centers their P&L and trade summary with restrained motion.
+- [x] Move the searchable monthly performance overview from the Trade Log to the top of the P&L Calendar.
+- [x] Complete the Trade Log visible context with direction-versus-bias and the remaining saved execution fields, preserving readable responsive columns and the full trade card.
+- [x] Diagnose and repair Goals calculation, period activity, status, and control behavior against account-scoped real trade data.
+- [x] Redesign Plan & Execution around a professional trader’s pre-market context, trade thesis, risk limits, execution review, and end-of-session scorecard.
+- [x] Execute and document the remaining protected no-mutation view-by-view review once the authenticated session is available.
+- [x] Execute and document the remaining phone, tablet, laptop, and wide-desktop audit for all primary journal views once the authenticated session is available. The finalized source-labeled view × breakpoint matrix preserves agent observations, shell checks, and trader sign-off separately.
+- [x] Execute and document the remaining authenticated dark/light contrast audit across forms, cards, dialogs, tables, and navigation once the authenticated session is available.
+- [x] Retry the final checkpoint after the temporary artifact-host DNS outage clears so the validated project state can be preserved and published.
+- [x] Prevent unavailable screenshot-signing requests from delaying the protected journal loader and its authenticated review screens.
+- [x] Replace the protected journal’s indefinite loading state with an explicit session-recovery state when account data cannot load.
+- [x] Replace the delayed protected-loader page reload with an in-place journal and trade-list retry path that preserves UI state.
+- [x] Add explicit user-facing OAuth outage handling on the login entry path, with a clear recoverable state for temporary authentication-service failures.
+- [x] Add the same OAuth-aware recoverable handling to the protected-session reconnect action.
+- [x] Verify the reliability-boundary documentation was persisted before marking that documentation work complete.
+- [x] Run the full regression suite, type check, production build, and service-worker syntax validation after the reliability updates.
+- [x] Add and test a server-side OAuth provider probe deadline that returns an unavailable result when the underlying fetch never settles.
+- [x] Add a client-visible OAuth recovery deadline so login and protected-session reconnect controls become recoverable even if their health request remains pending.
+- [x] Run the full regression suite, type check, production build, and service-worker syntax validation after the final client-side OAuth recovery-deadline change.
+- [x] Build an account-scoped Analysis Edge feature showing win rate, net P&L, expectancy, and sample size by session, timeframe, and level.
+- [x] Add combination analysis for session × timeframe, level × session, and level × timeframe so the trader can identify context-specific edges.
+- [x] Present strongest, weakest, and insufficient-sample signals with a minimum-trade threshold and practical data-quality guidance.
+- [x] Add automated analysis-edge tests and run full regression validation after the feature is implemented.
+- [x] Ensure strongest and weakest Analysis Edge callouts rank all qualified single and combined contexts globally, then revalidate the correction.
+- [x] Make MT5 Connect discoverable in the navigation and expose a clear primary connection action.
+- [x] Build a complete in-app MT5 connector workflow with bridge installation, terminal preparation, local endpoint setup, account mapping, test connection, and import controls.
+- [x] Add actionable MT5 diagnostics for unavailable bridge, incorrect local URL, CORS/browser access, invalid payload, account mismatch, and empty history.
+- [x] Add or strengthen MT5 connector tests and run complete regression validation.
+- [x] Update MT5 Connect to explain normal connector shutdown and support explicit selection among multiple desktop MT5 terminal accounts.
+- [x] Add multi-account connector regression coverage and validate the updated workflow.
+- [x] Remove all MT5 Connect navigation, UI, local bridge download, import controls, storage, and protected import workflow from Gold Journal.
+- [x] Remove MT5-specific tests and validate the remaining application after the removal.
+- [x] Add a professional shared 3D depth, lighting, and restrained motion system that remains accessible with reduced motion enabled.
+- [x] Upgrade primary journal surfaces, navigation, cards, and empty/recovery states with consistent professional visual hierarchy across dark and light themes.
+- [x] Add deterministic in-app workflow automations for trading readiness, rule guardrails, and action prioritization based on real journal data.
+- [x] Refine loading and recovery states so the journal retains visible professional workstation context rather than reading as a generic centered error card.
+- [x] Run and document the missing light-theme tablet and wide-desktop visual audits for the upgraded shell and recovery states, fixing any issues found.
+- [x] Add focused regression coverage for the upgraded automation and recovery-state presentation before final validation.
+- [x] Reconfirm responsive and dark/light validation after the missing light-theme breakpoint checks, while retaining the previously completed test, type, build, and service-worker validation.
+- [x] Replace the current Goals dashboard and its hard-coded goal assumptions with an account-scoped configurable daily, weekly, and monthly goals system.
+- [x] Support creating, editing, enabling, disabling, and deleting any goal, including custom names, goal periods, metric types, comparison rules, targets, and notifications.
+- [x] Automatically calculate real-data goal progress from the selected account’s closed trades and surface risk-first goal insights and notifications without placing or modifying trades.
+- [x] Add goal-management and goal-notification regression coverage, then complete full validation for the redesigned workflow.
+- [x] Retry physical removal of hidden legacy non-custom goal rows when the external TiDB DNS outage has cleared; legacy rows are already excluded from every journal read.
+- [x] Remove journal entry IDs, account IDs, owner IDs, screenshot keys, storage filenames, and internal timestamps from the trade-view dialog and every client-visible trade detail surface.
+- [x] Audit the card-style PDF report and all remaining visible journal interfaces for internal IDs, ownership fields, storage keys, signed URLs, or other implementation metadata, then remove any exposure found.
+- [x] Add privacy-regression coverage and complete validation for the metadata-exposure hardening release.
+- [x] Replace the generic goal editor with strategy-first risk, execution-discipline, and behavior-control templates tailored to a real XAUUSD journal.
+- [x] Add direct configurable controls for max daily loss, max weekly loss/drawdown, loss streak, trade frequency, FOMO, revenge, overtrading, rule violations, and required evidence/review habits.
+- [x] Automatically track the new controls from closed trades, saved mistake tags, screenshots, Plan & Execution reviews, and configurable strategy context without placing or modifying trades.
+- [x] Research and document the risk and behavior-control design basis, then add regression coverage and complete validation for the rebuilt workflow.
+- [x] Replace the single-choice Mistake selector with persisted multi-tag behavior capture so one trade can record FOMO, revenge, moved SL, and other rule breaks together.
+- [x] Preserve, edit, and analyze multiple behavior tags end-to-end through trade create/update flows while remaining compatible with existing single-value mistake records.
+- [x] Add regression coverage proving multiple saved behavior tags flow from trade entry into the strategy-control calculations.
+- [x] Rebuild the broken Goals page as a readable summary-card and compact control-table workspace with reliable spacing, status hierarchy, and responsive behavior.
+- [x] Replace the oversized card-grid presentation with a table-driven tracker for daily, weekly, and monthly controls, including current value, limit, status, action, scope, and row actions.
+- [x] Audit and strengthen control progress, status, alert, and strategy-scope logic through realistic risk, behavior, and habit scenarios.
+- [x] Add layout and logic regressions, validate desktop and mobile Goals views, and publish the repaired workflow.
+- [x] Correct daily and weekly loss controls so an entered positive limit is transparently evaluated and displayed as a negative P&L floor, with no confusing sign inversion.
+- [x] Add reusable multi-select controls for eligible strategy and execution trade fields, while preserving single-select semantics where a field is inherently singular.
+- [x] Maintain backward compatibility for existing single-value journal entries and add regression coverage for negative-loss semantics plus multi-select persistence.
+- [x] Add account-scoped MT5 connection and live-position storage, including unique API keys, connection state, MT5 ticket deduplication, and secure ownership enforcement.
+- [x] Add a secure public MT5 ingestion endpoint for authenticated Expert Advisor ping, open-position upsert, and close-position updates without exposing browser session credentials.
+- [x] Build an MT5 Live workspace with connection management, setup guidance, live open positions, recent closes, and controlled journal prefill for unjournaled closed trades.
+- [x] Integrate active live positions into the Trade Log without disrupting existing features, and ship the downloadable Gold Journal Expert Advisor file.
+- [x] Add MT5 isolation, API-key, ingest, journal-status, and UI regression coverage, then complete full validation and publish.
+- [x] Fix the missing QueryError recovery icon import that can crash the authenticated error state, then add a regression and validate the repair.
+- [x] Add secure MT5 account-summary ingestion for balance, equity, margin, free margin, currency, and current floating P&L.
+- [x] Add an initial and on-demand historical closed-trade backfill from MT5 with ticket-based upsert deduplication and no automatic journal-trade creation.
+- [x] Show MT5 account metrics, historical closed trades, sync/backfill status, and a user-controlled refresh in the MT5 Live workspace.
+- [x] Update the managed Expert Advisor and setup guidance for historical sync, then add regression coverage and complete full validation.
+- [x] Automatically mirror the selected MT5 connection's historical closed positions and active open positions into the assigned Gold Journal Trade Log with stable ticket-based deduplication.
+- [x] Automatically reconcile synchronized MT5 positions from open to closed in existing journal entries, preserving the trader's non-MT5 journal fields where applicable.
+- [x] Show the connected broker balance, equity, floating P&L, and MT5 synchronization state directly in the Trade Log summary without creating duplicate cash movements.
+- [x] Add account-isolation, historical-sync, open-to-closed reconciliation, and Trade Log summary regression coverage, then complete full validation.
+- [x] Reconcile stored MT5 positions server-side before protected journal and Trade Log reads, so previously backfilled history cannot depend on a browser-side refresh race.
+- [x] Limit automatically created MT5 journal records to PKT date/session, direction, result, risk, reward, and P&L, leaving all discretionary analysis fields empty for trader completion.
+- [x] Add direct regression coverage for server-side Trade Log load reconciliation and validate the correction against the connected account.
+- [x] Accept standard MQL5 dot-formatted timestamps in secure MT5 event validation, then verify the connected terminal can ingest its existing history.
+- [x] Diagnose and correct the managed EA historical-batch path so all available prior MT5 closes are ingested and automatically journaled.
+- [x] Correct MT5-generated Trade Log session labels to the intended PKT session boundaries, including 4:00 pm PKT as Pre-NY.
+- [x] Remove journal balance and deposit/withdraw actions for MT5-linked Trade Logs, using broker balance and equity as the account balance display instead.
+- [x] Validate historical MT5 closes, live floating positions, PKT session labels, and linked-account summary behavior with the connected account data.
+- [x] Research and correct all managed-EA historical-deal collection assumptions against the official MQL5 history API behavior.
+- [x] Audit MT5 request delivery, server validation, position deduplication, and Trade Log synchronization for every historical-trade failure mode.
+- [x] Replace the current historical-deal batch logic with a resilient position-level backfill that proves every prior closed position reaches Trade Log exactly once.
+- [x] Add comprehensive MT5 history fault regressions and validate the repaired path against the connected account before publishing.
+- [x] Verify and resolve the supplied review’s remaining MT5 history risks: index-based live-close detection, position-versus-deal identity clarity, partial/reversal handling, and complete retry behavior.
+- [x] Add server-visible MT5 ingestion diagnostics so rejected historical batches can be identified from the app without relying on terminal logs.
+- [x] Diagnose and remove the HTTP 400 validation failure emitted by the MT5 historical-batch payload, then display its exact response in the EA log.
+- [x] Replace the remaining running journal-balance column and trade-card balance field with the connected broker balance in MT5-linked Trade Logs.
+- [x] Ensure published PWA revisions activate reliably so users receive the latest Trade Log bundle rather than a stale service-worker-cached version.
+- [x] Replace the remaining linked-account sidebar journal balance with the connected MT5 broker balance and remove its journal-derived win-rate treatment.
+- [x] Apply the trader-specified PKT session schedule to every auto-synced MT5 trade and backfill already imported journal records.
+- [x] Diagnose and correct the remaining MT5 broker-balance display discrepancy across linked Trade Log rows, cards, summaries, and sidebar.
+- [x] Add exact PKT boundary and linked-broker-balance regressions, then validate the corrected connected-account view.
+- [x] Encode the UTC+3 broker timestamp offset in the MT5 EA payload and correctly parse it before PKT session classification.
+- [x] Shift and reclassify existing auto-imported MT5 history from broker UTC+3 to PKT UTC+5 using the requested session schedule.
+- [x] Remove the misleading repeated current MT5 balance from individual historical Trade Log rows while retaining broker balance and equity in the summary and sidebar.
+- [x] Add broker-timezone and per-row-balance regressions, verify the connected account, and publish the correction.
+- [x] Correct the MT5 Live historical-sync summary so its displayed closed-position count always matches the visible account-owned history rows.
+- [x] Color weekly P&L calendar summaries green for profit, red for loss, and neutral for flat results with accessible light/dark contrast.
+- [x] Improve Plan & Execution search with a debounced account-scoped query and clear no-results state.
+- [x] Improve Plan & Execution saved entries with explicit add, edit, and confirmed remove controls that preserve account ownership and refresh state reliably.
+- [x] Add focused Plan & Execution workflow regressions and complete validation for search plus saved-entry management.
+- [x] Ensure Plan & Execution entry and adherence checklists show active user-defined Trading rules, with a clear add-rule action instead of an empty 0/0 protocol state.
+- [x] Correct manual New Trade session prefill to derive the exact current Pakistan Standard Time session rather than the browser-local hour.
+- [x] Remove hard-coded Skip reason and Outcome defaults from the manual Missed Trades form so each opportunity is recorded from trader-entered facts.
+- [x] Remove the remaining hard-coded New Trade direction, result, timeframe, quality, execution, and patience defaults so manual entries start only with an auto-detected PKT session.
+- [x] Add explicit blank Direction and Result choices in the live reusable New Trade dialog so browser-native first-option selection cannot bypass the required-choice guard.
+- [x] Deliver one comprehensive Gold Journal rebuild prompt covering Supabase, Netlify, every feature, security requirement, and complete responsive UI behavior.
+- [x] Align and publish the connected Najam27/MyGoldJournal repository with the validated Gold Journal UI, workflows, security, PWA, responsive behavior, Supabase data layer, and Netlify deployment configuration. Superseded by the user's instruction to retain the managed Gold Journal codebase and database; no GitHub/Supabase/Netlify migration was performed.
+- [x] Enforce server-side isolation for multiple trading accounts, MT5 connections, MT5 tickets, historical sync, live positions, and account switching without cross-account trade mixing.
+- [x] Fix the production MT5 Live connection leak where the selected `enx live` account displays the `Blueberry p2` connection, then verify each account sees only its own connection and records.
+- [x] Advance the PWA cache generation so authenticated users receive the repaired MT5 account-scoped bundle instead of a stale workspace asset.
+- [x] Audit all interactive application controls, replace dummy behavior with complete handlers or remove unsupported controls, and verify light/dark responsive visibility across primary views.
+- [x] Recover the managed MySQL-backed application locally, retain the validated MT5 isolation and UI repairs, and remove the unfinished external migration artifacts from the active release.
+- [x] Remove the client-visible AI Mentor local-storage key name while retaining the local-only privacy explanation and add a regression for the safe copy.
+- [x] Advance the PWA static cache generation and confirm the published AI Mentor privacy repair replaces the stale client bundle.
+- [x] Audit the authenticated Missed Trades view and dialog in dark theme, documenting contrast for its table, fields, buttons, and empty state without saving a record.
+- [x] Complete authenticated light-theme contrast checks for the remaining populated primary views: MT5 Live, Analysis, P&L Calendar, and Missed Trades.
+- [x] Make populated P&L Calendar day-card buttons activate an explicit selected state on tap and keyboard, then add regression coverage.
+- [x] Trace and document the complete MT5 ingress-to-journal data flow, including timestamp interpretation, ownership resolution, lifecycle transitions, and validation order.
+- [x] Centralize MT5 timestamp normalization to canonical UTC+5 using explicit payload offsets or a per-connection broker offset for offset-free broker-local timestamps.
+- [x] Add a user-configurable broker UTC offset to each MT5 connection and expose it only through account-scoped server procedures and MT5 setup controls.
+- [x] Make MT5 OPEN/CLOSE/history reconciliation idempotent, resistant to delayed OPEN events, and atomic across live-position and journal-trade updates.
+- [x] Harden MT5 ingest rate limiting, payload validation, safe error categorization, and bounded diagnostic logging without exposing API keys.
+- [x] Add regression coverage for broker offsets, UTC+5 date boundaries, duplicate and out-of-order events, close finalization, account isolation, and future-timestamp validation.
+- [x] Complete a no-mutation production verification of the MT5 workspace and document remaining integration risks.
+- [x] Advance the PWA cache generation so installed and returning users activate the MT5 integrity release.
+- [x] Trace the reported closed XAUUSDm position that remains OPEN in MT5 Live and Trade Log, then reconcile only the verified stale record safely.
+- [x] Enforce canonical fixed UTC+5 business timestamps for every MT5 event path, independent of broker-local display time or browser timezone.
+- [x] Allow edits to any already-journaled trade by correcting the false future-date guard without allowing genuinely new future-dated manual trades.
+- [x] Add regressions for stale-close reconciliation, fixed UTC+5 business dates, and editing existing journal records with historical dates.
+- [x] Update the MT5 Expert Advisor so live close detection runs while history backfill is still in progress and recent terminal closes are not starved behind historical batches.
+- [x] Advance the PWA cache generation so returning users receive the EA v1.14 setup link and corrected journal-edit date guard.
+- [x] Ensure manually closed MT5 positions finalize through live close detection and history reconciliation even when no SL or TP is hit.
+- [x] Make Clear all remove all active-account journal records and linked MT5 position/history records in one explicit, confirmed, account-scoped operation.
+- [x] Replace the P&L monthly overview's dark-incompatible native month selector with an accessible themed control.
+- [x] Add explicit Previous month and Next month calendar navigation with visible labels and correct selected-month data.
+- [x] Add regression coverage for manual close reconciliation, account-scoped clear-all completeness, themed month selection, and month navigation.
+- [x] Persist an account-scoped MT5 data-reset watermark so a cleared journal is not immediately repopulated by pre-clear history or pre-clear open-position events.
+- [x] Execute authenticated breakpoint audits at 375×812, 768×1024, 1280×720, and 1600×1000 for populated Trade Log, MT5 Live, Goals, P&L Calendar, and Plan & Execution views; record overflow, readability, and control-reachability findings. The finalized matrix labels desktop agent observations and non-desktop trader-confirmed cells separately.
+- [x] Update the audit record with per-view, per-breakpoint evidence that distinguishes shell-only checks from populated authenticated-view checks, then close responsive audit items only after all views are verified. The matrix preserves that distinction and includes direct trader sign-off.
+- [x] Create a finalized responsive audit matrix listing Trade Log, MT5 Live, Goals, P&L Calendar, and Plan & Execution against 375, 768, 1280, and 1600 with explicit overflow, readability, and control-reachability findings for each cell.
+- [x] Record agent-verifiable populated-view evidence for missing non-desktop breakpoints, or explicitly document those cells as accepted only on direct trader confirmation rather than agent observation.
+- [x] Reconcile and checkpoint the detailed responsive audit matrix so shell-only and populated-authenticated evidence remain distinguishable before closing the audit tracker.
+- [x] Complete a frontend inventory and UI-smell audit across pages, components, primitives, theme implementation, states, charts, dialogs, forms, tables, and responsive layouts without changing business logic.
+- [x] Establish and apply a unified semantic light/dark design-token system and shared layout/widget patterns for trading-specific states.
+- [x] Repair frontend-only theme contrast, hardcoded presentation styles, card density, forms, tables, dialogs, charts, navigation, loading/empty/error states, and responsive behavior where audit evidence supports it.
+- [x] Add or update frontend regression coverage, perform representative light/dark and responsive visual verification, and publish a scope-limited UI/UX audit report.
+- [x] Audit the complete MT5 ownership model, account switching, query scoping, API-key ingest resolution, ticket identity, and deletion isolation against the uploaded multi-account requirements.
+- [x] Audit every visible interactive control for real handler wiring, loading/disabled/error behavior, and truthful user feedback; identify only verified non-functional controls for repair or removal.
+- [x] Audit hardcoded frontend presentation behavior, light/dark token use, and responsive constraints across pages, dialogs, tables, forms, widgets, charts, navigation, and floating controls without changing data logic.
+- [x] Implement only verified multi-account MT5, action-wiring, theme, and responsive repairs with a focused regression matrix, full validation, and a traceable production report.
+- [x] Trace and repair the authenticated tRPC path that is returning an HTML document where the client expects a JSON response, preserving routing and authentication behavior.
+- [x] Add focused regression coverage for API-route precedence and malformed non-JSON responses, then validate and publish the fix.
+- [x] Audit and harden production environment validation so required authentication, database, OAuth, and server configuration fails safely without exposing secret values.
+- [x] Audit MT5 API-key handling, bounded rate limiting, fixed UTC+5 timestamp preservation, idempotent event ordering, safe response mapping, and terminal-close reconciliation without breaking the existing EA contract.
+- [x] Audit and make account creation/deletion plus other multi-step account-scoped data operations atomic and ownership-checked, using additive schema protections only where evidence requires them.
+- [x] Reduce oversized global request parsing, add safe error/headers controls, and audit client-visible responses for secret or internal-data disclosure.
+- [x] Audit journal loading/search pagination, date/month business calculations, indexes, and large-history behavior while preserving existing filters, exports, and the fixed UTC+5 convention.
+- [x] Audit and remove only justified GoldJournal type-suppression issues, then consolidate duplicated goal formulas where practical without changing goal behavior.
+- [x] Add focused regression coverage for each verified hardening correction and complete full test, type, build, migration, and production validation.
+- [x] Raise the Manage accounts control above the lower-right branding overlay while retaining a separate reachable Rules & lists control at desktop and mobile breakpoints.
+- [x] Advance the PWA cache generation so returning users activate the floating-control positioning repair.
+- [x] Consolidate FOMO, revenge, overtrading, and oversizing into one account-scoped configurable behavior-discipline control while preserving existing saved controls and history.
+- [x] Research and add concise, evidence-based risk, execution, and review control types that can be tracked from existing journal fields without inventing trader data.
+- [x] Add goal-calculation, notification, and Goals-workspace regressions for the consolidated and new control types, then validate and publish the update.

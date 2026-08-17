@@ -1,0 +1,55 @@
+Starting video analysis...
+Submitting video analysis task...
+Task submitted (ID: video-analysis-a76748ba-09e8-449a-b4b8-d56d89913349)
+[9s] Status: Analyzing video content with AI...
+[33s] Still processing, please wait...
+[46s] Status: Analysis completed
+[46s] Analysis completed!
+Full analysis result saved to: /home/ubuntu/video_x2OJNpulRik_analysis_20260817_104955.md
+Note: This tool performs AI-based visual and audio analysis, not verbatim transcription. For detailed speech transcription, use `manus-speech-to-text` instead.
+Analysis result:
+
+Based on the video presentation by Mr OrderFlow, here are practical, measurable trade-journal control ideas categorized by the requested psychological and risk management themes.
+
+### **Journal-Trackable Metrics & Control Ideas**
+
+These ideas rely on data typically recorded in a trading journal (entry/exit price, time, and PnL).
+
+*   **FOMO & Revenge Trading (Recency Bias Control):**
+    *   **Metric:** Track a minimum sample size (e.g., 30–100+ trades) before evaluating a strategy.
+    *   **Control Idea:** Review the entire sample when feeling the urge to change strategies after a few losses. 
+    *   **Quote:** *"If you're not journaling... you really, really struggle with the recency bias... you will simply only remember those losing trades and some people then have the tendency to then just move and change strategy."*
+*   **Overtrading & Plan Adherence:**
+    *   **Metric:** Average Winner Hold Time vs. Average Losing Hold Time.
+    *   **Control Idea:** Identify if you are "micro-managing" positions by comparing hold times. If losing hold times are significantly longer than winners, it indicates a failure to cut losses or a tendency to take profits too early.
+    *   **Quote:** *"Do you tend to hold your losing trades longer or do you tend to hold your winning trades longer? [It] just gives you another insight into how you behave when you're actually managing a position."*
+*   **Risk Definition (Stop-Loss Optimization):**
+    *   **Metric:** Max Adverse Excursion (MAE) — the maximum number of ticks a trade went against you before closing.
+    *   **Control Idea:** Analyze MAE over a large sample to see if trades that go a certain distance against you ever actually return to profit. If they don't, you can tighten your stops to save capital.
+    *   **Quote:** *"If you realize that once you go eight ticks against you, it never really comes back... you've just saved yourself a couple hundred ticks [over a year]."*
+*   **Loss Limits:**
+    *   **Metric:** Daily Net Return vs. Average Winning Day.
+    *   **Control Idea:** Set a daily stop-loss limit that is proportional to your average winning day to avoid the "boom and bust" cycle.
+    *   **Quote:** *"Try and make sure you're not at least losing... more than one and a half times your average winning day... a losing day should never wipe you out!"*
+*   **Weekly/Monthly Review:**
+    *   **Metric:** Max Consecutive Wins vs. Max Consecutive Losses.
+    *   **Control Idea:** Use these streaks to set realistic expectations for "drawdown" periods, reducing panic during normal losing streaks.
+
+### **Advice Requiring External/Market Data**
+
+These insights require data points that are usually not found in a standard trade log and must be pulled from market history or news calendars.
+
+*   **Understanding Product Volatility:**
+    *   **Metric:** Average Daily Range (ADR) and Standard Deviation (Std Dev) of price moves.
+    *   **Advice:** Knowing the "normal" range of a product (e.g., 22–65 ticks for ZB) helps determine if a move is an "extreme" likely to revert to the mean or a trending breakout.
+*   **News Context:**
+    *   **Advice:** Note how price behaves specifically on "Balance Days" (no news) vs. "Trending Days" (CPI, FOMC, GDP reports). 
+    *   **Quote:** *"You need to be journaling how price behaves on days prior to important data... do we typically balance? Do we not?"*
+*   **Cost of Business:**
+    *   **Metric:** Tick-to-commission ratio.
+    *   **Advice:** High-frequency scalping requires understanding how platform fees and commissions impact the "Profit Factor" over hundreds of trades.
+
+### **Summary of Journaling Philosophy**
+The core objective of journaling, according to the presenter, is to transition from "betting on the future" to executing based on statistical confidence.
+*   **On Execution:** *"Sample size is extremely important because it gives you the confidence in your data in order for you to execute and be able to step up and take a position without hesitation and without fear."*
+*   **On Professionalism:** *"Do you think Goldman and Citadel have just had an end-of-quarter review on their trades? You better believe they have. If entities are doing it... why shouldn't you?"*
