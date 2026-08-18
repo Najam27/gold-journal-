@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 
 const migration = readFileSync(join(process.cwd(), "supabase/migrations/0006_schema_integrity.sql"), "utf8");
 const atomicMigration = readFileSync(join(process.cwd(), "supabase/migrations/0004_atomic_operations.sql"), "utf8");
+const tradeSummary = readFileSync(join(process.cwd(), "supabase/migrations/0005_trade_summary.sql"), "utf8");
+const tradeSummaryHotfix = readFileSync(join(process.cwd(), "supabase/migrations/0007_fix_trade_summary_and_accounts.sql"), "utf8");
 const schema = readFileSync(join(process.cwd(), "drizzle/schema.ts"), "utf8");
 
 describe("Supabase schema-integrity migration", () => {
@@ -26,6 +28,19 @@ describe("Supabase schema-integrity migration", () => {
     expect(migration).toContain("revoke all on function public.current_journal_user_id() from public, anon");
     expect(migration).toContain('create unique index if not exists "gj_notification_user_type_unique"');
     expect(migration).toContain("group by \"userId\", \"type\" having count(*) > 1");
+  });
+
+  it("qualifies trade-summary columns and keeps the RPC service-role-only", () => {
+    expect(tradeSummary).toContain("from public.gj_trades as trade");
+    expect(tradeSummaryHotfix).toContain("from public.gj_trades as trade");
+    expect(tradeSummaryHotfix).toContain('trade."result"');
+    expect(tradeSummaryHotfix).toContain('trade."pnl"');
+    expect(tradeSummaryHotfix).toContain('trade."userId"');
+    expect(tradeSummaryHotfix).toContain('trade."accountId"');
+    expect(tradeSummaryHotfix).toContain("revoke all on function public.gj_account_trade_summary(integer, integer) from public, anon, authenticated;");
+    expect(tradeSummaryHotfix).toContain("grant execute on function public.gj_account_trade_summary(integer, integer) to service_role;");
+    expect(tradeSummary).not.toContain('coalesce(sum("pnl")');
+    expect(tradeSummaryHotfix).not.toContain('coalesce(sum("pnl")');
   });
 
   it("does not use PostgreSQL-reserved position as an unquoted RPC parameter", () => {

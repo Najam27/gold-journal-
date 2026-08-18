@@ -18,3 +18,7 @@ export function toSafeJournalRecord<T extends RecordWithInternalScope>(record: T
 export function toSafeAccount<T extends RecordWithInternalScope>(account: T): T {
   return withoutInternalScope(account, ["createdAt", "updatedAt"]);
 }
+
+export function toSafeAccountListItem<T extends RecordWithInternalScope>(account: T) {
+  return { id: account.id, name: account.name, startingBalance: account.startingBalance, createdAt: account.createdAt, updatedAt: account.updatedAt };
+}

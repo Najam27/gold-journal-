@@ -5,7 +5,7 @@ const root = process.cwd();
 const read = path => readFileSync(join(root, path), "utf8");
 const schema = read("drizzle/schema.ts");
 const migrationDir = join(root, "supabase/migrations");
-const migrations = readdirSync(migrationDir).filter(name => /^000[1-6]_.*\.sql$/.test(name)).sort();
+const migrations = readdirSync(migrationDir).filter(name => /^000[1-7]_.*\.sql$/.test(name)).sort();
 const expectedMigrations = [
   "0001_source_gold_journal.sql",
   "0002_security_rls_and_storage.sql",
@@ -13,6 +13,7 @@ const expectedMigrations = [
   "0004_atomic_operations.sql",
   "0005_trade_summary.sql",
   "0006_schema_integrity.sql",
+  "0007_fix_trade_summary_and_accounts.sql",
 ];
 const expectedNames = [
   "gj_accounts_id_user_unique",
@@ -45,6 +46,7 @@ const report = {
   missingInSchema,
   missingInMigrations,
   drizzleSchemaPresent: existsSync(join(root, "drizzle/schema.ts")),
+  tradeSummaryHotfixQualified: (() => { const hotfix = read("supabase/migrations/0007_fix_trade_summary_and_accounts.sql"); return hotfix.includes("from public.gj_trades as trade") && ["trade.\"result\"", "trade.\"pnl\"", "trade.\"userId\"", "trade.\"accountId\""].every(token => hotfix.includes(token)); })(),
 };
 console.log(JSON.stringify(report, null, 2));
-if (!report.migrationOrderValid || !report.staleDrizzleArtifactsRemoved || !report.expectedNamesInDrizzleSchema || !report.expectedNamesInSupabaseMigrations || missingMigrations.length) process.exitCode = 1;
+if (!report.migrationOrderValid || !report.staleDrizzleArtifactsRemoved || !report.expectedNamesInDrizzleSchema || !report.expectedNamesInSupabaseMigrations || !report.tradeSummaryHotfixQualified || missingMigrations.length) process.exitCode = 1;

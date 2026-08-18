@@ -8,7 +8,7 @@ import { ensureAccount, getJournal, getOwnedAccount, ownsTrade } from "./goldDb"
 import { getDb } from "./db";
 import { getMt5History, getMt5Workspace, syncStoredMt5PositionsToTradeLog } from "./mt5Db";
 import { mt5ApiKeyFingerprint } from "./mt5Security";
-import { toSafeJournalRecord, toSafeTrade } from "./journalPrivacy";
+import { toSafeAccount, toSafeAccountListItem, toSafeJournalRecord, toSafeTrade } from "./journalPrivacy";
 import { protectedProcedure, router } from "./_core/trpc";
 import { hasImageSignature, storageGetSignedUrl, storagePut } from "./storage";
 import { consumeRateLimit } from "./rateLimit";
@@ -84,10 +84,10 @@ async function clearAccountJournalData(userId: number, accountId: number) {
 
 export const goldRouter = router({
   journal: router({
-    bootstrap: protectedProcedure.query(({ ctx }) => ensureAccount(ctx.user.id)),
+    bootstrap: protectedProcedure.query(async ({ ctx }) => toSafeAccountListItem(await ensureAccount(ctx.user.id))),
     get: protectedProcedure.input(z.object({ accountId: z.number().int().positive().optional() })).query(async ({ ctx, input }) => {
       const account = await getOwnedAccount(ctx.user.id, input.accountId);
-      await syncStoredMt5PositionsToTradeLog(ctx.user.id, account.id);
+      try { await syncStoredMt5PositionsToTradeLog(ctx.user.id, account.id); } catch (error) { console.warn("[Journal] MT5 pre-sync degraded", error instanceof Error ? error.message : "unknown error"); }
       return getJournal(ctx.user.id, account.id);
     }),
   }),
@@ -105,6 +105,11 @@ export const goldRouter = router({
     }),
   }),
   accounts: router({
+    list: protectedProcedure.query(async ({ ctx }) => {
+      const db = await dbOrThrow();
+      const rows = await db.select().from(accounts).where(eq(accounts.userId, ctx.user.id)).orderBy(desc(accounts.createdAt)).limit(1_000);
+      return rows.map(toSafeAccountListItem);
+    }),
     create: protectedProcedure.input(z.object({ name: z.string().trim().min(1).max(100), startingBalance: money(0).default(0) })).mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const inserted = await db.insert(accounts).values({ userId: ctx.user.id, name: input.name, startingBalance: input.startingBalance.toFixed(2) }).returning({ id: accounts.id });

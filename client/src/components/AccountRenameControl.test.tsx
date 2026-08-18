@@ -1,23 +1,27 @@
 // @vitest-environment jsdom
-import { act, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setSelectedAccountId } from "@/lib/accountSelection";
 
 const mocks = vi.hoisted(() => ({
-  queryInputs: [] as Array<{ accountId?: number }>,
+  accounts: [{ id: 12, name: "Primary Account" }, { id: 24, name: "Review Account" }],
+  list: vi.fn(),
   rename: vi.fn(),
   create: vi.fn(),
   remove: vi.fn(),
   invalidate: vi.fn(),
 }));
 
-vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ isAuthenticated: true }) }));
+vi.mock("@/_core/hooks/useAuth", () => ({ useAuth: () => ({ isAuthenticated: true, profileReady: true }) }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
-    journal: { get: { useQuery: (input: { accountId?: number }) => { mocks.queryInputs.push(input); return { data: { activeAccount: { id: input.accountId, name: `Account ${input.accountId}` } } }; } } },
-    accounts: { rename: { useMutation: () => ({ mutateAsync: mocks.rename, isPending: false }) }, create: { useMutation: () => ({ mutateAsync: mocks.create, isPending: false }) }, remove: { useMutation: () => ({ mutateAsync: mocks.remove, isPending: false }) } },
-    useUtils: () => ({ journal: { get: { invalidate: mocks.invalidate } } }),
+    accounts: { list: { useQuery: () => mocks.list() }, rename: { useMutation: () => ({ mutateAsync: mocks.rename, isPending: false }) }, create: { useMutation: () => ({ mutateAsync: mocks.create, isPending: false }) }, remove: { useMutation: () => ({ mutateAsync: mocks.remove, isPending: false }) } },
+    useUtils: () => ({
+      accounts: { list: { invalidate: mocks.invalidate } }, journal: { get: { invalidate: mocks.invalidate } }, trades: { list: { invalidate: mocks.invalidate } },
+      mt5: { workspace: { invalidate: mocks.invalidate }, history: { invalidate: mocks.invalidate } }, notifications: { get: { invalidate: mocks.invalidate } },
+      analysis: { get: { invalidate: mocks.invalidate } }, optionLists: { list: { invalidate: mocks.invalidate } },
+    }),
   },
 }));
 vi.mock("@/components/ui/button", () => ({ Button: ({ children, ...props }: any) => <button {...props}>{children}</button> }));
@@ -27,15 +31,23 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 import { AccountRenameControl } from "./AccountRenameControl";
 
-describe("AccountRenameControl selected-account integration", () => {
-  beforeEach(() => { mocks.queryInputs.length = 0; setSelectedAccountId(undefined); });
+describe("AccountRenameControl independent account management", () => {
+  afterEach(() => cleanup());
+  beforeEach(() => { setSelectedAccountId(undefined); mocks.list.mockReset().mockReturnValue({ data: mocks.accounts, isLoading: false, error: null, refetch: vi.fn() }); mocks.invalidate.mockReset(); });
 
-  it("switches the rename query target when the selected account changes", async () => {
-    setSelectedAccountId(12);
+  it("renders Manage Accounts and uses accounts.list without journal.get", () => {
     render(<AccountRenameControl />);
-    expect(mocks.queryInputs.at(-1)).toEqual({ accountId: 12 });
+    expect(screen.getByTitle("Manage trading accounts")).toBeTruthy();
+    fireEvent.click(screen.getByTitle("Manage trading accounts"));
+    expect(screen.getByText("Primary Account")).toBeTruthy();
+    expect(screen.getByText("Review Account")).toBeTruthy();
+    expect(mocks.list).toHaveBeenCalled();
+  });
 
-    await act(async () => { setSelectedAccountId(24); });
-    await waitFor(() => expect(mocks.queryInputs.at(-1)).toEqual({ accountId: 24 }));
+  it("replaces a stale selected account with the first owned account", async () => {
+    setSelectedAccountId(999);
+    render(<AccountRenameControl />);
+    await waitFor(() => expect(screen.getByText("Primary Account")).toBeTruthy());
+    expect(screen.getByText("Primary Account")).toBeTruthy();
   });
 });

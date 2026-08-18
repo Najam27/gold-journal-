@@ -2,6 +2,7 @@ type Invalidate = () => Promise<unknown>;
 
 export type AccountScopedUtils = {
   journal: { get: { invalidate: Invalidate } };
+  accounts?: { list: { invalidate: Invalidate } };
   trades: { list: { invalidate: Invalidate } };
   mt5: { workspace: { invalidate: Invalidate }; history: { invalidate: Invalidate } };
   notifications: { get: { invalidate: Invalidate } };
@@ -17,6 +18,7 @@ export function invalidateAccountScopedQueries(utils: AccountScopedUtils) {
     utils.mt5.history.invalidate(),
     utils.notifications.get.invalidate(),
   ];
+  if (utils.accounts) invalidations.push(utils.accounts.list.invalidate());
   if (utils.analysis) invalidations.push(utils.analysis.get.invalidate());
   if (utils.optionLists) invalidations.push(utils.optionLists.list.invalidate());
   return Promise.all(invalidations);
