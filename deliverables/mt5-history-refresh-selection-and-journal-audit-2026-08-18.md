@@ -94,3 +94,8 @@ The attached master prompt identified a correctness defect in the EA: historical
 The EA now uses historical deal SL/TP values when available, includes commission, swap, and fee in realized P&L, calculates risk/reward only from actual recovered values, preserves zero/unknown semantics when values are unavailable, computes volume-weighted close price for multi-deal positions, bounds batches at 50 positions, and sends a successful empty `history_batch` when no closed positions exist. The source version is **2.1.0** and the dashboard guidance has been updated to EA v2.1.
 
 A source-contract test verifies the reconstruction requirements. The repository does not contain MetaEditor or a Windows MT5 compiler, so final compilation must still be performed in MetaEditor on the operator’s MT5 terminal before attaching the EA.
+
+
+## Read-only Netlify deployment verification
+
+On 18 August 2026, the public site at `https://topgjournal.netlify.app/` loaded the unauthenticated Supabase-backed sign-in shell. The public download URL `https://topgjournal.netlify.app/GoldJournal_EA.mq5` was fetched successfully through the browser download path; the downloaded source reports `#property version "2.1"`, `SyncSeconds = 3`, and `ConnectionId = ""`, confirming that the v2.1 asset is present on the deployed site. This verifies the public deployment surface only. An authenticated account-specific MT5 smoke test and real MetaEditor compilation remain operator actions.
