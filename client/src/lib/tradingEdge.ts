@@ -1,54 +1,25 @@
-import { toNumber } from "./gold";
+import { metricRow, type AnalysisTrade } from "@shared/analysisEngine";
 
 export const EDGE_MIN_SAMPLE = 5;
-
-export type EdgeTrade = {
-  session?: string | null;
-  timeframe?: string | null;
-  level?: string | null;
-  result: string;
-  pnl: number | string | null;
-  tradeDate?: number | string | Date | null;
-};
-
-export type EdgeRow = {
-  key: string;
-  label: string;
-  sample: number;
-  wins: number;
-  losses: number;
-  breakEven: number;
-  winRate: number;
-  netPnl: number;
-  expectancy: number;
-  qualified: boolean;
-};
-
-type Dimension = "session" | "timeframe" | "level";
+export type EdgeTrade = AnalysisTrade;
+export type Dimension = "session" | "timeframe" | "level";
+export type EdgeRow = ReturnType<typeof metricRow> & { qualified: boolean };
 
 function labelFor(trade: EdgeTrade, dimensions: Dimension[]) {
-  const values = dimensions.map(dimension => String(trade[dimension] || "").trim()).filter(Boolean);
-  return values.length === dimensions.length ? values.join(" · ") : null;
+  const values = dimensions.map(dimension => String(trade[dimension] ?? "").trim());
+  return values.every(Boolean) ? values.join(" · ") : null;
 }
 
-export function edgeRows(trades: EdgeTrade[], dimensions: Dimension[]) {
+export function edgeRows(trades: EdgeTrade[], dimensions: Dimension[]): EdgeRow[] {
   const groups = new Map<string, EdgeTrade[]>();
   for (const trade of trades) {
-    if (trade.result === "OPEN") continue;
     const label = labelFor(trade, dimensions);
-    if (!label) continue;
+    if (!label || trade.result === "OPEN") continue;
     const current = groups.get(label) ?? [];
     current.push(trade);
     groups.set(label, current);
   }
-  const entries = Array.from(groups.entries()) as [string, EdgeTrade[]][];
-  return entries.map(([label, rows]): EdgeRow => {
-    const wins = rows.filter(row => row.result === "WIN").length;
-    const losses = rows.filter(row => row.result === "LOSS").length;
-    const breakEven = rows.filter(row => row.result === "BREAK_EVEN").length;
-    const netPnl = rows.reduce((sum, row) => sum + toNumber(row.pnl), 0);
-    return { key: label, label, sample: rows.length, wins, losses, breakEven, winRate: rows.length ? wins / rows.length * 100 : 0, netPnl, expectancy: rows.length ? netPnl / rows.length : 0, qualified: rows.length >= EDGE_MIN_SAMPLE };
-  }).sort((a, b) => b.expectancy - a.expectancy || b.winRate - a.winRate || b.sample - a.sample);
+  return Array.from(groups.entries()).map(([label, rows]) => ({ ...metricRow(label, rows), qualified: rows.length >= EDGE_MIN_SAMPLE })).sort((a, b) => b.edgeScore - a.edgeScore || b.expectancy - a.expectancy || b.sample - a.sample);
 }
 
 export function buildTradingEdge(trades: EdgeTrade[]) {
@@ -60,7 +31,7 @@ export function buildTradingEdge(trades: EdgeTrade[]) {
   const levelTimeframes = edgeRows(trades, ["level", "timeframe"]);
   const all = [...sessions, ...timeframes, ...levels, ...sessionTimeframes, ...levelSessions, ...levelTimeframes];
   const qualified = all.filter(row => row.qualified);
-  const strongest = [...qualified].sort((a, b) => b.expectancy - a.expectancy || b.winRate - a.winRate || b.sample - a.sample)[0] ?? null;
-  const weakest = [...qualified].sort((a, b) => a.expectancy - b.expectancy || a.winRate - b.winRate || b.sample - a.sample)[0] ?? null;
+  const strongest = [...qualified].sort((a, b) => b.edgeScore - a.edgeScore || b.expectancy - a.expectancy || b.sample - a.sample)[0] ?? null;
+  const weakest = [...qualified].sort((a, b) => a.edgeScore - b.edgeScore || a.expectancy - b.expectancy || b.sample - a.sample)[0] ?? null;
   return { sessions, timeframes, levels, sessionTimeframes, levelSessions, levelTimeframes, strongest, weakest };
 }

@@ -5,6 +5,7 @@ export type AccountScopedUtils = {
   trades: { list: { invalidate: Invalidate } };
   mt5: { workspace: { invalidate: Invalidate }; history: { invalidate: Invalidate } };
   notifications: { get: { invalidate: Invalidate } };
+  analysis?: { get: { invalidate: Invalidate } };
   optionLists?: { list: { invalidate: Invalidate } };
 };
 
@@ -16,6 +17,7 @@ export function invalidateAccountScopedQueries(utils: AccountScopedUtils) {
     utils.mt5.history.invalidate(),
     utils.notifications.get.invalidate(),
   ];
+  if (utils.analysis) invalidations.push(utils.analysis.get.invalidate());
   if (utils.optionLists) invalidations.push(utils.optionLists.list.invalidate());
   return Promise.all(invalidations);
 }

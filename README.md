@@ -34,7 +34,7 @@ Use `.env.example` as the template. Configure these in Netlify Site configuratio
 | `SUPABASE_SERVICE_ROLE_KEY` | Netlify only | Server-side Auth verification, Supabase database/storage access |
 | `SUPABASE_STORAGE_BUCKET` | Netlify only | Private screenshot bucket; use `trade-screenshots` |
 
-The AI Mentor uses an OpenRouter key entered by the user and retained only in a user-scoped browser-local key; no server-side AI provider secret is required by the live journal path. Analytics variables are optional. The old `VITE_APP_ID`, `JWT_SECRET`, `OAUTH_SERVER_URL`, `VITE_OAUTH_PORTAL_URL`, `OWNER_OPEN_ID`, `OWNER_NAME`, and source Forge variables are not required by the Supabase Auth flow.
+The Analysis and AI Mentor views use an optional server-side OpenRouter integration. Configure `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` only in Netlify/server environment variables; never create a `VITE_OPENROUTER_API_KEY` or place provider credentials in browser storage. If these variables are absent, deterministic analysis remains available and the AI panel reports that it is not configured. `OPENROUTER_FALLBACK_MODEL` and `OPENROUTER_APP_URL` are optional. The old `VITE_APP_ID`, `JWT_SECRET`, `OAUTH_SERVER_URL`, `VITE_OAUTH_PORTAL_URL`, `OWNER_OPEN_ID`, `OWNER_NAME`, and source Forge variables are not required by the Supabase Auth flow.
 
 ## Netlify deployment
 
@@ -51,7 +51,7 @@ pnpm test
 pnpm build
 ```
 
-The source feature suite remains in the repository. The Supabase-only conversion adds dedicated Auth, runtime configuration, storage-content, aggregate-statistics, query-adapter, and atomic-operation tests while retaining the source UI, journal, goals, plans, exports, and MT5 regression coverage. Procedure throttles are process-local safeguards; configure a distributed edge/WAF or Supabase-backed limiter before operating multiple Netlify instances under hostile traffic. The included local burst harness measures API routing only and is not evidence of authenticated Supabase/database capacity.
+The source feature suite remains in the repository. The Supabase-only conversion adds dedicated Auth, runtime configuration, storage-content, aggregate-statistics, query-adapter, and atomic-operation tests while retaining the source UI, journal, goals, plans, exports, and MT5 regression coverage. Deterministic Analysis is cached independently in the client query layer and invalidated with account-scoped journal mutations; AI results use a bounded server cache keyed by the deterministic aggregate hash. The Analysis AI procedure allows three requests per ten minutes per user in the current process and returns deterministic-unavailable results on provider failure. Procedure throttles are process-local safeguards; configure a distributed edge/WAF or Supabase-backed limiter before operating multiple Netlify instances under hostile traffic. The included local burst harness measures API routing only and is not evidence of authenticated Supabase/database capacity.
 
 ## MT5
 

@@ -13,6 +13,9 @@ import { protectedProcedure, router } from "./_core/trpc";
 import { hasImageSignature, storageGetSignedUrl, storagePut } from "./storage";
 import { consumeRateLimit } from "./rateLimit";
 import { clearAccountJournalDataAtomic, recordGoalAlertsAtomic, removeAccountAtomic } from "./atomicOperations";
+import { getAccountAnalysis } from "./analysisDb";
+import { analyzeWithOpenRouter } from "./analysisAi";
+import { compareAnalysis } from "@shared/analysisEngine";
 
 const MAX_MONEY = 999_999_999_999.99;
 const optionalText = (max = 5000) => z.string().trim().max(max).optional().default("");
@@ -20,6 +23,9 @@ const money = (min = -MAX_MONEY) => z.number().finite().min(min).max(MAX_MONEY);
 const timestampInput = z.number().finite().int().positive().max(8_640_000_000_000_000);
 const accountIdInput = z.object({ accountId: z.number().int().positive() });
 const mt5TicketInput = z.string().regex(/^\d+$/).max(20).optional();
+const analysisFiltersInput = z.object({ startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), session: z.string().trim().max(40).nullable().optional(), timeframe: z.string().trim().max(20).nullable().optional(), level: z.string().trim().max(100).nullable().optional(), setup: z.string().trim().max(40).nullable().optional(), direction: z.enum(["BUY", "SELL"]).nullable().optional(), result: z.enum(["WIN", "LOSS", "BREAK_EVEN", "OPEN"]).nullable().optional() }).default({});
+const analysisInput = z.object({ accountId: z.number().int().positive(), filters: analysisFiltersInput });
+const analysisCompareInput = z.object({ accountId: z.number().int().positive(), current: analysisFiltersInput, previous: analysisFiltersInput });
 const lossFloorMetrics = new Set(["daily_loss", "weekly_drawdown"]);
 const goalInput = z.object({ accountId: z.number().int().positive(), name: z.string().trim().min(1).max(120), description: optionalText(500), period: z.enum(["DAILY", "WEEKLY", "MONTHLY"]), metric: z.string().trim().min(1).max(80), comparison: z.enum(["GTE", "LTE"]), target: money(-1_000_000), notify: z.boolean().default(true), active: z.boolean().default(true) }).superRefine((value, ctx) => {
   if (lossFloorMetrics.has(value.metric) && value.target >= 0) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["target"], message: "Loss controls use a negative P&L floor, for example -100." });
@@ -83,6 +89,19 @@ export const goldRouter = router({
       const account = await getOwnedAccount(ctx.user.id, input.accountId);
       await syncStoredMt5PositionsToTradeLog(ctx.user.id, account.id);
       return getJournal(ctx.user.id, account.id);
+    }),
+  }),
+  analysis: router({
+    get: protectedProcedure.input(analysisInput).query(({ ctx, input }) => getAccountAnalysis(ctx.user.id, input.accountId, input.filters)),
+    ai: protectedProcedure.input(analysisInput).mutation(async ({ ctx, input }) => {
+      if (!consumeRateLimit("analysis-ai", ctx.user.id, 3, 10 * 60_000)) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "AI analysis limit reached. Please retry later." });
+      const deterministic = await getAccountAnalysis(ctx.user.id, input.accountId, input.filters);
+      const ai = await analyzeWithOpenRouter(ctx.user.id, input.accountId, deterministic);
+      return { ...deterministic, ai };
+    }),
+    compare: protectedProcedure.input(analysisCompareInput).query(async ({ ctx, input }) => {
+      const [current, previous] = await Promise.all([getAccountAnalysis(ctx.user.id, input.accountId, input.current), getAccountAnalysis(ctx.user.id, input.accountId, input.previous)]);
+      return { current, previous, delta: compareAnalysis(current, previous) };
     }),
   }),
   accounts: router({
