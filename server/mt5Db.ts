@@ -3,6 +3,7 @@ import { accounts, mt5Connections, mt5LivePositions, trades } from "../drizzle/s
 import { getOwnedAccount } from "./goldDb";
 import { getDb } from "./db";
 import { mt5ApiKeyFingerprint } from "./mt5Security";
+import { syncMt5PositionAtomic } from "./atomicOperations";
 
 async function requireDb() { const db = await getDb(); if (!db) throw new Error("Supabase database is unavailable. Please retry shortly."); return db; }
 
@@ -148,12 +149,6 @@ async function upsertTradeRecord(db: any, record: any) {
   return query.onDuplicateKeyUpdate({ set: { tradeDate: record.tradeDate, session: record.session, direction: record.direction, result: record.result, risk: record.risk, reward: record.reward, pnl: record.pnl } });
 }
 
-async function upsertLivePosition(db: any, record: any) {
-  const query = db.insert(mt5LivePositions).values(record) as any;
-  if (typeof query.onConflictDoUpdate === "function") return query.onConflictDoUpdate({ target: [mt5LivePositions.accountId, mt5LivePositions.ticket], set: record });
-  return query.onDuplicateKeyUpdate({ set: record });
-}
-
 async function syncMt5PositionToTradeLog(userId: number, accountId: number, position: SyncedMt5Position, database?: any) {
   const db = database ?? await requireDb();
   const record = {
@@ -220,28 +215,14 @@ export async function upsertMt5OpenPosition(userId: number, accountId: number, v
   const db = await requireDb();
   const resetAt = await getJournalDataResetAt(db, accountId);
   if (!isMt5PositionAfterJournalReset(resetAt, { status: "OPEN", openTime: value.openTime })) return;
-  const record = {
-    accountId,
-    ticket: value.ticket,
-    symbol: value.symbol,
-    direction: value.direction,
-    lots: value.lots.toFixed(2),
-    openPrice: value.openPrice.toFixed(6),
-    slPrice: value.slPrice?.toFixed(6) ?? null,
-    tpPrice: value.tpPrice?.toFixed(6) ?? null,
-    riskUsd: value.riskUsd.toFixed(2),
-    rewardUsd: value.rewardUsd.toFixed(2),
-    rrRatio: value.rrRatio.toFixed(2),
-    floatingPnl: value.floatingPnl.toFixed(2),
-    openTime: value.openTime,
-    status: "OPEN" as const,
-    updatedAt: new Date(),
-  };
-  await db.transaction(async tx => {
-    const existing = await tx.select({ status: mt5LivePositions.status }).from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, accountId), eq(mt5LivePositions.ticket, value.ticket))).limit(1);
-    if (existing[0]?.status === "CLOSED") return;
-    await upsertLivePosition(tx, record);
-    await syncMt5PositionToTradeLog(userId, accountId, { ...value, pnl: value.floatingPnl, result: "OPEN", tradeTime: value.openTime }, tx);
+  await syncMt5PositionAtomic(userId, accountId, {
+    ticket: value.ticket.toString(), symbol: value.symbol, direction: value.direction,
+    lots: value.lots.toFixed(2), openPrice: value.openPrice.toFixed(6),
+    closePrice: null, slPrice: value.slPrice?.toFixed(6) ?? null, tpPrice: value.tpPrice?.toFixed(6) ?? null,
+    riskUsd: value.riskUsd.toFixed(2), rewardUsd: value.rewardUsd.toFixed(2), rrRatio: value.rrRatio.toFixed(2),
+    floatingPnl: value.floatingPnl.toFixed(2), realizedPnl: null, result: "OPEN",
+    openTime: value.openTime.toISOString(), closeTime: null, status: "OPEN",
+    session: pktSession(value.openTime), tradeTime: value.openTime.toISOString(), pnl: value.floatingPnl.toFixed(2),
   });
 }
 
@@ -249,32 +230,13 @@ export async function upsertMt5ClosedPosition(userId: number, accountId: number,
   const db = await requireDb();
   const resetAt = await getJournalDataResetAt(db, accountId);
   if (!isMt5PositionAfterJournalReset(resetAt, { status: "CLOSED", openTime: value.openTime, closeTime: value.closeTime })) return;
-  await db.transaction(async tx => {
-    const existing = await tx.select({ status: mt5LivePositions.status, openTime: mt5LivePositions.openTime }).from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, accountId), eq(mt5LivePositions.ticket, value.ticket))).limit(1);
-    if (existing[0]?.status === "CLOSED") return;
-    const openTime = existing[0]?.openTime ?? value.openTime;
-    const record = {
-      accountId,
-      ticket: value.ticket,
-      symbol: value.symbol,
-      direction: value.direction,
-      lots: value.lots.toFixed(2),
-      openPrice: value.openPrice.toFixed(6),
-      closePrice: value.closePrice.toFixed(6),
-      slPrice: value.slPrice?.toFixed(6) ?? null,
-      tpPrice: value.tpPrice?.toFixed(6) ?? null,
-      riskUsd: value.riskUsd.toFixed(2),
-      rewardUsd: value.rewardUsd.toFixed(2),
-      rrRatio: value.rrRatio.toFixed(2),
-      floatingPnl: "0.00",
-      realizedPnl: value.realizedPnl.toFixed(2),
-      result: value.result,
-      openTime,
-      closeTime: value.closeTime,
-      status: "CLOSED" as const,
-      updatedAt: new Date(),
-    };
-    await upsertLivePosition(tx, record);
-    await syncMt5PositionToTradeLog(userId, accountId, { ...value, openTime, pnl: value.realizedPnl, result: value.result, tradeTime: value.closeTime }, tx);
+  await syncMt5PositionAtomic(userId, accountId, {
+    ticket: value.ticket.toString(), symbol: value.symbol, direction: value.direction,
+    lots: value.lots.toFixed(2), openPrice: value.openPrice.toFixed(6),
+    closePrice: value.closePrice.toFixed(6), slPrice: value.slPrice?.toFixed(6) ?? null, tpPrice: value.tpPrice?.toFixed(6) ?? null,
+    riskUsd: value.riskUsd.toFixed(2), rewardUsd: value.rewardUsd.toFixed(2), rrRatio: value.rrRatio.toFixed(2),
+    floatingPnl: "0.00", realizedPnl: value.realizedPnl.toFixed(2), result: value.result,
+    openTime: value.openTime.toISOString(), closeTime: value.closeTime.toISOString(), status: "CLOSED",
+    session: pktSession(value.closeTime), tradeTime: value.closeTime.toISOString(), pnl: value.realizedPnl.toFixed(2),
   });
 }

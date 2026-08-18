@@ -4,11 +4,20 @@ import { mt5Connections, mt5LivePositions, trades } from "../drizzle/schema";
 const store = vi.hoisted(() => ({
   positions: new Map<string, any>(),
   journal: new Map<string, any>(),
-  transactionCalls: 0,
+  atomicCalls: 0,
   db: null as any,
 }));
 
 vi.mock("./db", () => ({ getDb: async () => store.db }));
+vi.mock("./atomicOperations", () => ({ syncMt5PositionAtomic: async (_userId: number, accountId: number, position: any) => {
+  store.atomicCalls += 1;
+  const positionKey = key(accountId, BigInt(position.ticket));
+  const existing = store.positions.get(positionKey);
+  if (existing?.status === "CLOSED") return false;
+  store.positions.set(positionKey, { ...(existing ?? {}), status: position.status, realizedPnl: position.realizedPnl, openTime: new Date(position.openTime), closeTime: position.closeTime ? new Date(position.closeTime) : null });
+  store.journal.set(positionKey, { ...(store.journal.get(positionKey) ?? { notes: "" }), result: position.result, pnl: position.pnl });
+  return true;
+} }));
 
 import { isMt5PositionAfterJournalReset, upsertMt5ClosedPosition, upsertMt5OpenPosition } from "./mt5Db";
 
@@ -30,7 +39,6 @@ function installFakeDatabase() {
   };
   store.db = {
     select: (columns: any) => ({ from: (table: unknown) => ({ where: () => ({ limit: async () => table === mt5Connections ? [{ journalDataResetAt: null }] : [] }) }) }),
-    transaction: async (callback: (database: typeof tx) => Promise<unknown>) => { store.transactionCalls += 1; return callback(tx); },
   };
 }
 
@@ -38,7 +46,7 @@ describe("MT5 position lifecycle", () => {
   beforeEach(() => {
     store.positions.clear();
     store.journal.clear();
-    store.transactionCalls = 0;
+    store.atomicCalls = 0;
     installFakeDatabase();
   });
 
@@ -53,7 +61,7 @@ describe("MT5 position lifecycle", () => {
     expect(store.positions).toHaveLength(1);
     expect(store.positions.get(key(12, 1001n))).toMatchObject({ status: "CLOSED", realizedPnl: "10.00", openTime: open().openTime });
     expect(store.journal.get(key(12, 1001n))).toMatchObject({ result: "WIN", pnl: "10.00", notes: "Trader context remains private and unchanged" });
-    expect(store.transactionCalls).toBe(3);
+    expect(store.atomicCalls).toBe(3);
   });
 
   it("treats repeated closes as idempotent without altering the finalized journal result", async () => {

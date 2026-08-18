@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   ownsTrade: vi.fn(),
   storagePut: vi.fn(),
   syncStoredMt5: vi.fn(),
+  removeAccountAtomic: vi.fn(),
+  clearAccountJournalDataAtomic: vi.fn(),
+  recordGoalAlertAtomic: vi.fn(),
 }));
 
 vi.mock("./db", () => ({ getDb: mocks.getDb }));
@@ -19,6 +22,7 @@ vi.mock("./goldDb", () => ({
 }));
 vi.mock("./storage", () => ({ storagePut: mocks.storagePut }));
 vi.mock("./mt5Db", () => ({ getMt5History: vi.fn(), getMt5Workspace: vi.fn(), syncStoredMt5PositionsToTradeLog: mocks.syncStoredMt5 }));
+vi.mock("./atomicOperations", () => ({ removeAccountAtomic: mocks.removeAccountAtomic, clearAccountJournalDataAtomic: mocks.clearAccountJournalDataAtomic, recordGoalAlertAtomic: mocks.recordGoalAlertAtomic }));
 
 import { goldRouter } from "./goldRouter";
 
@@ -83,20 +87,13 @@ describe("Gold Journal protected server workflows", () => {
   });
 
   it("chooses a remaining owned account after confirmed removal", async () => {
-    const deleteWhere = vi.fn().mockResolvedValue(undefined);
-    const selectWhere = vi.fn().mockResolvedValue([{ id: 24, userId: 7 }, { id: 25, userId: 7 }]);
-    const transaction = vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback({
-      select: () => ({ from: () => ({ where: selectWhere }) }),
-      delete: () => ({ where: deleteWhere }),
-    }));
     mocks.getOwnedAccount.mockResolvedValue({ id: 24, userId: 7, name: "Account to remove" });
-    mocks.getDb.mockResolvedValue({ transaction });
+    mocks.removeAccountAtomic.mockResolvedValue({ success: true, replacementAccountId: 25 });
     const caller = goldRouter.createCaller({ user } as any);
 
     await expect(caller.accounts.remove({ accountId: 24, confirmed: true })).resolves.toEqual({ success: true, replacementAccountId: 25 });
     expect(mocks.getOwnedAccount).toHaveBeenCalledWith(7, 24);
-    expect(transaction).toHaveBeenCalledTimes(1);
-    expect(deleteWhere).toHaveBeenCalledTimes(9);
+    expect(mocks.removeAccountAtomic).toHaveBeenCalledWith(7, 24);
   });
 
   it("does not return the internal storage key after an owned screenshot upload", async () => {
@@ -139,18 +136,18 @@ describe("Gold Journal protected server workflows", () => {
     const select = vi.fn()
       .mockImplementationOnce(() => limitedRows([]))
       .mockImplementationOnce(() => limitedRows([{ id: 88, userId: 7, accountId: 12, active: true, notify: true }]))
-      .mockImplementationOnce(() => limitedRows([]));
+      .mockImplementationOnce(() => limitedRows([]))
+      .mockImplementationOnce(() => limitedRows([{ id: 88, userId: 7, accountId: 12, active: true, notify: true }]));
     mocks.getOwnedAccount.mockResolvedValue({ id: 12, userId: 7 });
+    mocks.recordGoalAlertAtomic.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
     mocks.getDb.mockResolvedValue({ select, insert: () => ({ values }) });
     const caller = goldRouter.createCaller({ user } as any);
 
     await expect(caller.notifications.recordGoalAlerts({ accountId: 12, alerts: [{ goalId: 88, status: "AT_RISK", cycleKey: "DAILY-2026-08-12", message: "Loss ceiling is near." }] })).resolves.toEqual({ recorded: 1 });
-    expect(values).toHaveBeenCalledWith(expect.objectContaining({ userId: 7, accountId: 12, type: "GOAL_AT_RISK_88_DAILY-2026-08-12" }));
+    expect(mocks.recordGoalAlertAtomic).toHaveBeenCalledWith(7, 12, 88, "GOAL_AT_RISK_88_DAILY-2026-08-12", "Loss ceiling is near.");
 
-    select.mockClear();
-    select.mockImplementationOnce(() => limitedRows([])).mockImplementationOnce(() => limitedRows([{ id: 88, userId: 7, accountId: 12, active: true, notify: true }])).mockImplementationOnce(() => limitedRows([{ id: 901 }]));
     await expect(caller.notifications.recordGoalAlerts({ accountId: 12, alerts: [{ goalId: 88, status: "AT_RISK", cycleKey: "DAILY-2026-08-12", message: "Loss ceiling is near." }] })).resolves.toEqual({ recorded: 0 });
-    expect(values).toHaveBeenCalledTimes(1);
+    expect(mocks.recordGoalAlertAtomic).toHaveBeenCalledTimes(2);
   });
 
   it("skips goal alerts for inactive or notification-disabled rules", async () => {

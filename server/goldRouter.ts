@@ -12,6 +12,7 @@ import { toSafeJournalRecord, toSafeTrade } from "./journalPrivacy";
 import { protectedProcedure, router } from "./_core/trpc";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { consumeRateLimit } from "./rateLimit";
+import { clearAccountJournalDataAtomic, recordGoalAlertAtomic, removeAccountAtomic } from "./atomicOperations";
 
 const MAX_MONEY = 999_999_999_999.99;
 const optionalText = (max = 5000) => z.string().trim().max(max).optional().default("");
@@ -72,17 +73,7 @@ async function ownMt5Connection(userId: number, accountId: number, connectionId:
 
 async function clearAccountJournalData(userId: number, accountId: number) {
   await getOwnedAccount(userId, accountId);
-  const db = await dbOrThrow();
-  const resetAt = new Date();
-  await db.transaction(async tx => {
-    await tx.update(mt5Connections).set({ journalDataResetAt: resetAt, historySyncedCount: 0, lastHistorySync: null, lastHistoryStatus: "RESET", lastHistoryMessage: "Journal data was cleared; awaiting post-reset MT5 events." }).where(and(eq(mt5Connections.userId, userId), eq(mt5Connections.accountId, accountId)));
-    await tx.delete(notificationHistory).where(and(eq(notificationHistory.userId, userId), eq(notificationHistory.accountId, accountId)));
-    await tx.delete(dailyPlans).where(and(eq(dailyPlans.userId, userId), eq(dailyPlans.accountId, accountId)));
-    await tx.delete(skippedTrades).where(and(eq(skippedTrades.userId, userId), eq(skippedTrades.accountId, accountId)));
-    await tx.delete(cashMovements).where(and(eq(cashMovements.userId, userId), eq(cashMovements.accountId, accountId)));
-    await tx.delete(mt5LivePositions).where(eq(mt5LivePositions.accountId, accountId));
-    await tx.delete(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId)));
-  });
+  await clearAccountJournalDataAtomic(userId, accountId, new Date());
 }
 
 export const goldRouter = router({
@@ -108,23 +99,7 @@ export const goldRouter = router({
     }),
     remove: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), confirmed: z.literal(true) })).mutation(async ({ ctx, input }) => {
       await getOwnedAccount(ctx.user.id, input.accountId);
-      const db = await dbOrThrow();
-      return db.transaction(async tx => {
-        const ownedAccounts = await tx.select().from(accounts).where(eq(accounts.userId, ctx.user.id));
-        if (ownedAccounts.length < 2) throw new Error("Create another account before removing your only account.");
-        const replacement = ownedAccounts.find(account => account.id !== input.accountId);
-        if (!replacement) throw new Error("A replacement account could not be selected.");
-        await tx.delete(notificationHistory).where(and(eq(notificationHistory.userId, ctx.user.id), eq(notificationHistory.accountId, input.accountId)));
-        await tx.delete(dailyPlans).where(and(eq(dailyPlans.userId, ctx.user.id), eq(dailyPlans.accountId, input.accountId)));
-        await tx.delete(skippedTrades).where(and(eq(skippedTrades.userId, ctx.user.id), eq(skippedTrades.accountId, input.accountId)));
-        await tx.delete(cashMovements).where(and(eq(cashMovements.userId, ctx.user.id), eq(cashMovements.accountId, input.accountId)));
-        await tx.delete(goals).where(and(eq(goals.userId, ctx.user.id), eq(goals.accountId, input.accountId)));
-        await tx.delete(mt5LivePositions).where(eq(mt5LivePositions.accountId, input.accountId));
-        await tx.delete(mt5Connections).where(and(eq(mt5Connections.userId, ctx.user.id), eq(mt5Connections.accountId, input.accountId)));
-        await tx.delete(trades).where(and(eq(trades.userId, ctx.user.id), eq(trades.accountId, input.accountId)));
-        await tx.delete(accounts).where(and(eq(accounts.userId, ctx.user.id), eq(accounts.id, input.accountId)));
-        return { success: true, replacementAccountId: replacement.id };
-      });
+      return removeAccountAtomic(ctx.user.id, input.accountId);
     }),
   }),
   mt5: router({
@@ -334,16 +309,18 @@ export const goldRouter = router({
         const goal = await ownGoal(ctx.user.id, alert.goalId);
         if (!goal.active || !goal.notify || goal.accountId !== input.accountId) continue;
         const type = `GOAL_${alert.status}_${goal.id}_${alert.cycleKey}`;
-        const existing = await db.select({ id: notificationHistory.id }).from(notificationHistory).where(and(eq(notificationHistory.userId, ctx.user.id), eq(notificationHistory.type, type))).limit(1);
-        if (existing[0]) continue;
-        await db.insert(notificationHistory).values({ userId: ctx.user.id, accountId: input.accountId, type, message: alert.message });
-        recorded += 1;
+        if (await recordGoalAlertAtomic(ctx.user.id, input.accountId, goal.id, type, alert.message)) recorded += 1;
       }
       return { recorded };
     }),
     markRead: protectedProcedure.input(z.object({ notificationId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       await db.update(notificationHistory).set({ readAt: new Date() }).where(and(eq(notificationHistory.id, input.notificationId), eq(notificationHistory.userId, ctx.user.id)));
+      return { success: true };
+    }),
+    markAllRead: protectedProcedure.mutation(async ({ ctx }) => {
+      const db = await dbOrThrow();
+      await db.update(notificationHistory).set({ readAt: new Date() }).where(and(eq(notificationHistory.userId, ctx.user.id), eq(notificationHistory.readAt, null)));
       return { success: true };
     }),
   }),

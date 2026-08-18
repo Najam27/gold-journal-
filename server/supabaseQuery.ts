@@ -14,7 +14,7 @@ const postgrestValue = (value: unknown) => value instanceof Date ? value.toISOSt
 const valueForFilter = (value: unknown) => {
   const normalized = postgrestValue(value);
   if (normalized === null) return "null";
-  return String(normalized).replaceAll("\\", "\\\\").replaceAll(",", "\\,").replaceAll("(", "\\(").replaceAll(")", "\\)");
+  return String(normalized).replace(/[\r\n]/g, " ").replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll(",", "\\,").replaceAll("(", "\\(").replaceAll(")", "\\)");
 };
 
 export const eq = (column: ColumnLike, value: unknown): Filter => ({ kind: "eq", column: columnName(column), value });
@@ -30,15 +30,15 @@ function applyFilter(query: any, filter?: Filter): any {
   if (filter.kind === "eq") return filter.value === null ? query.is(filter.column, null) : query.eq(filter.column, postgrestValue(filter.value));
   if (filter.kind === "like") return query.ilike(filter.column, filter.value);
   if (filter.kind === "and") return filter.parts.reduce((current, part) => applyFilter(current, part), query);
-  if (filter.kind === "or") return query.or(filter.parts.map(renderFilter).join(","));
+  if (filter.kind === "or") return query.or(filter.parts.map(renderPostgrestFilter).join(","));
   return query;
 }
 
-function renderFilter(filter: Filter): string {
+export function renderPostgrestFilter(filter: Filter): string {
   if (filter.kind === "eq") return filter.value === null ? `${filter.column}.is.null` : `${filter.column}.eq.${valueForFilter(filter.value)}`;
   if (filter.kind === "like") return `${filter.column}.ilike.${valueForFilter(filter.value)}`;
-  if (filter.kind === "and") return filter.parts.map(renderFilter).join("&");
-  if (filter.kind === "or") return `or(${filter.parts.map(renderFilter).join(",")})`;
+  if (filter.kind === "and") return filter.parts.map(renderPostgrestFilter).join("&");
+  if (filter.kind === "or") return `or(${filter.parts.map(renderPostgrestFilter).join(",")})`;
   return "";
 }
 
@@ -118,7 +118,6 @@ class SupabaseDb {
   insert(table: TableLike) { return new WriteQuery("insert").into(table); }
   update(table: TableLike) { return new WriteQuery("update").into(table); }
   delete(table: TableLike) { return new WriteQuery("delete").into(table); }
-  async transaction<T>(callback: (tx: SupabaseDb) => Promise<T>) { return callback(this); }
 }
 
 export const supabaseDb = new SupabaseDb();
