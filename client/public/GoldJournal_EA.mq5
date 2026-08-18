@@ -4,7 +4,7 @@
 
 input string Endpoint = "https://YOUR-SITE.netlify.app/api/mt5";
 input string ApiKey = "PASTE_ONCE_FROM_GOLD_JOURNAL";
-input string ConnectionId = "PASTE_CONNECTION_ID";
+input string ConnectionId = "";
 input int BrokerUtcOffsetMinutes = 180;
 input int SyncSeconds = 30;
 input int HistoryDays = 30;
