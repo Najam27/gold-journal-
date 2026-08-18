@@ -32,7 +32,10 @@ string DealDirection(long type) { return type == DEAL_TYPE_BUY ? "BUY" : "SELL";
 
 bool SendJson(string payload, string expectedEvent) {
    char data[];
-   StringToCharArray(payload, data, 0, WHOLE_ARRAY, CP_UTF8);
+   int data_size = StringToCharArray(payload, data, 0, WHOLE_ARRAY, CP_UTF8);
+   if(data_size > 0 && data[data_size - 1] == 0) {
+      ArrayResize(data, data_size - 1);
+   }
    char response[];
    string response_headers;
    string headers = "Content-Type: application/json\r\n";

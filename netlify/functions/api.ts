@@ -7,6 +7,7 @@ import { registerMt5Compatibility, registerMt5Ingest } from "../../server/mt5Ing
 import { getActiveMt5Connection, recordMt5HistoryFailure } from "../../server/mt5Db";
 import { validateRuntimeConfiguration } from "../../server/_core/env";
 import { httpCompression } from "../../server/httpCompression";
+import { mt5JsonBody } from "../../server/mt5Http";
 
 validateRuntimeConfiguration();
 
@@ -21,7 +22,7 @@ app.use((_req, res, next) => {
   next();
 });
 app.use(httpCompression);
-app.use("/api/mt5", express.json({ limit: "256kb" }));
+app.use(["/api/mt5", "/mt5"], mt5JsonBody);
 app.use("/api/trpc", express.json({ limit: "10mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ limit: "1mb", extended: true }));

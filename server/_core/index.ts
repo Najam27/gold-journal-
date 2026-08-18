@@ -10,6 +10,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { validateRuntimeConfiguration } from "./env";
 import { httpCompression } from "../httpCompression";
+import { mt5JsonBody } from "../mt5Http";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -44,7 +45,7 @@ async function startServer() {
     next();
   });
   app.use(httpCompression);
-  app.use("/api/mt5", express.json({ limit: "256kb" }));
+  app.use("/api/mt5", mt5JsonBody);
   // Screenshot uploads use authenticated tRPC and are validated again by the
   // procedure to a decoded 5 MB image. Other application JSON stays small.
   app.use("/api/trpc", express.json({ limit: "10mb" }));

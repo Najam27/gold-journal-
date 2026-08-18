@@ -1,6 +1,7 @@
 import express from "express";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { registerMt5Ingest } from "./mt5Ingest";
+import { mt5JsonBody } from "./mt5Http";
 
 const mocks = vi.hoisted(() => ({
   getActive: vi.fn(),
@@ -21,7 +22,7 @@ vi.mock("./mt5Db", () => ({
 
 async function withServer<T>(run: (baseUrl: string) => Promise<T>) {
   const app = express();
-  app.use(express.json({ limit: "256kb" }));
+  app.use(mt5JsonBody);
   registerMt5Ingest(app);
   app.use((error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (req.path === "/api/mt5" && error instanceof SyntaxError && "body" in error) return res.status(400).json({ ok: false, code: "INVALID_JSON" });
@@ -41,7 +42,7 @@ async function withServer<T>(run: (baseUrl: string) => Promise<T>) {
 
 describe("MT5 HTTP route safety", () => {
   beforeEach(() => {
-    mocks.getActive.mockReset();
+    mocks.getActive.mockReset().mockResolvedValue({ id: 44, userId: 77, accountId: 12, active: true });
     mocks.failure.mockReset();
   });
 
@@ -50,5 +51,12 @@ describe("MT5 HTTP route safety", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ ok: false, code: "INVALID_JSON" });
     expect(mocks.getActive).not.toHaveBeenCalled();
+  });
+
+  it("accepts a valid MQL5 JSON body with a trailing NUL terminator", async () => {
+    const payload = JSON.stringify({ event: "ping", api_key: "mt5_live_key_nul_padding_xxxxxxxxxxxxx" });
+    const response = await withServer(baseUrl => fetch(`${baseUrl}/api/mt5`, { method: "POST", headers: { "content-type": "application/json" }, body: Buffer.concat([Buffer.from(payload), Buffer.from([0])] ) }));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ ok: true, event: "ping" });
   });
 });
