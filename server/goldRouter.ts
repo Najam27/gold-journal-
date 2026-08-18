@@ -10,9 +10,9 @@ import { getMt5History, getMt5Workspace, syncStoredMt5PositionsToTradeLog } from
 import { mt5ApiKeyFingerprint } from "./mt5Security";
 import { toSafeJournalRecord, toSafeTrade } from "./journalPrivacy";
 import { protectedProcedure, router } from "./_core/trpc";
-import { storageGetSignedUrl, storagePut } from "./storage";
+import { hasImageSignature, storageGetSignedUrl, storagePut } from "./storage";
 import { consumeRateLimit } from "./rateLimit";
-import { clearAccountJournalDataAtomic, recordGoalAlertAtomic, removeAccountAtomic } from "./atomicOperations";
+import { clearAccountJournalDataAtomic, recordGoalAlertsAtomic, removeAccountAtomic } from "./atomicOperations";
 
 const MAX_MONEY = 999_999_999_999.99;
 const optionalText = (max = 5000) => z.string().trim().max(max).optional().default("");
@@ -218,6 +218,7 @@ export const goldRouter = router({
       const bytes = Buffer.from(base64, "base64");
       if (!bytes.byteLength) throw new Error("Screenshot payload is empty.");
       if (bytes.byteLength > 5 * 1024 * 1024) throw new Error("Screenshot must be 5MB or smaller.");
+      if (!hasImageSignature(bytes, input.mimeType)) throw new Error("Screenshot content does not match its declared image type.");
       const extension = input.mimeType === "image/png" ? "png" : input.mimeType === "image/webp" ? "webp" : "jpg";
       const stored = await storagePut(`gold-journal/${ctx.user.openId}/trades/${trade.id}-${nanoid()}.${extension}`, bytes, input.mimeType);
       const db = await dbOrThrow();
@@ -264,7 +265,7 @@ export const goldRouter = router({
   optionLists: router({
     list: protectedProcedure.query(async ({ ctx }) => {
       const db = await dbOrThrow();
-      const rows = await db.select().from(optionLists).where(eq(optionLists.userId, ctx.user.id)).orderBy(optionLists.category, optionLists.value);
+      const rows = await db.select().from(optionLists).where(eq(optionLists.userId, ctx.user.id)).orderBy(optionLists.category, optionLists.value).limit(500);
       return rows.map(toSafeJournalRecord);
     }),
     add: protectedProcedure.input(z.object({ category: z.string().trim().min(1).max(80), value: z.string().trim().min(1).max(160) })).mutation(async ({ ctx, input }) => {
@@ -304,14 +305,8 @@ export const goldRouter = router({
       const db = await dbOrThrow();
       const [settings] = await db.select().from(notificationSettings).where(eq(notificationSettings.userId, ctx.user.id)).limit(1);
       if (settings && !settings.goalAlerts) return { recorded: 0 };
-      let recorded = 0;
-      for (const alert of input.alerts) {
-        const goal = await ownGoal(ctx.user.id, alert.goalId);
-        if (!goal.active || !goal.notify || goal.accountId !== input.accountId) continue;
-        const type = `GOAL_${alert.status}_${goal.id}_${alert.cycleKey}`;
-        if (await recordGoalAlertAtomic(ctx.user.id, input.accountId, goal.id, type, alert.message)) recorded += 1;
-      }
-      return { recorded };
+      const alerts = input.alerts.map(alert => ({ goalId: alert.goalId, type: `GOAL_${alert.status}_${alert.goalId}_${alert.cycleKey}`, message: alert.message }));
+      return { recorded: await recordGoalAlertsAtomic(ctx.user.id, input.accountId, alerts) };
     }),
     markRead: protectedProcedure.input(z.object({ notificationId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();

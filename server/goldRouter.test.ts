@@ -7,10 +7,11 @@ const mocks = vi.hoisted(() => ({
   getOwnedAccount: vi.fn(),
   ownsTrade: vi.fn(),
   storagePut: vi.fn(),
+  hasImageSignature: vi.fn(() => true),
   syncStoredMt5: vi.fn(),
   removeAccountAtomic: vi.fn(),
   clearAccountJournalDataAtomic: vi.fn(),
-  recordGoalAlertAtomic: vi.fn(),
+  recordGoalAlertsAtomic: vi.fn(),
 }));
 
 vi.mock("./db", () => ({ getDb: mocks.getDb }));
@@ -20,9 +21,9 @@ vi.mock("./goldDb", () => ({
   getOwnedAccount: mocks.getOwnedAccount,
   ownsTrade: mocks.ownsTrade,
 }));
-vi.mock("./storage", () => ({ storagePut: mocks.storagePut }));
+vi.mock("./storage", () => ({ storagePut: mocks.storagePut, hasImageSignature: mocks.hasImageSignature }));
 vi.mock("./mt5Db", () => ({ getMt5History: vi.fn(), getMt5Workspace: vi.fn(), syncStoredMt5PositionsToTradeLog: mocks.syncStoredMt5 }));
-vi.mock("./atomicOperations", () => ({ removeAccountAtomic: mocks.removeAccountAtomic, clearAccountJournalDataAtomic: mocks.clearAccountJournalDataAtomic, recordGoalAlertAtomic: mocks.recordGoalAlertAtomic }));
+vi.mock("./atomicOperations", () => ({ removeAccountAtomic: mocks.removeAccountAtomic, clearAccountJournalDataAtomic: mocks.clearAccountJournalDataAtomic, recordGoalAlertsAtomic: mocks.recordGoalAlertsAtomic }));
 
 import { goldRouter } from "./goldRouter";
 
@@ -33,6 +34,7 @@ const limitedRows = (rows: unknown[]) => ({ from: () => ({ where: () => ({ limit
 describe("Gold Journal protected server workflows", () => {
   beforeEach(() => {
     Object.values(mocks).forEach(mock => mock.mockReset());
+    mocks.hasImageSignature.mockReturnValue(true);
   });
 
   it("bootstraps an authenticated user through the account helper", async () => {
@@ -132,36 +134,28 @@ describe("Gold Journal protected server workflows", () => {
   });
 
   it("records a new account-scoped goal alert once and deduplicates its type plus cycle key", async () => {
-    const values = vi.fn().mockResolvedValue(undefined);
-    const select = vi.fn()
-      .mockImplementationOnce(() => limitedRows([]))
-      .mockImplementationOnce(() => limitedRows([{ id: 88, userId: 7, accountId: 12, active: true, notify: true }]))
-      .mockImplementationOnce(() => limitedRows([]))
-      .mockImplementationOnce(() => limitedRows([{ id: 88, userId: 7, accountId: 12, active: true, notify: true }]));
+    const select = vi.fn().mockImplementation(() => limitedRows([]));
     mocks.getOwnedAccount.mockResolvedValue({ id: 12, userId: 7 });
-    mocks.recordGoalAlertAtomic.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-    mocks.getDb.mockResolvedValue({ select, insert: () => ({ values }) });
+    mocks.recordGoalAlertsAtomic.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+    mocks.getDb.mockResolvedValue({ select });
     const caller = goldRouter.createCaller({ user } as any);
 
     await expect(caller.notifications.recordGoalAlerts({ accountId: 12, alerts: [{ goalId: 88, status: "AT_RISK", cycleKey: "DAILY-2026-08-12", message: "Loss ceiling is near." }] })).resolves.toEqual({ recorded: 1 });
-    expect(mocks.recordGoalAlertAtomic).toHaveBeenCalledWith(7, 12, 88, "GOAL_AT_RISK_88_DAILY-2026-08-12", "Loss ceiling is near.");
+    expect(mocks.recordGoalAlertsAtomic).toHaveBeenCalledWith(7, 12, [{ goalId: 88, type: "GOAL_AT_RISK_88_DAILY-2026-08-12", message: "Loss ceiling is near." }]);
 
     await expect(caller.notifications.recordGoalAlerts({ accountId: 12, alerts: [{ goalId: 88, status: "AT_RISK", cycleKey: "DAILY-2026-08-12", message: "Loss ceiling is near." }] })).resolves.toEqual({ recorded: 0 });
-    expect(mocks.recordGoalAlertAtomic).toHaveBeenCalledTimes(2);
+    expect(mocks.recordGoalAlertsAtomic).toHaveBeenCalledTimes(2);
   });
 
   it("skips goal alerts for inactive or notification-disabled rules", async () => {
-    const values = vi.fn().mockResolvedValue(undefined);
-    const select = vi.fn()
-      .mockImplementationOnce(() => limitedRows([]))
-      .mockImplementationOnce(() => limitedRows([{ id: 89, userId: 7, accountId: 12, active: false, notify: true }]))
-      .mockImplementationOnce(() => limitedRows([{ id: 90, userId: 7, accountId: 12, active: true, notify: false }]));
+    const select = vi.fn().mockImplementation(() => limitedRows([]));
     mocks.getOwnedAccount.mockResolvedValue({ id: 12, userId: 7 });
-    mocks.getDb.mockResolvedValue({ select, insert: () => ({ values }) });
+    mocks.recordGoalAlertsAtomic.mockResolvedValue(0);
+    mocks.getDb.mockResolvedValue({ select });
     const caller = goldRouter.createCaller({ user } as any);
 
     await expect(caller.notifications.recordGoalAlerts({ accountId: 12, alerts: [{ goalId: 89, status: "BREACHED", cycleKey: "DAILY-2026-08-12", message: "Inactive ceiling breached." }, { goalId: 90, status: "MET", cycleKey: "DAILY-2026-08-12", message: "Silent target achieved." }] })).resolves.toEqual({ recorded: 0 });
-    expect(values).not.toHaveBeenCalled();
+    expect(mocks.recordGoalAlertsAtomic).toHaveBeenCalledTimes(1);
   });
 
   it("reconciles stored MT5 positions into only the owned account with an active connection", async () => {

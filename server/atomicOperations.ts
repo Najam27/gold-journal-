@@ -25,16 +25,16 @@ export async function removeAccountAtomic(userId: number, accountId: number) {
   return { success: true as const, replacementAccountId: replacement };
 }
 
-export async function recordGoalAlertAtomic(userId: number, accountId: number, goalId: number, type: string, message: string) {
-  const { data, error } = await getSupabaseAdmin().rpc("gj_record_goal_alert", {
+export async function recordGoalAlertsAtomic(userId: number, accountId: number, alerts: Array<{ goalId: number; type: string; message: string }>) {
+  const { data, error } = await getSupabaseAdmin().rpc("gj_record_goal_alerts", {
     target_user_id: userId,
     target_account_id: accountId,
-    target_goal_id: goalId,
-    target_type: type,
-    target_message: message,
+    alerts,
   });
-  if (error) throwRpcError("record goal alert", error);
-  return data === true;
+  if (error) throwRpcError("record goal alerts", error);
+  const recorded = Number(data ?? 0);
+  if (!Number.isInteger(recorded) || recorded < 0 || recorded > alerts.length) throw new Error("Supabase atomic goal-alert batch returned an invalid count.");
+  return recorded;
 }
 
 export async function syncMt5PositionAtomic(userId: number, accountId: number, position: Record<string, unknown>) {

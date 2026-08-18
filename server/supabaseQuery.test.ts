@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { eq, like, or, renderPostgrestFilter, supabaseDb } from "./supabaseQuery";
+import { eq, gte, like, or, renderPostgrestFilter, supabaseDb } from "./supabaseQuery";
 
 describe("Supabase query adapter transaction boundary", () => {
   it("does not expose a fake transaction method", () => {
     expect("transaction" in (supabaseDb as object)).toBe(false);
+  });
+
+  it("renders a bounded date lower bound", () => {
+    expect(renderPostgrestFilter(gte({ name: "tradeDate" }, new Date("2026-01-01T00:00:00.000Z")))).toBe("tradeDate.gte.2026-01-01T00:00:00.000Z");
   });
 
   it("escapes compound filter delimiters without removing search wildcards", () => {

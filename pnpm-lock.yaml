@@ -4,14 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  tailwindcss>nanoid: 3.3.7
-
-patchedDependencies:
-  wouter@3.7.1:
-    hash: 4e16e6ff3fde7d6c1024d3e0c8605dc9eb6afb690d0d49958c2f449091813072
-    path: patches/wouter@3.7.1.patch
-
 importers:
 
   .:
@@ -130,6 +122,9 @@ importers:
       cmdk:
         specifier: ^1.1.1
         version: 1.1.1(@types/react-dom@19.2.1(@types/react@19.2.1))(@types/react@19.2.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
+      compression:
+        specifier: ^1.8.1
+        version: 1.8.1
       cookie:
         specifier: ^1.0.2
         version: 1.1.1
@@ -213,7 +208,7 @@ importers:
         version: 1.1.2(@types/react-dom@19.2.1(@types/react@19.2.1))(@types/react@19.2.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
       wouter:
         specifier: ^3.3.5
-        version: 3.7.1(patch_hash=4e16e6ff3fde7d6c1024d3e0c8605dc9eb6afb690d0d49958c2f449091813072)(react@19.2.1)
+        version: 3.7.1(react@19.2.1)
       xlsx:
         specifier: ^0.18.5
         version: 0.18.5
@@ -239,6 +234,9 @@ importers:
       '@testing-library/react':
         specifier: ^16.3.2
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.1(@types/react@19.2.1))(@types/react@19.2.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
+      '@types/compression':
+        specifier: ^1.8.1
+        version: 1.8.1
       '@types/express':
         specifier: 4.17.21
         version: 4.17.21
@@ -2132,6 +2130,9 @@ packages:
   '@types/body-parser@1.19.6':
     resolution: {integrity: sha512-HLFeCYgz89uk22N5Qg3dvGvsv46B8GLvKKo1zKG4NybA8U2DiEO3w9lqGg29t/tfLRJpJ6iQxnVw4OnB7MoM9g==}
 
+  '@types/compression@1.8.1':
+    resolution: {integrity: sha512-kCFuWS0ebDbmxs0AXYn6e2r2nrGAb5KwQhknjSPSPgJcGd8+HVSILlUyFhGqML2gk39HcG7D1ydW9/qpYkN00Q==}
+
   '@types/connect@3.4.38':
     resolution: {integrity: sha512-K6uROf1LD88uDQqJCktA4yzL1YYAK6NgfsI0v/mTgyPKWsX1CnJ0XPSDhViejru1GcRkLWb8RlzFYJRqGUbaug==}
 
@@ -2805,6 +2806,14 @@ packages:
   compress-commons@6.0.2:
     resolution: {integrity: sha512-6FqVXeETqWPoGcfzrXb37E50NP0LXT8kAMu5ooZayhWWdgEY4lBEEcbQNXtkuKQsGduxiIcI4gOTsxTmuq/bSg==}
     engines: {node: '>= 14'}
+
+  compressible@2.0.18:
+    resolution: {integrity: sha512-AF3r7P5dWxL8MxyITRMlORQNaOA2IkAFaTr4k7BUumjPtRpGDTZpl0Pb1XCO6JeDCBdp126Cgs9sMxqSjgYyRg==}
+    engines: {node: '>= 0.6'}
+
+  compression@1.8.1:
+    resolution: {integrity: sha512-9mAqGPHLakhCLeNyxPkK4xVo746zQ/czLH1Ky+vkitMnWfWZps8r0qXuwhwizagCRttsL4lfG4pIOvaWLpAP0w==}
+    engines: {node: '>= 0.8.0'}
 
   confbox@0.1.8:
     resolution: {integrity: sha512-RMtmw0iFkeR4YV+fUOSucriAQNb9g8zFR52MWCtl+cCZOFRNL6zeB395vPzFhEjjn4fMxXudmELnl/KF/WrK6w==}
@@ -4529,6 +4538,10 @@ packages:
     resolution: {integrity: sha512-+EUsqGPLsM+j/zdChZjsnX51g4XrHFOIXwfnCVPGlQk/k5giakcKsuxCObBRu6DSm9opw/O6slWbJdghQM4bBg==}
     engines: {node: '>= 0.6'}
 
+  negotiator@0.6.4:
+    resolution: {integrity: sha512-myRT3DiWPHqho5PrJaIRyaMv2kgYf0mUVgBNOYMuCH5Ki1yEiQaf/ZJuQ62nvpc44wL5WDbTX7yGJi1Neevw8w==}
+    engines: {node: '>= 0.6'}
+
   netlify@13.3.5:
     resolution: {integrity: sha512-Nc3loyVASW59W+8fLDZT1lncpG7llffyZ2o0UQLx/Fr20i7P8oP+lE7+TEcFvXj9IUWU6LjB9P3BH+iFGyp+mg==}
     engines: {node: ^14.16.0 || >=16.0.0}
@@ -4619,6 +4632,10 @@ packages:
 
   on-finished@2.4.1:
     resolution: {integrity: sha512-oVlzkg3ENAhCk2zdv7IJwd/QUD4z2RxRwpkcGY8psCVcCYZNq4wYnVWALHM+brtuJjePWiYF/ClmuDr8Ch5+kg==}
+    engines: {node: '>= 0.8'}
+
+  on-headers@1.1.0:
+    resolution: {integrity: sha512-737ZY3yNnXy37FHkQxPzt4UZ2UWPWiCZWLvFZ4fu5cueciegX0zGPnrlY6bwRg4FdQOe9YU8MkmJwGhoMybl8A==}
     engines: {node: '>= 0.8'}
 
   once@1.4.0:
@@ -7743,6 +7760,11 @@ snapshots:
       '@types/connect': 3.4.38
       '@types/node': 24.7.0
 
+  '@types/compression@1.8.1':
+    dependencies:
+      '@types/express': 4.17.21
+      '@types/node': 24.7.0
+
   '@types/connect@3.4.38':
     dependencies:
       '@types/node': 24.7.0
@@ -8519,6 +8541,22 @@ snapshots:
       is-stream: 2.0.1
       normalize-path: 3.0.0
       readable-stream: 4.7.0
+
+  compressible@2.0.18:
+    dependencies:
+      mime-db: 1.52.0
+
+  compression@1.8.1:
+    dependencies:
+      bytes: 3.1.2
+      compressible: 2.0.18
+      debug: 2.6.9
+      negotiator: 0.6.4
+      on-headers: 1.1.0
+      safe-buffer: 5.2.1
+      vary: 1.1.2
+    transitivePeerDependencies:
+      - supports-color
 
   confbox@0.1.8: {}
 
@@ -10578,6 +10616,8 @@ snapshots:
 
   negotiator@0.6.3: {}
 
+  negotiator@0.6.4: {}
+
   netlify@13.3.5:
     dependencies:
       '@netlify/open-api': 2.57.0
@@ -10666,6 +10706,8 @@ snapshots:
   on-finished@2.4.1:
     dependencies:
       ee-first: 1.1.1
+
+  on-headers@1.1.0: {}
 
   once@1.4.0:
     dependencies:
@@ -12120,7 +12162,7 @@ snapshots:
 
   word@0.3.0: {}
 
-  wouter@3.7.1(patch_hash=4e16e6ff3fde7d6c1024d3e0c8605dc9eb6afb690d0d49958c2f449091813072)(react@19.2.1):
+  wouter@3.7.1(react@19.2.1):
     dependencies:
       mitt: 3.0.1
       react: 19.2.1

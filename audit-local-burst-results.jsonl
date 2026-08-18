@@ -1,0 +1,4 @@
+{"requests":100,"p50_ms":148.67,"p95_ms":152.38,"p99_ms":183.28,"total_ms":224.76,"non_2xx":0,"network_failures":0}
+{"requests":250,"p50_ms":129.69,"p95_ms":264.07,"p99_ms":273.94,"total_ms":293.9,"non_2xx":0,"network_failures":0}
+{"requests":500,"p50_ms":240.21,"p95_ms":454.04,"p99_ms":493.12,"total_ms":528.15,"non_2xx":0,"network_failures":0}
+{"requests":1000,"p50_ms":426.35,"p95_ms":800.6,"p99_ms":838.63,"total_ms":907.2,"non_2xx":0,"network_failures":0}

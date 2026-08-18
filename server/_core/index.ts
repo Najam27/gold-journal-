@@ -9,6 +9,7 @@ import { getActiveMt5Connection, recordMt5HistoryFailure } from "../mt5Db";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { validateRuntimeConfiguration } from "./env";
+import { httpCompression } from "../httpCompression";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -42,6 +43,7 @@ async function startServer() {
     if (process.env.NODE_ENV === "production") res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
     next();
   });
+  app.use(httpCompression);
   app.use("/api/mt5", express.json({ limit: "256kb" }));
   // Screenshot uploads use authenticated tRPC and are validated again by the
   // procedure to a decoded 5 MB image. Other application JSON stays small.

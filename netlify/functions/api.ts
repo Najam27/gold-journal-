@@ -6,6 +6,7 @@ import { createContext } from "../../server/_core/context";
 import { registerMt5Ingest } from "../../server/mt5Ingest";
 import { getActiveMt5Connection, recordMt5HistoryFailure } from "../../server/mt5Db";
 import { validateRuntimeConfiguration } from "../../server/_core/env";
+import { httpCompression } from "../../server/httpCompression";
 
 validateRuntimeConfiguration();
 
@@ -19,6 +20,7 @@ app.use((_req, res, next) => {
   if (process.env.NODE_ENV === "production") res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   next();
 });
+app.use(httpCompression);
 app.use("/api/mt5", express.json({ limit: "256kb" }));
 app.use("/api/trpc", express.json({ limit: "10mb" }));
 app.use(express.json({ limit: "1mb" }));
