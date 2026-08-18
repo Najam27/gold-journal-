@@ -6,14 +6,15 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export function NotificationCenter({ triggerClassName = "notification-fab" }: { triggerClassName?: string }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, profileReady } = useAuth();
+  const privateReady = profileReady ?? isAuthenticated;
   const [open, setOpen] = useState(false);
-  const query = trpc.notifications.get.useQuery(undefined, { enabled: isAuthenticated, refetchInterval: 30_000 });
+  const query = trpc.notifications.get.useQuery(undefined, { enabled: privateReady, refetchInterval: 30_000 });
   const updateSettings = trpc.notifications.updateSettings.useMutation();
   const markRead = trpc.notifications.markRead.useMutation();
   const markAllRead = trpc.notifications.markAllRead.useMutation();
   const utils = trpc.useUtils();
-  if (!isAuthenticated) return null;
+  if (!privateReady) return null;
   const settings = query.data?.settings ?? { goalAlerts: true, emailAlerts: false };
   const history = query.data?.history ?? [];
   const unread = history.filter((entry: any) => !entry.readAt).length;

@@ -23,11 +23,12 @@ function addWrapped(pdf: jsPDF, value: unknown, x: number, y: number, width: num
 export function pdfTradeCardFields(trade: any) { return [["Session", pdfText(trade.session, 80) || "—"], ["Level", pdfText(trade.level, 100) || "—"], ["Timeframe", pdfText(trade.timeframe, 40) || "—"], ["Setup", pdfText(trade.setupQuality, 80) || "—"], ["Risk", formatMoney(trade.risk)], ["Reward", formatMoney(trade.reward)], ["R:R", formatRr(trade.risk, trade.reward)], ["P&L", formatMoney(trade.pnl)]] as const; }
 
 export function BulkPdfExporter() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, profileReady } = useAuth();
+  const privateReady = profileReady ?? isAuthenticated;
   const utils = trpc.useUtils();
   const [open, setOpen] = useState(false);
   const [accountId, setAccountId] = useState<number | undefined>(() => getSelectedAccountId());
-  const journal = trpc.journal.get.useQuery({ accountId }, { enabled: isAuthenticated });
+  const journal = trpc.journal.get.useQuery({ accountId }, { enabled: Boolean(privateReady && accountId), retry: false, refetchOnWindowFocus: false });
   const [allTime, setAllTime] = useState(true);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");

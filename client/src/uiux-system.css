@@ -178,6 +178,12 @@ a:focus-visible {
 .query-error,
 .goal-alert-strip,
 .plan-save-error { background: color-mix(in srgb, var(--destructive) 8%, var(--gj-panel)); }
+.auth-profile-recovery { display: flex; align-items: center; gap: .75rem; margin: .75rem var(--gj-space-page) 0; padding: .75rem 1rem; border: 1px solid color-mix(in srgb, var(--destructive) 32%, var(--gj-line)); border-radius: .75rem; background: color-mix(in srgb, var(--destructive) 8%, var(--gj-panel)); color: var(--gj-text); }
+.auth-profile-recovery > svg { flex: 0 0 auto; color: var(--destructive); }
+.auth-profile-recovery > div { display: grid; gap: .15rem; min-width: 0; margin-right: auto; }
+.auth-profile-recovery strong { font-size: .82rem; }
+.auth-profile-recovery span { color: var(--gj-subtext); font-size: .72rem; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .auth-profile-recovery { align-items: flex-start; flex-wrap: wrap; margin-inline: var(--gj-space-page); }.auth-profile-recovery > div { flex-basis: calc(100% - 2rem); }.auth-profile-recovery .button { flex: 1 1 auto; } }
 
 /* Responsive dialog model: enough room on desktop, viewport-safe on a phone. */
 [role="dialog"] { color: var(--gj-text); }

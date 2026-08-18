@@ -9,9 +9,10 @@ import { toast } from "sonner";
 import { getSelectedAccountId, setSelectedAccountId, subscribeSelectedAccount } from "@/lib/accountSelection";
 
 export function AccountRenameControl() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, profileReady } = useAuth();
+  const privateReady = profileReady ?? isAuthenticated;
   const [selectedAccountId, setLocalSelectedAccountId] = useState<number | undefined>(() => getSelectedAccountId());
-  const journal = trpc.journal.get.useQuery({ accountId: selectedAccountId }, { enabled: isAuthenticated });
+  const journal = trpc.journal.get.useQuery({ accountId: selectedAccountId }, { enabled: Boolean(privateReady && selectedAccountId), retry: false, refetchOnWindowFocus: false });
   const rename = trpc.accounts.rename.useMutation();
   const create = trpc.accounts.create.useMutation();
   const remove = trpc.accounts.remove.useMutation();

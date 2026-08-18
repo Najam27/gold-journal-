@@ -20,8 +20,9 @@ export async function getSupabaseAccessToken(): Promise<string | undefined> {
     ]);
     return session.data.session?.access_token || undefined;
   } catch (error) {
-    console.warn("[Auth] Supabase access-token lookup failed", error);
-    return undefined;
+    const normalized = error instanceof Error ? error : new Error("Supabase session lookup failed.");
+    console.warn("[Auth] Supabase access-token lookup failed", normalized.message);
+    throw normalized;
   } finally {
     if (timeout !== undefined) globalThis.clearTimeout(timeout);
   }

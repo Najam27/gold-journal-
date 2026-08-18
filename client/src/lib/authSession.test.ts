@@ -18,7 +18,8 @@ describe("getSupabaseAccessToken", () => {
   it("fails closed when Supabase session lookup hangs", async () => {
     mocks.getSession.mockReturnValue(new Promise(() => undefined));
     const tokenPromise = getSupabaseAccessToken();
+    const expectation = expect(tokenPromise).rejects.toThrow("Supabase session lookup timed out");
     await vi.advanceTimersByTimeAsync(AUTH_SESSION_LOOKUP_TIMEOUT_MS);
-    await expect(tokenPromise).resolves.toBeUndefined();
+    await expectation;
   });
 });

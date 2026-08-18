@@ -4,10 +4,6 @@ import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { PwaUpdateBanner } from "./components/PwaUpdateBanner";
-import { AccountRenameControl } from "./components/AccountRenameControl";
-import { NotificationCenter } from "./components/NotificationCenter";
-import { OptionListManager } from "./components/OptionListManager";
-import { BulkPdfExporter } from "./components/BulkPdfExporter";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 
@@ -38,10 +34,6 @@ function App() {
         <TooltipProvider>
           <Toaster />
           <PwaUpdateBanner />
-          <AccountRenameControl />
-          <NotificationCenter />
-          <OptionListManager />
-          <BulkPdfExporter />
           <Router />
         </TooltipProvider>
       </ThemeProvider>

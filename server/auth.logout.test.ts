@@ -31,6 +31,12 @@ describe("Supabase auth procedures", () => {
     await expect(appRouter.createCaller(ctx).auth.me()).resolves.toMatchObject({ openId: "supabase-user-uuid", loginMethod: "supabase" });
   });
 
+  it("surfaces a controlled profile-sync error when token verification infrastructure fails", async () => {
+    const { ctx } = createAuthContext();
+    ctx.authError = new Error("secret service detail must not leak");
+    await expect(appRouter.createCaller(ctx).auth.me()).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR", message: "Secure profile sync is temporarily unavailable." });
+  });
+
   it("returns sign-out compatibility success without managing a server cookie", async () => {
     const { ctx, clearCookie } = createAuthContext();
     await expect(appRouter.createCaller(ctx).auth.logout()).resolves.toEqual({ success: true });
