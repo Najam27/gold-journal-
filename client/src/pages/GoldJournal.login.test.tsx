@@ -9,6 +9,7 @@ vi.mock("@/lib/supabase", () => ({ supabase: { auth: { signInWithPassword, signU
 vi.mock("@/lib/trpc", () => ({ trpc: {} }));
 
 import { LoginScreen } from "./GoldJournal";
+import { getAuthRedirectUrl } from "@/lib/authRedirect";
 
 describe("Gold Journal Supabase login", () => {
   afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -27,6 +28,6 @@ describe("Gold Journal Supabase login", () => {
     render(<LoginScreen />);
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "trader@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: "Send magic link" }));
-    await waitFor(() => expect(signInWithOtp).toHaveBeenCalledWith({ email: "trader@example.com", options: { emailRedirectTo: window.location.origin } }));
+    await waitFor(() => expect(signInWithOtp).toHaveBeenCalledWith({ email: "trader@example.com", options: { emailRedirectTo: getAuthRedirectUrl() } }));
   });
 });
