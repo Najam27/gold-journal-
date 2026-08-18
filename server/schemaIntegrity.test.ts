@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const migration = readFileSync(join(process.cwd(), "supabase/migrations/0006_schema_integrity.sql"), "utf8");
+const atomicMigration = readFileSync(join(process.cwd(), "supabase/migrations/0004_atomic_operations.sql"), "utf8");
 const schema = readFileSync(join(process.cwd(), "drizzle/schema.ts"), "utf8");
 
 describe("Supabase schema-integrity migration", () => {
@@ -25,6 +26,12 @@ describe("Supabase schema-integrity migration", () => {
     expect(migration).toContain("revoke all on function public.current_journal_user_id() from public, anon");
     expect(migration).toContain('create unique index if not exists "gj_notification_user_type_unique"');
     expect(migration).toContain("group by \"userId\", \"type\" having count(*) > 1");
+  });
+
+  it("does not use PostgreSQL-reserved position as an unquoted RPC parameter", () => {
+    expect(atomicMigration).toContain("position_payload jsonb");
+    expect(atomicMigration).not.toMatch(/\n\s+position jsonb/);
+    expect(atomicMigration).not.toMatch(/\bposition->>/);
   });
 
   it("defines PostgreSQL-owned updatedAt triggers and matching Drizzle metadata", () => {

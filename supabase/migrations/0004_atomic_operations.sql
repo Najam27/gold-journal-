@@ -98,7 +98,7 @@ $$;
 create or replace function public.gj_sync_mt5_position(
   target_user_id integer,
   target_account_id integer,
-  position jsonb
+  position_payload jsonb
 )
 returns boolean
 language plpgsql
@@ -106,13 +106,13 @@ security definer
 set search_path = public
 as $$
 declare
-  target_ticket bigint := (position->>'ticket')::bigint;
-  target_status varchar(8) := position->>'status';
+  target_ticket bigint := (position_payload->>'ticket')::bigint;
+  target_status varchar(8) := position_payload->>'status';
   existing_status varchar(8);
   existing_open_time timestamptz;
   effective_open_time timestamptz;
-  target_trade_time timestamptz := (position->>'tradeTime')::timestamptz;
-  target_result varchar(16) := position->>'result';
+  target_trade_time timestamptz := (position_payload->>'tradeTime')::timestamptz;
+  target_result varchar(16) := position_payload->>'result';
 begin
   perform 1 from public.gj_accounts
    where "id" = target_account_id and "userId" = target_user_id
@@ -129,19 +129,19 @@ begin
   if existing_status = 'CLOSED' then
     return false;
   end if;
-  effective_open_time := coalesce(existing_open_time, (position->>'openTime')::timestamptz);
+  effective_open_time := coalesce(existing_open_time, (position_payload->>'openTime')::timestamptz);
 
   insert into public.gj_mt5_live_positions (
     "accountId", "ticket", "symbol", "direction", "lots", "openPrice", "closePrice",
     "slPrice", "tpPrice", "riskUsd", "rewardUsd", "rrRatio", "floatingPnl",
     "realizedPnl", "result", "openTime", "closeTime", "status", "updatedAt"
   ) values (
-    target_account_id, target_ticket, position->>'symbol', position->>'direction',
-    (position->>'lots')::numeric, (position->>'openPrice')::numeric, nullif(position->>'closePrice', '')::numeric,
-    nullif(position->>'slPrice', '')::numeric, nullif(position->>'tpPrice', '')::numeric,
-    (position->>'riskUsd')::numeric, (position->>'rewardUsd')::numeric, (position->>'rrRatio')::numeric,
-    (position->>'floatingPnl')::numeric, nullif(position->>'realizedPnl', '')::numeric,
-    target_result, effective_open_time, nullif(position->>'closeTime', '')::timestamptz,
+    target_account_id, target_ticket, position_payload->>'symbol', position_payload->>'direction',
+    (position_payload->>'lots')::numeric, (position_payload->>'openPrice')::numeric, nullif(position_payload->>'closePrice', '')::numeric,
+    nullif(position_payload->>'slPrice', '')::numeric, nullif(position_payload->>'tpPrice', '')::numeric,
+    (position_payload->>'riskUsd')::numeric, (position_payload->>'rewardUsd')::numeric, (position_payload->>'rrRatio')::numeric,
+    (position_payload->>'floatingPnl')::numeric, nullif(position_payload->>'realizedPnl', '')::numeric,
+    target_result, effective_open_time, nullif(position_payload->>'closeTime', '')::timestamptz,
     target_status, now()
   )
   on conflict ("accountId", "ticket") do update set
@@ -158,9 +158,9 @@ begin
     "tpPlacement", "mistake", "holdQuality", "patienceScore", "risk", "reward", "pnl", "notes",
     "emotionBefore", "emotionDuring", "emotionAfter", "mt5Ticket"
   ) values (
-    target_user_id, target_account_id, target_trade_time, position->>'session', position->>'direction', target_result,
-    '', '', '', '', '', '', '', '', '', '', null, (position->>'riskUsd')::numeric, (position->>'rewardUsd')::numeric,
-    (position->>'pnl')::numeric, '', '', '', '', target_ticket
+    target_user_id, target_account_id, target_trade_time, position_payload->>'session', position_payload->>'direction', target_result,
+    '', '', '', '', '', '', '', '', '', '', null, (position_payload->>'riskUsd')::numeric, (position_payload->>'rewardUsd')::numeric,
+    (position_payload->>'pnl')::numeric, '', '', '', '', target_ticket
   )
   on conflict ("accountId", "mt5Ticket") do update set
     "tradeDate" = excluded."tradeDate", "session" = excluded."session", "direction" = excluded."direction",
