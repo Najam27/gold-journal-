@@ -13,7 +13,7 @@ describe("account analysis data loader", () => {
 
   it("loads only owned account rows and returns deterministic aggregates instead of raw trades", async () => {
     const builder: any = {};
-    builder.from = vi.fn(() => builder); builder.where = vi.fn(() => builder); builder.orderBy = vi.fn(() => builder); builder.limit = vi.fn(() => builder); builder.offset = vi.fn().mockResolvedValue([row]);
+    builder.from = vi.fn(() => builder); builder.where = vi.fn(() => builder); builder.orderBy = vi.fn(() => builder); builder.limit = vi.fn().mockResolvedValue([row]);
     mocks.getDb.mockResolvedValue({ select: vi.fn(() => builder) });
     const result = await getAccountAnalysis(3, 7);
     expect(mocks.getOwnedAccount).toHaveBeenCalledWith(3, 7);

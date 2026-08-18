@@ -185,12 +185,12 @@ async function syncMt5PositionToTradeLog(userId: number, accountId: number, posi
 export async function syncStoredMt5PositionsToTradeLog(userId: number, accountId: number) {
   const db = await requireDb();
   const [positions, resetAt] = await Promise.all([
-    db.select().from(mt5LivePositions).where(eq(mt5LivePositions.accountId, accountId)).orderBy(desc(mt5LivePositions.updatedAt)).limit(500),
+    db.select().from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, accountId), eq(mt5LivePositions.status, "CLOSED"))).orderBy(desc(mt5LivePositions.updatedAt)).limit(500),
     getJournalDataResetAt(db, accountId),
   ]);
+  let synchronized = 0;
   for (const position of positions) {
     if (!isMt5PositionAfterJournalReset(resetAt, position as { status: "OPEN" | "CLOSED"; openTime: Date; closeTime?: Date | null })) continue;
-    const closed = position.status === "CLOSED";
     await syncMt5PositionToTradeLog(userId, accountId, {
       ticket: position.ticket,
       symbol: position.symbol,
@@ -203,12 +203,13 @@ export async function syncStoredMt5PositionsToTradeLog(userId: number, accountId
       rewardUsd: Number(position.rewardUsd),
       rrRatio: Number(position.rrRatio),
       openTime: position.openTime,
-      pnl: Number(closed ? position.realizedPnl : position.floatingPnl),
-      result: closed ? ((position.result as "WIN" | "LOSS" | "BREAK_EVEN" | null) ?? "BREAK_EVEN") : "OPEN",
-      tradeTime: closed ? (position.closeTime ?? position.openTime) : position.openTime,
+      pnl: Number(position.realizedPnl),
+      result: ((position.result as "WIN" | "LOSS" | "BREAK_EVEN" | null) ?? "BREAK_EVEN"),
+      tradeTime: position.closeTime ?? position.openTime,
     });
+    synchronized += 1;
   }
-  return positions.length;
+  return synchronized;
 }
 
 export async function upsertMt5OpenPosition(userId: number, accountId: number, value: LiveBase & { floatingPnl: number }) {

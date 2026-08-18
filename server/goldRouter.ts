@@ -15,6 +15,7 @@ import { consumeRateLimit } from "./rateLimit";
 import { clearAccountJournalDataAtomic, recordGoalAlertsAtomic, removeAccountAtomic } from "./atomicOperations";
 import { getAccountAnalysis } from "./analysisDb";
 import { analyzeWithOpenRouter } from "./analysisAi";
+import { listAiExperiments, listAiReports, persistAiOutcome, updateAiExperiment } from "./aiReportDb";
 import { compareAnalysis } from "@shared/analysisEngine";
 
 const MAX_MONEY = 999_999_999_999.99;
@@ -94,11 +95,18 @@ export const goldRouter = router({
   analysis: router({
     get: protectedProcedure.input(analysisInput).query(({ ctx, input }) => getAccountAnalysis(ctx.user.id, input.accountId, input.filters)),
     ai: protectedProcedure.input(analysisInput).mutation(async ({ ctx, input }) => {
-      if (!consumeRateLimit("analysis-ai", ctx.user.id, 3, 10 * 60_000)) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "AI analysis limit reached. Please retry later." });
+      if (!(await consumeRateLimit("analysis-ai", ctx.user.id, 3, 10 * 60_000))) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "AI analysis limit reached. Please retry later." });
       const deterministic = await getAccountAnalysis(ctx.user.id, input.accountId, input.filters);
       const ai = await analyzeWithOpenRouter(ctx.user.id, input.accountId, deterministic);
+      if (ai.available && ai.report) {
+        try { ai.persistence = await persistAiOutcome(ctx.user.id, input.accountId, deterministic, ai); }
+        catch (error) { console.warn("[analysis-ai] persistence degraded", error instanceof Error ? error.message : "unknown error"); ai.persistence = { persisted: false, reportId: null, dataFingerprint: "" }; }
+      }
       return { ...deterministic, ai };
     }),
+    history: protectedProcedure.input(accountIdInput.extend({ limit: z.number().int().min(1).max(50).default(20) })).query(async ({ ctx, input }) => { await getOwnedAccount(ctx.user.id, input.accountId); return listAiReports(ctx.user.id, input.accountId, input.limit); }),
+    experiments: protectedProcedure.input(accountIdInput.extend({ limit: z.number().int().min(1).max(100).default(50) })).query(async ({ ctx, input }) => { await getOwnedAccount(ctx.user.id, input.accountId); return listAiExperiments(ctx.user.id, input.accountId, input.limit); }),
+    updateExperiment: protectedProcedure.input(accountIdInput.extend({ experimentId: z.number().int().positive(), status: z.enum(["PLANNED", "RUNNING", "COMPLETED", "CANCELLED"]), outcome: optionalText(2_000).nullable() })).mutation(({ ctx, input }) => updateAiExperiment(ctx.user.id, input.accountId, input.experimentId, input.status, input.outcome)),
     compare: protectedProcedure.input(analysisCompareInput).query(async ({ ctx, input }) => {
       const [current, previous] = await Promise.all([getAccountAnalysis(ctx.user.id, input.accountId, input.current), getAccountAnalysis(ctx.user.id, input.accountId, input.previous)]);
       return { current, previous, delta: compareAnalysis(current, previous) };
@@ -236,7 +244,7 @@ export const goldRouter = router({
       return { success: true };
     }),
     uploadScreenshot: protectedProcedure.input(z.object({ tradeId: z.number().int().positive(), fileName: z.string().trim().min(1).max(255), mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]), base64: z.string().trim().min(40).max(7_000_000).regex(/^(?:data:image\/(?:jpeg|png|webp);base64,)?[A-Za-z0-9+/]+={0,2}$/, "Invalid base64 image payload") })).mutation(async ({ ctx, input }) => {
-      if (!consumeRateLimit("screenshot", ctx.user.id, 20, 60_000)) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Screenshot upload limit reached. Please try again shortly." });
+      if (!(await consumeRateLimit("screenshot", ctx.user.id, 20, 60_000))) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Screenshot upload limit reached. Please try again shortly." });
       const trade = await ownsTrade(ctx.user.id, input.tradeId);
       const base64 = input.base64.includes(",") ? input.base64.split(",")[1] : input.base64;
       const bytes = Buffer.from(base64, "base64");
@@ -324,7 +332,7 @@ export const goldRouter = router({
       return { success: true };
     }),
     recordGoalAlerts: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), alerts: z.array(z.object({ goalId: z.number().int().positive(), status: z.enum(["AT_RISK", "BREACHED", "MET"]), cycleKey: z.string().min(4).max(24), message: z.string().trim().min(1).max(800) })).max(20) })).mutation(async ({ ctx, input }) => {
-      if (!consumeRateLimit("goal-alerts", ctx.user.id, 30, 60_000)) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Notification write limit reached. Please try again shortly." });
+      if (!(await consumeRateLimit("goal-alerts", ctx.user.id, 30, 60_000))) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Notification write limit reached. Please try again shortly." });
       await getOwnedAccount(ctx.user.id, input.accountId);
       const db = await dbOrThrow();
       const [settings] = await db.select().from(notificationSettings).where(eq(notificationSettings.userId, ctx.user.id)).limit(1);

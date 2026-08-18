@@ -3,7 +3,7 @@ import { getSupabaseAdmin } from "./supabaseAdmin";
 
 type TableLike = Record<string, any>;
 type ColumnLike = { name?: string; columnName?: string };
-type Filter = { kind: "eq" | "like" | "gte"; column: string; value: unknown } | { kind: "and" | "or"; parts: Filter[] };
+type Filter = { kind: "eq" | "like" | "gte" | "gt" | "lt"; column: string; value: unknown } | { kind: "and" | "or"; parts: Filter[] };
 type Order = { column: string; ascending: boolean } | ColumnLike;
 
 type Selection = Record<string, any> | undefined;
@@ -20,6 +20,8 @@ const valueForFilter = (value: unknown) => {
 export const eq = (column: ColumnLike, value: unknown): Filter => ({ kind: "eq", column: columnName(column), value });
 export const like = (column: ColumnLike, value: string): Filter => ({ kind: "like", column: columnName(column), value });
 export const gte = (column: ColumnLike, value: unknown): Filter => ({ kind: "gte", column: columnName(column), value });
+export const gt = (column: ColumnLike, value: unknown): Filter => ({ kind: "gt", column: columnName(column), value });
+export const lt = (column: ColumnLike, value: unknown): Filter => ({ kind: "lt", column: columnName(column), value });
 export const and = (...parts: Array<Filter | undefined>): Filter => ({ kind: "and", parts: parts.filter(Boolean) as Filter[] });
 export const or = (...parts: Array<Filter | undefined>): Filter => ({ kind: "or", parts: parts.filter(Boolean) as Filter[] });
 export const desc = (column: ColumnLike): Order => ({ column: columnName(column), ascending: false });
@@ -37,6 +39,8 @@ function applyFilter(query: any, filter?: Filter): any {
   if (filter.kind === "eq") return filter.value === null ? query.is(filter.column, null) : query.eq(filter.column, postgrestValue(filter.value));
   if (filter.kind === "like") return query.ilike(filter.column, filter.value);
   if (filter.kind === "gte") return query.gte(filter.column, postgrestValue(filter.value));
+  if (filter.kind === "gt") return query.gt(filter.column, postgrestValue(filter.value));
+  if (filter.kind === "lt") return query.lt(filter.column, postgrestValue(filter.value));
   if (filter.kind === "and") return filter.parts.reduce((current, part) => applyFilter(current, part), query);
   if (filter.kind === "or") return query.or(filter.parts.map(renderFilterOperand).join(","));
   return query;
@@ -46,6 +50,8 @@ export function renderPostgrestFilter(filter: Filter): string {
   if (filter.kind === "eq") return filter.value === null ? `${filter.column}.is.null` : `${filter.column}.eq.${valueForFilter(filter.value)}`;
   if (filter.kind === "like") return `${filter.column}.ilike.${valueForFilter(filter.value)}`;
   if (filter.kind === "gte") return `${filter.column}.gte.${valueForFilter(filter.value)}`;
+  if (filter.kind === "gt") return `${filter.column}.gt.${valueForFilter(filter.value)}`;
+  if (filter.kind === "lt") return `${filter.column}.lt.${valueForFilter(filter.value)}`;
   if (filter.kind === "and") return `and(${filter.parts.map(renderFilterOperand).join(",")})`;
   if (filter.kind === "or") return `or(${filter.parts.map(renderFilterOperand).join(",")})`;
   return "";
@@ -101,6 +107,7 @@ class WriteQuery {
   where(filter: Filter) { this.filter = filter; return this; }
   returning(selection: Selection) { this.returningSelection = selection; return this; }
   onConflictDoUpdate(options: { target: any; set: any }) { const targets = Array.isArray(options.target) ? options.target : [options.target]; this.conflict = targets.map(columnName).join(","); this.updateValues = options.set; return this; }
+  onConflictDoNothing(options: { target: any }) { const targets = Array.isArray(options.target) ? options.target : [options.target]; this.conflict = targets.map(columnName).join(","); this.updateValues = undefined; return this; }
   onDuplicateKeyUpdate(options: { set: any }) { this.updateValues = options.set; return this; }
   async execute() {
     if (!this.source) throw new Error("Supabase write has no table.");
@@ -108,7 +115,7 @@ class WriteQuery {
     const table = client.from(tableName(this.source));
     let query: any;
     if (this.operation === "insert") {
-      if (this.conflict) query = table.upsert(this.insertValues, { onConflict: this.conflict, ignoreDuplicates: false });
+      if (this.conflict) query = table.upsert(this.insertValues, { onConflict: this.conflict, ignoreDuplicates: this.updateValues === undefined });
       else query = table.insert(this.insertValues);
     } else if (this.operation === "update") query = table.update(this.updateValues);
     else query = table.delete();

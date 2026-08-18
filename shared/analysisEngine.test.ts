@@ -24,7 +24,7 @@ describe("deterministic analysis engine", () => {
     expect(row.totalR).toBe(1);
     expect(row.averageR).toBeCloseTo(1 / 3, 4);
     expect(row.expectancyR).toBeCloseTo(1 / 3, 4);
-    expect(row.evidenceTier).toBe("INSUFFICIENT DATA");
+    expect(row.evidenceTier).toBe("OBSERVED BEST CONTEXT");
     expect(wilsonInterval(0, 5)[0]).toBe(0);
     expect(wilsonInterval(5, 5)[1]).toBe(100);
   });

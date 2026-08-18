@@ -24,25 +24,25 @@ describe("MT5 EA ingest", () => {
   });
 
   it("authorizes by active API key, touches the connection, and upserts an open position under its account", async () => {
-    await expect(processMt5Payload(openPayload())).resolves.toEqual({ status: 200, body: { ok: true, event: "open" } });
+    await expect(processMt5Payload(openPayload())).resolves.toMatchObject({ status: 200, body: { ok: true, event: "open", compatible: false } });
     expect(mocks.getActive).toHaveBeenCalledWith(key("open"));
     expect(mocks.touch).toHaveBeenCalledWith(44);
     expect(mocks.open).toHaveBeenCalledWith(77, 12, expect.objectContaining({ ticket: 123456789n, direction: "BUY", floatingPnl: 12.5, symbol: "XAUUSD" }));
   });
 
   it("treats timezone-less MQL5 broker timestamps as UTC+3 for live and historical positions", async () => {
-    await expect(processMt5Payload(openPayload(key("mql-date")))).resolves.toEqual({ status: 200, body: { ok: true, event: "open" } });
+    await expect(processMt5Payload(openPayload(key("mql-date")))).resolves.toMatchObject({ status: 200, body: { ok: true, event: "open", compatible: false } });
     expect(mocks.open).toHaveBeenCalledWith(77, 12, expect.objectContaining({ openTime: new Date("2026-07-11T06:30:00Z") }));
   });
 
   it("preserves an explicit UTC+3 broker timestamp so journal sync can classify the corresponding PKT session", async () => {
-    await expect(processMt5Payload({ ...openPayload(key("broker-utc3")), open_time: "2026.07.11 09:30:00+03:00" })).resolves.toEqual({ status: 200, body: { ok: true, event: "open" } });
+    await expect(processMt5Payload({ ...openPayload(key("broker-utc3")), open_time: "2026.07.11 09:30:00+03:00" })).resolves.toMatchObject({ status: 200, body: { ok: true, event: "open", compatible: false } });
     expect(mocks.open).toHaveBeenCalledWith(77, 12, expect.objectContaining({ openTime: new Date("2026-07-11T06:30:00Z") }));
   });
 
   it("uses the authenticated connection broker offset for offset-free MQL timestamps", async () => {
     mocks.getActive.mockResolvedValue({ id: 44, userId: 77, accountId: 12, active: true, brokerUtcOffsetMinutes: 120 });
-    await expect(processMt5Payload(openPayload(key("broker-utc2")))).resolves.toEqual({ status: 200, body: { ok: true, event: "open" } });
+    await expect(processMt5Payload(openPayload(key("broker-utc2")))).resolves.toMatchObject({ status: 200, body: { ok: true, event: "open", compatible: false } });
     expect(mocks.open).toHaveBeenCalledWith(77, 12, expect.objectContaining({ openTime: new Date("2026-07-11T07:30:00Z") }));
   });
 
@@ -60,19 +60,19 @@ describe("MT5 EA ingest", () => {
 
   it("stores a close event as a closed position with realized P&L and a normalized result", async () => {
     const { floating_pnl, open_time, ...base } = openPayload(key("close"));
-    await expect(processMt5Payload({ ...base, event: "close", close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00", open_time })).resolves.toEqual({ status: 200, body: { ok: true, event: "close" } });
+    await expect(processMt5Payload({ ...base, event: "close", close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00", open_time })).resolves.toMatchObject({ status: 200, body: { ok: true, event: "close", compatible: false } });
     expect(mocks.close).toHaveBeenCalledWith(77, 12, expect.objectContaining({ ticket: 123456789n, result: "WIN", realizedPnl: 168, closePrice: 3308 }));
   });
 
   it("stores MT5 account balance, equity, margin, and floating P&L only after resolving the API key", async () => {
-    await expect(processMt5Payload({ event: "summary", api_key: key("summary"), mt5_login: "90123456", broker_server: "Broker-Live", currency: "USD", balance: 10000, equity: 10042.5, margin: 250, free_margin: 9792.5, floating_pnl: 42.5 })).resolves.toEqual({ status: 200, body: { ok: true, event: "summary" } });
+    await expect(processMt5Payload({ event: "summary", api_key: key("summary"), mt5_login: "90123456", broker_server: "Broker-Live", currency: "USD", balance: 10000, equity: 10042.5, margin: 250, free_margin: 9792.5, floating_pnl: 42.5 })).resolves.toMatchObject({ status: 200, body: { ok: true, event: "summary", compatible: false } });
     expect(mocks.summary).toHaveBeenCalledWith(44, expect.objectContaining({ mt5Login: 90123456n, balance: 10000, equity: 10042.5, floatingPnl: 42.5, brokerServer: "Broker-Live" }));
   });
 
   it("upserts a bounded historical closed-trade batch under the resolved account and marks a completed backfill", async () => {
     const { floating_pnl, api_key: _nestedApiKeyMustBeAbsent, ...position } = openPayload(key("history"));
     const closed = { ...position, close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00" };
-    await expect(processMt5Payload({ event: "history_batch", api_key: key("history"), positions: [closed], complete: true })).resolves.toEqual({ status: 200, body: { ok: true, event: "history_batch", synced: 1, complete: true } });
+    await expect(processMt5Payload({ event: "history_batch", api_key: key("history"), positions: [closed], complete: true })).resolves.toMatchObject({ status: 200, body: { ok: true, event: "history_batch", synced: 1, complete: true, compatible: false } });
     expect(mocks.close).toHaveBeenCalledWith(77, 12, expect.objectContaining({ ticket: 123456789n, result: "WIN" }));
     expect(mocks.historyAttempt).toHaveBeenCalledWith(44, 1);
     expect(mocks.historyAccepted).toHaveBeenCalledWith(44, 1, true);
