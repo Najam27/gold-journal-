@@ -47,7 +47,7 @@ describe("MT5 EA ingest", () => {
   });
 
   it("rejects only a genuinely future normalized MT5 timestamp", async () => {
-    await expect(processMt5Payload({ ...openPayload(key("future")), open_time: "2099-07-11 09:30:00" })).resolves.toEqual({ status: 422, body: { ok: false, code: "FUTURE_TRADE" } });
+    await expect(processMt5Payload({ ...openPayload(key("future")), open_time: "2099-07-11 09:30:00" })).resolves.toMatchObject({ status: 422, body: { ok: false, code: "FUTURE_TRADE", diagnostic: expect.stringContaining("future") } });
     expect(mocks.open).not.toHaveBeenCalled();
   });
 
@@ -91,7 +91,7 @@ describe("MT5 EA ingest", () => {
   it("records a migration-specific history failure when the sync RPC is unavailable", async () => {
     mocks.close.mockRejectedValue(new Error("column openTime does not exist"));
     await expect(processMt5Payload({ event: "history_batch", api_key: key("migration"), positions: [{ ...openPayload(key("migration")), close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00" }], complete: false })).rejects.toThrow("column openTime does not exist");
-    expect(mocks.historyFailure).toHaveBeenCalledWith(44, "MIGRATION_REQUIRED_0008");
+    expect(mocks.historyFailure).toHaveBeenCalledWith(44, expect.stringContaining("MIGRATION_REQUIRED_0008"));
   });
 
   it("derives the target account from the authenticated connection even when a payload attempts to supply another account", async () => {

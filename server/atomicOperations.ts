@@ -1,7 +1,13 @@
 import { getSupabaseAdmin } from "./supabaseAdmin";
 
-function throwRpcError(operation: string, error: { message: string }) {
-  throw new Error(`Supabase atomic operation ${operation} failed: ${error.message}`);
+type SupabaseRpcError = { message: string; code?: string; details?: string; hint?: string };
+
+function throwRpcError(operation: string, error: SupabaseRpcError) {
+  const wrapped = new Error(`Supabase atomic operation ${operation} failed: ${error.message}`) as Error & { supabaseCode?: string; supabaseDetails?: string; supabaseHint?: string };
+  wrapped.supabaseCode = error.code;
+  wrapped.supabaseDetails = error.details;
+  wrapped.supabaseHint = error.hint;
+  throw wrapped;
 }
 
 export async function clearAccountJournalDataAtomic(userId: number, accountId: number, resetAt: Date) {

@@ -69,3 +69,10 @@ The `MIGRATION_REQUIRED_0008` status was caused by a server-to-Supabase RPC cont
 The first level chips were rendered inside a `<label>` field wrapper while containing interactive `<button>` elements. That invalid nested-interactive structure can produce inconsistent click behavior in browser layouts. Trade dialog fields now use semantic `<div role="group">` wrappers with accessible labels, preserving normal input styling while giving level buttons direct click targets. Regression coverage now explicitly clicks both `SBR/TJL1` and `RBS/TJL1` in the Edit Trade path.
 
 The follow-up release gate passed with **67 test files passed, 210 tests passed; 1 test file and 2 opt-in Supabase integration tests skipped**, plus TypeScript, schema audit, and production build success.
+
+
+## Follow-up for `SYNC_UNAVAILABLE`
+
+The remaining generic status was caused by the ingest layer discarding Supabase provider metadata from RPC errors. The atomic wrapper now preserves the provider code, details, and hint internally. The MT5 ingest layer classifies safe categories such as `PGRST202` schema/signature mismatch, `22P02` invalid data, `42501` permission/account rejection, lock/timeouts, and timestamp failures. The API returns a safe diagnostic message without exposing credentials or raw SQL. History status records now include the actionable category and diagnostic, so the next retry will distinguish a schema problem from invalid MT5 data or a temporary database lock.
+
+The focused diagnostic release checks passed: **22 tests passed** across MT5 ingest, atomic Supabase wrappers, and the MT5 HTTP route, together with TypeScript validation.

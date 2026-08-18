@@ -35,8 +35,43 @@ export const mt5Payload = z.discriminatedUnion("event", [
 
 export const mt5RateLimitTestHooks = { reset: rateLimitTestHooks.reset, size: () => rateLimitTestHooks.size("mt5-ingest") };
 
-function versionBody(payload: z.infer<typeof mt5Payload>) { return { eaVersion: payload.ea_version, payloadVersion: payload.payload_version, minimumEaVersion: MT5_EA_MIN_VERSION, supportedPayloadVersion: MT5_PAYLOAD_VERSION, compatible: payload.ea_version !== "legacy" && payload.payload_version === MT5_PAYLOAD_VERSION }; }
-function classifySyncFailure(error: unknown) { const message = error instanceof Error ? error.message.toLowerCase() : ""; if (/function .*gj_sync_mt5_position|column .* does not exist|relation .* does not exist|migration/.test(message)) return "MIGRATION_REQUIRED_0008"; if (/deadlock|timeout|timed out|lock not available|temporarily unavailable/.test(message)) return "DATABASE_RETRYABLE"; return "SYNC_UNAVAILABLE"; }
+function versionBody(payload: z.infer<typeof mt5Payload>) {
+  return { eaVersion: payload.ea_version, payloadVersion: payload.payload_version, minimumEaVersion: MT5_EA_MIN_VERSION, supportedPayloadVersion: MT5_PAYLOAD_VERSION, compatible: payload.ea_version !== "legacy" && payload.payload_version === MT5_PAYLOAD_VERSION };
+}
+
+type Mt5FailureCode = "MIGRATION_REQUIRED_0008" | "DATABASE_RETRYABLE" | "INVALID_SYNC_DATA" | "SYNC_PERMISSION_DENIED" | "INVALID_MT5_TIMESTAMP" | "FUTURE_TRADE" | "SYNC_UNAVAILABLE";
+type SupabaseWrappedError = Error & { supabaseCode?: string; supabaseDetails?: string; supabaseHint?: string };
+
+function errorText(error: unknown) {
+  const wrapped = error as SupabaseWrappedError;
+  return [wrapped?.message, wrapped?.supabaseDetails, wrapped?.supabaseHint, wrapped?.supabaseCode].filter(Boolean).join(" ").toLowerCase();
+}
+
+function syncFailureDiagnostic(error: unknown) {
+  if (error instanceof Mt5TimestampError) {
+    return error.code === "FUTURE_TRADE" ? "MT5 history contains a timestamp in the future; verify the broker clock and UTC offset." : "MT5 history contains an invalid timestamp.";
+  }
+  const wrapped = error as SupabaseWrappedError;
+  const providerCode = String(wrapped?.supabaseCode || "").toUpperCase();
+  const text = errorText(error);
+  if (providerCode === "PGRST202" || /schema cache|could not find the function|function .*gj_sync_mt5_position|column .* does not exist|relation .* does not exist|migration|position_payload/.test(text)) return "Supabase RPC/schema mismatch; verify migration 0008 and reload the PostgREST schema.";
+  if (providerCode === "22P02" || providerCode === "22007" || /invalid input syntax|date\/time field|numeric value out of range/.test(text)) return "MT5 history contains an invalid timestamp or numeric value.";
+  if (providerCode === "42501" || /permission denied|account unavailable|not authorized/.test(text)) return "Supabase rejected the MT5 account or service-role operation.";
+  if (/deadlock|timeout|timed out|lock not available|temporarily unavailable/.test(text)) return "Supabase was temporarily unavailable or the account row was locked; retry history.";
+  return "Inspect the Netlify function log for the redacted Supabase error metadata.";
+}
+
+function classifySyncFailure(error: unknown): Mt5FailureCode {
+  if (error instanceof Mt5TimestampError) return error.code;
+  const wrapped = error as SupabaseWrappedError;
+  const providerCode = String(wrapped?.supabaseCode || "").toUpperCase();
+  const message = errorText(error);
+  if (providerCode === "PGRST202" || /schema cache|could not find the function|function .*gj_sync_mt5_position|column .* does not exist|relation .* does not exist|migration|position_payload/.test(message)) return "MIGRATION_REQUIRED_0008";
+  if (providerCode === "22P02" || providerCode === "22007" || /invalid input syntax|date\/time field|numeric value out of range/.test(message)) return "INVALID_SYNC_DATA";
+  if (providerCode === "42501" || /permission denied|account unavailable|not authorized/.test(message)) return "SYNC_PERMISSION_DENIED";
+  if (/deadlock|timeout|timed out|lock not available|temporarily unavailable/.test(message)) return "DATABASE_RETRYABLE";
+  return "SYNC_UNAVAILABLE";
+}
 
 export async function processMt5Payload(body: unknown) {
   const payload = mt5Payload.parse(body);
@@ -75,9 +110,9 @@ export async function processMt5Payload(body: unknown) {
     await upsertMt5ClosedPosition(connection.userId, connection.accountId, { ...shared, closePrice: payload.close_price, realizedPnl: payload.realized_pnl, result: payload.result, closeTime: normalize(payload.close_time), openTime: normalize(payload.open_time ?? payload.close_time) });
     return { status: 200, body: { ok: true, event: "close", ...versionBody(payload) } };
   } catch (error) {
-    const code = error instanceof Mt5TimestampError ? error.code : classifySyncFailure(error);
-    if (payload.event === "history_batch") await recordMt5HistoryFailure(connection.id, code);
-    if (code !== "SYNC_UNAVAILABLE" && code !== "DATABASE_RETRYABLE" && code !== "MIGRATION_REQUIRED_0008") return { status: 422, body: { ok: false, code } };
+    const code = classifySyncFailure(error);
+    if (payload.event === "history_batch") await recordMt5HistoryFailure(connection.id, `${code}: ${syncFailureDiagnostic(error)}`);
+    if (code === "INVALID_SYNC_DATA" || code === "SYNC_PERMISSION_DENIED" || code === "INVALID_MT5_TIMESTAMP" || code === "FUTURE_TRADE") return { status: 422, body: { ok: false, code, diagnostic: syncFailureDiagnostic(error) } };
     throw error;
   }
 }
@@ -99,11 +134,11 @@ export function registerMt5Ingest(app: Express, paths: string[] = ["/api/mt5"]) 
       }
       console.error("[MT5] ingest failed", error instanceof Error ? error.message : "unknown error");
       const code = classifySyncFailure(error);
-      res.status(503).json({ ok: false, code });
+      res.status(code === "INVALID_SYNC_DATA" || code === "SYNC_PERMISSION_DENIED" || code === "INVALID_MT5_TIMESTAMP" || code === "FUTURE_TRADE" ? 422 : 503).json({ ok: false, code, diagnostic: syncFailureDiagnostic(error) });
     }
   });
 }
 
 export function registerMt5Compatibility(app: Express, path = "/api/mt5/compat") {
-  app.get(path, (_req: Request, res: Response) => res.status(200).json({ ok: true, service: "gold-journal-mt5", minimumEaVersion: MT5_EA_MIN_VERSION, supportedPayloadVersion: MT5_PAYLOAD_VERSION }));
+  app.get(path, (_req, res) => res.status(200).json({ ok: true, service: "gold-journal-mt5", minimumEaVersion: MT5_EA_MIN_VERSION, supportedPayloadVersion: MT5_PAYLOAD_VERSION }));
 }
