@@ -8,7 +8,7 @@ describe("Gold Journal account switching", () => {
 
     expect(source).toContain('import { invalidateAccountScopedQueries } from "@/lib/accountScope";');
     expect(source).toMatch(/const switchAccount = React\.useCallback\([\s\S]*?setAccountId\(nextAccountId\);[\s\S]*?invalidateAccountScopedQueries\(utils\)/);
-    expect(source).toContain("const refresh = () => invalidateAccountScopedQueries({ ...utils, accounts: utils.accounts });");
+    expect(source).toContain("const refresh = () => invalidateAccountScopedQueries(utils);");
     expect(source).toContain("onAccount={switchAccount}");
   });
 });

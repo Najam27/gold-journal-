@@ -36,7 +36,7 @@ export function AccountRenameControl() {
 
   if (!isAuthenticated) return null;
 
-  const refresh = async () => { await invalidateAccountScopedQueries({ ...utils, accounts: utils.accounts }); };
+  const refresh = async () => { await invalidateAccountScopedQueries(utils); };
   const saveName = async () => {
     const trimmed = name.trim();
     if (!account || !trimmed) { toast.error("An account name is required."); return; }

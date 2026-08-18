@@ -14,7 +14,7 @@ import { hasImageSignature, storageGetSignedUrl, storagePut } from "./storage";
 import { consumeRateLimit } from "./rateLimit";
 import { clearAccountJournalDataAtomic, recordGoalAlertsAtomic, removeAccountAtomic } from "./atomicOperations";
 import { getAccountAnalysis } from "./analysisDb";
-import { analyzeWithOpenRouter } from "./analysisAi";
+import { analyzeWithOpenRouter, getOpenRouterStatus } from "./analysisAi";
 import { listAiExperiments, listAiReports, persistAiOutcome, updateAiExperiment } from "./aiReportDb";
 import { compareAnalysis } from "@shared/analysisEngine";
 
@@ -93,6 +93,7 @@ export const goldRouter = router({
     }),
   }),
   analysis: router({
+    config: protectedProcedure.query(() => getOpenRouterStatus()),
     get: protectedProcedure.input(analysisInput).query(({ ctx, input }) => getAccountAnalysis(ctx.user.id, input.accountId, input.filters)),
     ai: protectedProcedure.input(analysisInput).mutation(async ({ ctx, input }) => {
       if (!(await consumeRateLimit("analysis-ai", ctx.user.id, 3, 10 * 60_000))) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "AI analysis limit reached. Please retry later." });

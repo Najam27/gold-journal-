@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildAnalysis } from "@shared/analysisEngine";
-import { aiTestHooks, analyzeWithOpenRouter } from "./analysisAi";
+import { aiTestHooks, analyzeWithOpenRouter, getOpenRouterStatus } from "./analysisAi";
 
 const report = {
   executiveSummary: "Evidence is limited and should be treated as a hypothesis.",
@@ -65,6 +65,12 @@ describe("server OpenRouter analysis", () => {
     const timedOut = await analyzeWithOpenRouter(1, 5, analysis);
     expect(timedOut.available).toBe(false);
     expect(aiTestHooks.cacheSize()).toBe(0);
+  });
+
+  it("reports readiness without exposing the OpenRouter secret", () => {
+    expect(getOpenRouterStatus()).toEqual({ configured: true, model: "test-model", fallbackConfigured: false });
+    delete process.env.OPENROUTER_API_KEY;
+    expect(getOpenRouterStatus()).toEqual({ configured: false, model: "test-model", fallbackConfigured: false });
   });
 
   it("returns a deterministic-unavailable result when server configuration is absent", async () => {
