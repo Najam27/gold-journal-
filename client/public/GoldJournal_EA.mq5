@@ -6,7 +6,7 @@ input string Endpoint = "https://YOUR-SITE.netlify.app/api/mt5";
 input string ApiKey = "PASTE_ONCE_FROM_GOLD_JOURNAL";
 input string ConnectionId = "";
 input int BrokerUtcOffsetMinutes = 180;
-input int SyncSeconds = 30;
+input int SyncSeconds = 3;
 input int HistoryDays = 30;
 input bool SendHistoryOnInit = true;
 
@@ -16,6 +16,7 @@ const int REQUEST_TIMEOUT_MS = 15000;
 const int HISTORY_BATCH_SIZE = 50;
 
 datetime g_last_history_sync = 0;
+datetime g_last_history_attempt = 0;
 
 string JsonEscape(string value) {
    StringReplace(value, "\\", "\\\\");
@@ -31,6 +32,7 @@ string Direction(ENUM_POSITION_TYPE type) { return type == POSITION_TYPE_BUY ? "
 string DealDirection(long type) { return type == DEAL_TYPE_BUY ? "BUY" : "SELL"; }
 
 bool SendJson(string payload, string expectedEvent) {
+   if(StringLen(payload) == 0) return false;
    char data[];
    int data_size = StringToCharArray(payload, data, 0, WHOLE_ARRAY, CP_UTF8);
    if(data_size > 0 && data[data_size - 1] == 0) {
@@ -133,6 +135,7 @@ string ClosedDealJson(ulong deal) {
 
 void SendHistory(bool fullReplay) {
    datetime now = TimeCurrent();
+   g_last_history_attempt = now;
    datetime from = now - (fullReplay ? HistoryDays * 86400 : MathMax(3600, SyncSeconds * 4));
    if(!HistorySelect(from, now)) return;
    int total = HistoryDealsTotal();
@@ -164,11 +167,11 @@ void SendHistory(bool fullReplay) {
 void Sync() {
    SendSummary();
    SendOpenPositions();
-   if(SendHistoryOnInit && (g_last_history_sync == 0 || TimeCurrent() - g_last_history_sync >= MathMax(60, HistoryDays * 60))) SendHistory(true);
+   if(SendHistoryOnInit && (g_last_history_attempt == 0 || TimeCurrent() - g_last_history_attempt >= 300) && (g_last_history_sync == 0 || TimeCurrent() - g_last_history_sync >= MathMax(60, HistoryDays * 60))) SendHistory(true);
 }
 
 int OnInit() {
-   EventSetTimer(MathMax(5, SyncSeconds));
+   EventSetTimer(MathMax(3, SyncSeconds));
    SendCompatibility();
    Sync();
    return INIT_SUCCEEDED;

@@ -79,6 +79,21 @@ describe("MT5 EA ingest", () => {
     expect(mocks.completeHistory).toHaveBeenCalledWith(44, 12);
   });
 
+  it("persists a history batch sequentially to avoid account-row lock contention", async () => {
+    const order: string[] = [];
+    mocks.close.mockImplementation(async (_userId: number, _accountId: number, position: { ticket: bigint }) => { order.push(position.ticket.toString()); });
+    const first = { ...openPayload(key("history-seq")), ticket: "1001", close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00" };
+    const second = { ...first, ticket: "1002" };
+    await expect(processMt5Payload({ event: "history_batch", api_key: key("history-seq"), positions: [first, second], complete: true })).resolves.toMatchObject({ status: 200, body: { synced: 2 } });
+    expect(order).toEqual(["1001", "1002"]);
+  });
+
+  it("records a migration-specific history failure when the sync RPC is unavailable", async () => {
+    mocks.close.mockRejectedValue(new Error("column openTime does not exist"));
+    await expect(processMt5Payload({ event: "history_batch", api_key: key("migration"), positions: [{ ...openPayload(key("migration")), close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00" }], complete: false })).rejects.toThrow("column openTime does not exist");
+    expect(mocks.historyFailure).toHaveBeenCalledWith(44, "MIGRATION_REQUIRED_0008");
+  });
+
   it("derives the target account from the authenticated connection even when a payload attempts to supply another account", async () => {
     await expect(processMt5Payload({ ...openPayload(key("spoofed-account")), accountId: 999 })).resolves.toMatchObject({ status: 200 });
     expect(mocks.open).toHaveBeenCalledWith(77, 12, expect.objectContaining({ ticket: 123456789n }));

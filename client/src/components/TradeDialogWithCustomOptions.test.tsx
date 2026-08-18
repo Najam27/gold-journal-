@@ -53,6 +53,18 @@ describe("TradeDialogWithCustomOptions", () => {
     expect(setForm).toHaveBeenCalledWith(expect.objectContaining({ marketCondition: "Trending" }));
   });
 
+  it("does not select a chip on hover; only an explicit click changes the form", () => {
+    const form = { tradeDate: "2026-08-12", session: "London", direction: "BUY", result: "WIN", level: "", timeframe: "", setupQuality: "", executionType: "", marketCondition: "", confirmationType: "", mistake: "", patienceScore: "", risk: "", reward: "", pnl: "", notes: "", emotionBefore: "", emotionDuring: "", emotionAfter: "" };
+    const setForm = vi.fn();
+    render(<TradeDialogWithCustomOptions open setOpen={vi.fn()} form={form} setForm={setForm} editing={undefined} onSave={vi.fn()} pending={false} screenshot={undefined} setScreenshot={vi.fn()} progress={0} />);
+    const fomo = screen.getByRole("button", { name: "FOMO" });
+    fireEvent.mouseOver(fomo);
+    fireEvent.focus(fomo);
+    expect(setForm).not.toHaveBeenCalled();
+    fireEvent.click(fomo);
+    expect(setForm).toHaveBeenCalledWith(expect.objectContaining({ mistake: "FOMO" }));
+  });
+
   it("keeps fresh manual Direction and Result on explicit disabled prompts", () => {
     const form = { tradeDate: "2026-08-12", session: "London", direction: "", result: "", level: "", timeframe: "", setupQuality: "", executionType: "", marketCondition: "", confirmationType: "", patienceScore: "", risk: "", reward: "", pnl: "", notes: "", emotionBefore: "", emotionDuring: "", emotionAfter: "" };
     const setForm = vi.fn();

@@ -36,6 +36,7 @@ export const mt5Payload = z.discriminatedUnion("event", [
 export const mt5RateLimitTestHooks = { reset: rateLimitTestHooks.reset, size: () => rateLimitTestHooks.size("mt5-ingest") };
 
 function versionBody(payload: z.infer<typeof mt5Payload>) { return { eaVersion: payload.ea_version, payloadVersion: payload.payload_version, minimumEaVersion: MT5_EA_MIN_VERSION, supportedPayloadVersion: MT5_PAYLOAD_VERSION, compatible: payload.ea_version !== "legacy" && payload.payload_version === MT5_PAYLOAD_VERSION }; }
+function classifySyncFailure(error: unknown) { const message = error instanceof Error ? error.message.toLowerCase() : ""; if (/function .*gj_sync_mt5_position|column .* does not exist|relation .* does not exist|migration/.test(message)) return "MIGRATION_REQUIRED_0008"; if (/deadlock|timeout|timed out|lock not available|temporarily unavailable/.test(message)) return "DATABASE_RETRYABLE"; return "SYNC_UNAVAILABLE"; }
 
 export async function processMt5Payload(body: unknown) {
   const payload = mt5Payload.parse(body);
@@ -56,7 +57,7 @@ export async function processMt5Payload(body: unknown) {
     if (payload.event === "history_batch") {
       await recordMt5HistoryAttempt(connection.id, payload.positions.length);
       const offset = payload.broker_utc_offset_minutes ?? connectionOffset;
-      await Promise.all(payload.positions.map(position => upsertMt5ClosedPosition(connection.userId, connection.accountId, { ticket: position.ticket, symbol: position.symbol, direction: position.direction, lots: position.lots, openPrice: position.open_price, closePrice: position.close_price, slPrice: position.sl_price > 0 ? position.sl_price : null, tpPrice: position.tp_price > 0 ? position.tp_price : null, riskUsd: position.risk_usd, rewardUsd: position.reward_usd, rrRatio: position.rr_ratio, realizedPnl: position.realized_pnl, result: position.result, closeTime: normalize(position.close_time, offset), openTime: normalize(position.open_time ?? position.close_time, offset) })));
+      for (const position of payload.positions) await upsertMt5ClosedPosition(connection.userId, connection.accountId, { ticket: position.ticket, symbol: position.symbol, direction: position.direction, lots: position.lots, openPrice: position.open_price, closePrice: position.close_price, slPrice: position.sl_price > 0 ? position.sl_price : null, tpPrice: position.tp_price > 0 ? position.tp_price : null, riskUsd: position.risk_usd, rewardUsd: position.reward_usd, rrRatio: position.rr_ratio, realizedPnl: position.realized_pnl, result: position.result, closeTime: normalize(position.close_time, offset), openTime: normalize(position.open_time ?? position.close_time, offset) });
       await recordMt5HistoryAccepted(connection.id, payload.positions.length, payload.complete);
       if (payload.complete) await completeMt5HistorySync(connection.id, connection.accountId);
       return { status: 200, body: { ok: true, event: "history_batch", synced: payload.positions.length, complete: payload.complete, ...versionBody(payload) } };
@@ -74,9 +75,9 @@ export async function processMt5Payload(body: unknown) {
     await upsertMt5ClosedPosition(connection.userId, connection.accountId, { ...shared, closePrice: payload.close_price, realizedPnl: payload.realized_pnl, result: payload.result, closeTime: normalize(payload.close_time), openTime: normalize(payload.open_time ?? payload.close_time) });
     return { status: 200, body: { ok: true, event: "close", ...versionBody(payload) } };
   } catch (error) {
-    const code = error instanceof Mt5TimestampError ? error.code : "SYNC_UNAVAILABLE";
+    const code = error instanceof Mt5TimestampError ? error.code : classifySyncFailure(error);
     if (payload.event === "history_batch") await recordMt5HistoryFailure(connection.id, code);
-    if (code !== "SYNC_UNAVAILABLE") return { status: 422, body: { ok: false, code } };
+    if (code !== "SYNC_UNAVAILABLE" && code !== "DATABASE_RETRYABLE" && code !== "MIGRATION_REQUIRED_0008") return { status: 422, body: { ok: false, code } };
     throw error;
   }
 }
@@ -96,8 +97,9 @@ export function registerMt5Ingest(app: Express, paths: string[] = ["/api/mt5"]) 
         res.status(400).json({ ok: false, code: "INVALID_PAYLOAD", details });
         return;
       }
-      console.error("[MT5] ingest failed", error);
-      res.status(503).json({ ok: false, code: "SYNC_UNAVAILABLE" });
+      console.error("[MT5] ingest failed", error instanceof Error ? error.message : "unknown error");
+      const code = classifySyncFailure(error);
+      res.status(503).json({ ok: false, code });
     }
   });
 }
