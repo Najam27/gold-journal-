@@ -94,6 +94,12 @@ describe("MT5 EA ingest", () => {
     expect(mocks.historyFailure).toHaveBeenCalledWith(44, expect.stringContaining("MIGRATION_REQUIRED_0008"));
   });
 
+  it("preserves an unknown Supabase provider code in the safe history diagnostic", async () => {
+    mocks.close.mockRejectedValue(Object.assign(new Error("provider rejected the write"), { supabaseCode: "XX999" }));
+    await expect(processMt5Payload({ event: "history_batch", api_key: key("unknown-provider"), positions: [{ ...openPayload(key("unknown-provider")), close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00" }], complete: false })).rejects.toThrow("provider rejected the write");
+    expect(mocks.historyFailure).toHaveBeenCalledWith(44, expect.stringContaining("XX999"));
+  });
+
   it("derives the target account from the authenticated connection even when a payload attempts to supply another account", async () => {
     await expect(processMt5Payload({ ...openPayload(key("spoofed-account")), accountId: 999 })).resolves.toMatchObject({ status: 200 });
     expect(mocks.open).toHaveBeenCalledWith(77, 12, expect.objectContaining({ ticket: 123456789n }));
@@ -106,6 +112,15 @@ describe("MT5 EA ingest", () => {
     await processMt5Payload(openPayload(key("account-b")));
     expect(mocks.open).toHaveBeenCalledWith(77, 12, expect.objectContaining({ ticket: 123456789n }));
     expect(mocks.open).toHaveBeenCalledWith(77, 13, expect.objectContaining({ ticket: 123456789n }));
+  });
+
+  it("persists an open batch sequentially to avoid account-row lock contention", async () => {
+    const order: string[] = [];
+    mocks.open.mockImplementation(async (_userId: number, _accountId: number, position: { ticket: bigint }) => { order.push(position.ticket.toString()); });
+    const first = { ...openPayload(key("open-seq")), ticket: "2001" };
+    const second = { ...openPayload(key("open-seq")), ticket: "2002" };
+    await expect(processMt5Payload({ event: "open_batch", api_key: key("open-seq"), positions: [first, second], broker_utc_offset_minutes: 180 })).resolves.toMatchObject({ status: 200, body: { event: "open_batch", synced: 2 } });
+    expect(order).toEqual(["2001", "2002"]);
   });
 
   it("limits a single API key to five events per second", async () => {

@@ -7,6 +7,15 @@ type Filter = { kind: "eq" | "like" | "gte" | "gt" | "lt"; column: string; value
 type Order = { column: string; ascending: boolean } | ColumnLike;
 
 type Selection = Record<string, any> | undefined;
+type SupabaseError = { message: string; code?: string; details?: string; hint?: string };
+
+function throwSupabaseError(error: SupabaseError): never {
+  const wrapped = new Error(error.message) as Error & { supabaseCode?: string; supabaseDetails?: string; supabaseHint?: string };
+  wrapped.supabaseCode = error.code;
+  wrapped.supabaseDetails = error.details;
+  wrapped.supabaseHint = error.hint;
+  throw wrapped;
+}
 
 const columnName = (column: ColumnLike | string) => typeof column === "string" ? column : column.name ?? column.columnName ?? "";
 const tableName = (table: TableLike) => getTableName(table as any);
@@ -83,7 +92,7 @@ class SelectQuery {
     if (this.take !== undefined) query = query.range(this.skip, this.skip + this.take - 1);
     else if (this.skip > 0) query = query.range(this.skip, this.skip + 9999);
     const { data, error, count: total } = await query;
-    if (error) throw new Error(error.message);
+    if (error) throwSupabaseError(error);
     if (isCount) {
       const alias = Object.entries(this.selection ?? {}).find(([, field]: any) => field?.kind === "count")?.[0] ?? "count";
       return [{ [alias]: total ?? data?.length ?? 0 }];
@@ -122,7 +131,7 @@ class WriteQuery {
     query = applyFilter(query, this.filter);
     if (this.returningSelection) query = query.select(selectColumns(this.returningSelection));
     const { data, error } = await query;
-    if (error) throw new Error(error.message);
+    if (error) throwSupabaseError(error);
     if (this.returningSelection) return (data ?? []).map((row: any) => Object.fromEntries(Object.entries(this.returningSelection!).map(([alias, field]: any) => [alias, row[columnName(field)]])));
     return data ?? [];
   }

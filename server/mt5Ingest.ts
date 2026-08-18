@@ -28,7 +28,7 @@ export const mt5Payload = z.discriminatedUnion("event", [
   z.object({ event: z.literal("compat"), api_key: z.string().trim().min(24).max(96), ea_version: z.string().trim().min(1).max(32), payload_version: z.string().trim().min(1).max(16), connection_id: z.string().trim().max(128).optional() }),
   z.object({ event: z.literal("summary"), api_key: z.string().trim().min(24).max(96), mt5_login: ticket, broker_server: z.string().trim().min(1).max(160), currency: z.string().trim().min(1).max(16), balance: numeric, equity: numeric, margin: numeric.min(0), free_margin: numeric, floating_pnl: numeric }).merge(versionSchema),
   base.extend({ event: z.literal("open") }).merge(openFields),
-  base.extend({ event: z.literal("open_batch"), positions: z.array(openPosition).max(200), broker_utc_offset_minutes: z.number().int().min(-720).max(840) }),
+  z.object({ event: z.literal("open_batch"), api_key: z.string().trim().min(24).max(96), positions: z.array(openPosition).max(200), broker_utc_offset_minutes: z.number().int().min(-720).max(840) }).merge(versionSchema),
   base.merge(closedFields).extend({ event: z.literal("close") }),
   z.object({ event: z.literal("history_batch"), api_key: z.string().trim().min(24).max(96), positions: z.array(closedPosition).max(50), complete: z.boolean().default(false), broker_utc_offset_minutes: z.number().int().min(-720).max(840).optional() }).merge(versionSchema),
 ]);
@@ -57,7 +57,9 @@ function syncFailureDiagnostic(error: unknown) {
   if (providerCode === "PGRST202" || /schema cache|could not find the function|function .*gj_sync_mt5_position|column .* does not exist|relation .* does not exist|migration|position_payload/.test(text)) return "Supabase RPC/schema mismatch; verify migration 0008 and reload the PostgREST schema.";
   if (providerCode === "22P02" || providerCode === "22007" || /invalid input syntax|date\/time field|numeric value out of range/.test(text)) return "MT5 history contains an invalid timestamp or numeric value.";
   if (providerCode === "42501" || /permission denied|account unavailable|not authorized/.test(text)) return "Supabase rejected the MT5 account or service-role operation.";
+  if (/supabase database is unavailable|server configuration is unavailable|fetch failed|econnreset|enotfound/.test(text)) return "The server could not reach Supabase or its server configuration is incomplete.";
   if (/deadlock|timeout|timed out|lock not available|temporarily unavailable/.test(text)) return "Supabase was temporarily unavailable or the account row was locked; retry history.";
+  if (providerCode) return `Supabase returned provider code ${providerCode}; inspect the Netlify function log for its redacted details.`;
   return "Inspect the Netlify function log for the redacted Supabase error metadata.";
 }
 
@@ -98,7 +100,7 @@ export async function processMt5Payload(body: unknown) {
       return { status: 200, body: { ok: true, event: "history_batch", synced: payload.positions.length, complete: payload.complete, ...versionBody(payload) } };
     }
     if (payload.event === "open_batch") {
-      await Promise.all(payload.positions.map(position => upsertMt5OpenPosition(connection.userId, connection.accountId, { ticket: position.ticket, symbol: position.symbol, direction: position.direction, lots: position.lots, openPrice: position.open_price, slPrice: position.sl_price > 0 ? position.sl_price : null, tpPrice: position.tp_price > 0 ? position.tp_price : null, riskUsd: position.risk_usd, rewardUsd: position.reward_usd, rrRatio: position.rr_ratio, floatingPnl: position.floating_pnl, openTime: normalize(position.open_time, payload.broker_utc_offset_minutes) })));
+      for (const position of payload.positions) await upsertMt5OpenPosition(connection.userId, connection.accountId, { ticket: position.ticket, symbol: position.symbol, direction: position.direction, lots: position.lots, openPrice: position.open_price, slPrice: position.sl_price > 0 ? position.sl_price : null, tpPrice: position.tp_price > 0 ? position.tp_price : null, riskUsd: position.risk_usd, rewardUsd: position.reward_usd, rrRatio: position.rr_ratio, floatingPnl: position.floating_pnl, openTime: normalize(position.open_time, payload.broker_utc_offset_minutes) });
       return { status: 200, body: { ok: true, event: "open_batch", synced: payload.positions.length, ...versionBody(payload) } };
     }
     const shared = { ticket: payload.ticket, symbol: payload.symbol, direction: payload.direction, lots: payload.lots, openPrice: payload.open_price, slPrice: payload.sl_price > 0 ? payload.sl_price : null, tpPrice: payload.tp_price > 0 ? payload.tp_price : null, riskUsd: payload.risk_usd, rewardUsd: payload.reward_usd, rrRatio: payload.rr_ratio };
@@ -111,7 +113,10 @@ export async function processMt5Payload(body: unknown) {
     return { status: 200, body: { ok: true, event: "close", ...versionBody(payload) } };
   } catch (error) {
     const code = classifySyncFailure(error);
-    if (payload.event === "history_batch") await recordMt5HistoryFailure(connection.id, `${code}: ${syncFailureDiagnostic(error)}`);
+    if (payload.event === "history_batch") {
+      try { await recordMt5HistoryFailure(connection.id, `${code}: ${syncFailureDiagnostic(error)}`); }
+      catch (statusError) { console.error("[MT5] failed to record history failure status", statusError instanceof Error ? statusError.message : "unknown error"); }
+    }
     if (code === "INVALID_SYNC_DATA" || code === "SYNC_PERMISSION_DENIED" || code === "INVALID_MT5_TIMESTAMP" || code === "FUTURE_TRADE") return { status: 422, body: { ok: false, code, diagnostic: syncFailureDiagnostic(error) } };
     throw error;
   }
@@ -132,8 +137,8 @@ export function registerMt5Ingest(app: Express, paths: string[] = ["/api/mt5"]) 
         res.status(400).json({ ok: false, code: "INVALID_PAYLOAD", details });
         return;
       }
-      console.error("[MT5] ingest failed", error instanceof Error ? error.message : "unknown error");
       const code = classifySyncFailure(error);
+      console.error("[MT5] ingest failed", code, syncFailureDiagnostic(error), error instanceof Error ? error.message : "unknown error");
       res.status(code === "INVALID_SYNC_DATA" || code === "SYNC_PERMISSION_DENIED" || code === "INVALID_MT5_TIMESTAMP" || code === "FUTURE_TRADE" ? 422 : 503).json({ ok: false, code, diagnostic: syncFailureDiagnostic(error) });
     }
   });

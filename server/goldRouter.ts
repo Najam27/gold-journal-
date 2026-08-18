@@ -176,7 +176,8 @@ export const goldRouter = router({
   trades: router({
     list: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(50).default(12), search: z.string().trim().max(160).optional().default(""), result: z.enum(["WIN", "LOSS", "BREAK_EVEN", "OPEN"]).optional() })).query(async ({ ctx, input }) => {
       const account = await getOwnedAccount(ctx.user.id, input.accountId);
-      await syncStoredMt5PositionsToTradeLog(ctx.user.id, account.id);
+      try { await syncStoredMt5PositionsToTradeLog(ctx.user.id, account.id); }
+      catch (error) { console.warn("[Trades] MT5 pre-sync degraded", error instanceof Error ? error.message : "unknown error"); }
       const db = await dbOrThrow();
       let where = and(eq(trades.userId, ctx.user.id), eq(trades.accountId, account.id));
       if (input.result) where = and(where, eq(trades.result, input.result));

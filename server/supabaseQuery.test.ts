@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { and, eq, gte, like, or, renderPostgrestFilter, supabaseDb } from "./supabaseQuery";
+import { mt5Connections } from "../drizzle/schema";
+
+const mocks = vi.hoisted(() => ({ admin: vi.fn() }));
+vi.mock("./supabaseAdmin", () => ({ getSupabaseAdmin: mocks.admin }));
 
 describe("Supabase query adapter transaction boundary", () => {
   it("does not expose a fake transaction method", () => {
@@ -21,6 +25,16 @@ describe("Supabase query adapter transaction boundary", () => {
     expect(rendered).toContain("notes.ilike.%gold%");
     expect(rendered).not.toContain("\\n");
     expect(rendered).not.toContain("\\r");
+  });
+
+  it("preserves Supabase provider metadata when a query fails", async () => {
+    const query = {
+      select: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      range: vi.fn().mockResolvedValue({ data: null, error: { message: "schema cache lookup failed", code: "PGRST202", details: "function signature mismatch", hint: "reload schema" }, count: null }),
+    };
+    mocks.admin.mockReturnValue({ from: vi.fn(() => query) });
+    await expect(supabaseDb.select().from(mt5Connections).limit(1)).rejects.toMatchObject({ message: "schema cache lookup failed", supabaseCode: "PGRST202", supabaseDetails: "function signature mismatch", supabaseHint: "reload schema" });
   });
 
   it("preserves nested boolean grouping and normalizes null, Date, and bigint values", () => {

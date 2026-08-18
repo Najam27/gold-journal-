@@ -76,3 +76,12 @@ The follow-up release gate passed with **67 test files passed, 210 tests passed;
 The remaining generic status was caused by the ingest layer discarding Supabase provider metadata from RPC errors. The atomic wrapper now preserves the provider code, details, and hint internally. The MT5 ingest layer classifies safe categories such as `PGRST202` schema/signature mismatch, `22P02` invalid data, `42501` permission/account rejection, lock/timeouts, and timestamp failures. The API returns a safe diagnostic message without exposing credentials or raw SQL. History status records now include the actionable category and diagnostic, so the next retry will distinguish a schema problem from invalid MT5 data or a temporary database lock.
 
 The focused diagnostic release checks passed: **22 tests passed** across MT5 ingest, atomic Supabase wrappers, and the MT5 HTTP route, together with TypeScript validation.
+
+
+## Whole-application follow-up findings
+
+The deeper contract audit found three additional reliability defects. First, the `open_batch` discriminated-union validator incorrectly inherited single-position fields at the top level, so every valid EA batch containing only `positions` was rejected before persistence. The schema now validates the actual batch shape and the server writes the batch sequentially to avoid account-row lock contention.
+
+Second, PostgREST metadata was preserved for atomic RPCs but was still discarded by ordinary Supabase query and write operations. The adapter now preserves provider code, details, and hint for all queries and writes, and unknown provider codes are included in the safe MT5 diagnostic.
+
+Third, Trade Log loading was coupled to MT5 pre-synchronization. A broker/database sync failure could therefore hide otherwise valid manual journal trades. Trade Log now degrades gracefully, logs the MT5 pre-sync failure, and still loads the account’s journal rows.
