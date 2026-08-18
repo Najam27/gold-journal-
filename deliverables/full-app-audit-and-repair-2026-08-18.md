@@ -69,7 +69,7 @@ After Netlify deploys the latest pushed commit, sign in and perform the followin
 3. Open **Analysis**. With OpenRouter variables absent, confirm deterministic metrics load and the AI panel explains that server configuration is required. With variables present, confirm the AI action becomes enabled.
 4. Open **AI Mentor** and confirm it shows the same readiness state. Run the report only after OpenRouter is configured and verify that the response is evidence-bound and account-scoped.
 5. Refresh the browser after every operation and confirm no stale account data or false mutation error remains.
-6. Re-test MT5 Live with the corrected EA v2.0 after migrations 0008 and 0009 are applied in Supabase.
+6. Re-test MT5 Live with the corrected EA v2.1 after migrations 0008 and 0009 are applied in Supabase.
 
 ## Deployment State
 

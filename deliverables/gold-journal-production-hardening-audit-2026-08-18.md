@@ -75,7 +75,7 @@ MT5 journal rows use account/ticket identity and update semantics rather than cr
 
 ### 12. MT5 Expert Advisor rebuild
 
-`client/public/GoldJournal_EA.mq5` was rebuilt as EA v2.0. It reports account summaries, batched open positions, close events, historical batches, broker UTC offset, compatibility metadata, and completion markers. History pagination uses a bounded cursor contract, and repeated history records are keyed by position identity.
+`client/public/GoldJournal_EA.mq5` was rebuilt as EA v2.1. It reports account summaries, batched open positions, close events, historical batches, broker UTC offset, compatibility metadata, and completion markers. History pagination uses a bounded cursor contract, and repeated history records are keyed by position identity.
 
 ### 13. MT5 ingest contract and compatibility
 
@@ -135,7 +135,7 @@ The full suite covers authentication state transitions, account scope, journal s
 
 ### 27. Release truthfulness and deployment surface
 
-The MT5 Live UI now labels the downloadable EA and setup guide as v2.0. The application does not claim that AI persistence is active when the migration is absent; it returns a persistence status. The production build completes for both the Vite client and server bundle. A chunk-size warning remains visible and is recorded as a follow-up rather than hidden.
+The MT5 Live UI now labels the downloadable EA and setup guide as v2.1. The application does not claim that AI persistence is active when the migration is absent; it returns a persistence status. The production build completes for both the Vite client and server bundle. A chunk-size warning remains visible and is recorded as a follow-up rather than hidden.
 
 ### 28. Operator deployment and manual verification
 
@@ -148,9 +148,9 @@ The final operator sequence is documented below. Applying the migrations, compil
 | 1 | In Supabase SQL Editor, apply `supabase/migrations/0008_production_integrity_and_analysis.sql` after migrations 0001–0007. | The ownership constraints validate, `gj_consume_rate_limit` exists, analysis columns exist, and the MT5 sync function is replaced. |
 | 2 | Apply `supabase/migrations/0009_ai_report_history.sql`. | AI report, edge-history, and experiment-history tables exist with RLS enabled and service-role-only grants. |
 | 3 | Run the SQL checks for `gj_consume_rate_limit`. | Repeated calls for one scope/hash allow up to the limit, reject the next call, and allow a new window after expiry. |
-| 4 | Send a v2.0 MT5 OPEN event. | It appears in `gj_mt5_live_positions` as OPEN and does not create a realized `gj_trades` row. |
+| 4 | Send a v2.1 MT5 OPEN event. | It appears in `gj_mt5_live_positions` as OPEN and does not create a realized `gj_trades` row. |
 | 5 | Send the corresponding CLOSE event and replay the batch. | Exactly one realized journal trade exists with broker close facts; replay does not duplicate or reopen it. |
-| 6 | Compile and attach `GoldJournal_EA.mq5` in MetaEditor. | The EA reports compatibility v2.0, account summary, open positions, closed history, offset, and completion markers. |
+| 6 | Compile and attach `GoldJournal_EA.mq5` in MetaEditor. | The EA reports compatibility v2.1, account summary, open positions, position-aggregated closed history, broker offset, original direction, historical SL/TP where available, fee-inclusive realized P&L, and completion markers. |
 | 7 | Verify a two-account user in the deployed app. | Changing accounts changes every scoped query; malicious account identifiers are rejected server-side. |
 | 8 | Open AI Analysis after migration 0009. | A validated report receives a persistence identifier and appears under authenticated history for that account only. |
 | 9 | Perform the live PWA update check. | The user sees an update banner and the app reloads once only after clicking Update now. |
@@ -167,7 +167,7 @@ The production Vite build still reports a chunk larger than 500 kB. This is a pe
 |---|---|
 | `supabase/migrations/0008_production_integrity_and_analysis.sql` | Composite ownership, concurrent account removal, MT5 OPEN/ CLOSE semantics, analysis columns, and distributed rate limiter. |
 | `supabase/migrations/0009_ai_report_history.sql` | Durable AI report, evidence, and experiment history. |
-| `client/public/GoldJournal_EA.mq5` | MT5 EA v2.0 contract implementation. |
+| `client/public/GoldJournal_EA.mq5` | MT5 EA v2.1 contract implementation. |
 | `server/mt5Ingest.ts` and `server/mt5Db.ts` | MT5 compatibility, replay, idempotency, and realized-P&L mirroring. |
 | `shared/analysisEngine.ts` and `server/analysisDb.ts` | PKT analytics, corrected metrics, evidence tiers, filters, and bounded keyset loading. |
 | `server/analysisAi.ts` and `server/aiReportDb.ts` | Evidence-grounded AI validation and durable report persistence. |
