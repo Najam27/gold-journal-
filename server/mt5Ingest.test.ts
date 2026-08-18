@@ -94,6 +94,13 @@ describe("MT5 EA ingest", () => {
     expect(mocks.historyFailure).toHaveBeenCalledWith(44, expect.stringContaining("MIGRATION_REQUIRED_0008"));
   });
 
+  it("classifies PostgreSQL syntax errors as migration-specific history failures", async () => {
+    mocks.close.mockRejectedValue(Object.assign(new Error("syntax error in gj_sync_mt5_position"), { supabaseCode: "42601" }));
+    await expect(processMt5Payload({ event: "history_batch", api_key: key("syntax-provider"), positions: [{ ...openPayload(key("syntax-provider")), close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00" }], complete: false })).rejects.toThrow("syntax error in gj_sync_mt5_position");
+    expect(mocks.historyFailure).toHaveBeenCalledWith(44, expect.stringContaining("MIGRATION_REQUIRED_0008"));
+    expect(mocks.historyFailure).toHaveBeenCalledWith(44, expect.stringContaining("migration 0010"));
+  });
+
   it("preserves an unknown Supabase provider code in the safe history diagnostic", async () => {
     mocks.close.mockRejectedValue(Object.assign(new Error("provider rejected the write"), { supabaseCode: "XX999" }));
     await expect(processMt5Payload({ event: "history_batch", api_key: key("unknown-provider"), positions: [{ ...openPayload(key("unknown-provider")), close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00" }], complete: false })).rejects.toThrow("provider rejected the write");

@@ -49,26 +49,26 @@ The build still reports a non-fatal bundle-size warning for the existing large f
 ## Required production actions
 
 1. Wait for Netlify to deploy the new commit from `main`.
-2. Apply Supabase migrations `0008_production_integrity_and_analysis.sql` and `0009_ai_report_history.sql` if they have not already been applied. The MT5 history RPC and the new analysis fields depend on migration 0008.
+2. Apply Supabase migrations `0008_production_integrity_and_analysis.sql`, `0009_ai_report_history.sql`, and `0010_fix_mt5_rpc_trade_insert_arity.sql` if they have not already been applied. The MT5 history RPC and the new analysis fields depend on migration 0008.
 3. In Gold Journal, download **EA v2.1** again. Replace the old `.mq5`, compile it in MetaEditor, remove the old chart instance, and attach the newly compiled EA.
 4. Keep the endpoint as `https://topgjournal.netlify.app/api/mt5`, use the current one-time API key, leave `ConnectionId` blank unless a real connection ID is explicitly supplied, and set the broker UTC offset correctly.
 5. In MT5, add the endpoint to **Tools → Options → Expert Advisors → Allow WebRequest for listed URL**.
 6. After attaching the EA, check MT5 Journal/Experts logs and Gold Journal MT5 Live. The connection should remain live, account metrics should refresh approximately every 3 seconds from the EA, the browser should refresh every 2.5 seconds, and history should progress from `RECEIVED`/`ACCEPTED` to `COMPLETED`; a BUY position closed by a SELL deal must remain BUY, and a SELL position closed by a BUY deal must remain SELL.
-7. If the history panel reports `MIGRATION_REQUIRED_0008`, apply migration 0008 and redeploy/retry. If it reports `DATABASE_RETRYABLE`, wait briefly and use `Retry history`. If it reports `SYNC_UNAVAILABLE` after migration verification, inspect the Netlify function log for the corresponding server error and confirm the service-role Supabase environment variables.
+7. If the history panel reports `MIGRATION_REQUIRED_0008`, apply migrations 0008 and 0010 and reload the PostgREST schema. If it reports `DATABASE_RETRYABLE`, wait briefly and use `Retry history`. PostgreSQL provider code 42601 specifically indicates the old RPC body’s 28-column/27-expression Trade Log INSERT; migration 0010 repairs that body. If any failure remains after migration verification, inspect the Netlify function log for the corresponding server error and confirm the service-role Supabase environment variables.
 8. Test New Trade by moving the pointer over level, confirmation, market-condition, and mistake chips without clicking; no value should change. Then click a chip and confirm only that clicked value is selected. Repeat for Plan & Execution and the month picker.
 
 ## Remaining limitation
 
-The sandbox browser cannot authenticate into the user’s Supabase session, so final live account-specific smoke tests must be performed by the operator after deployment. The code, schema audit, focused tests, full tests, and production build are complete; the remaining production dependency is applying the database migrations and installing the rebuilt EA on the user’s terminal.
+The sandbox browser cannot authenticate into the user’s Supabase session, so final live account-specific smoke tests must be performed by the operator after deployment. The code, schema audit, focused tests, full tests, and production build are complete; the remaining production dependency is applying migrations 0008–0010, reloading the schema cache, and installing the rebuilt EA on the user’s terminal.
 
 
 ## Follow-up findings from the latest screenshots
 
-The `MIGRATION_REQUIRED_0008` status was caused by a server-to-Supabase RPC contract mismatch, not necessarily by an unapplied migration. Migrations 0004 and 0008 define the JSON parameter as `position_payload`, while the server wrapper sent the parameter under the name `position`. PostgREST therefore could not resolve the function signature and the error classifier correctly surfaced the failure as migration-related. The wrapper now sends `position_payload`, and `server/atomicOperations.test.ts` verifies the exact argument contract.
+The initial `MIGRATION_REQUIRED_0008` status was caused by a server-to-Supabase RPC contract mismatch: migrations 0004 and 0008 define the JSON parameter as `position_payload`, while the server wrapper sent `position`. The wrapper now sends `position_payload`, and `server/atomicOperations.test.ts` verifies the exact argument contract. The subsequent provider code 42601 exposed a second defect in the deployed RPC body: the `gj_trades` INSERT listed 28 target columns but only 27 values because `holdQuality` was omitted. Migrations 0004 and 0008 now include the missing value, and forward migration 0010 replaces the function for existing deployments.
 
 The first level chips were rendered inside a `<label>` field wrapper while containing interactive `<button>` elements. That invalid nested-interactive structure can produce inconsistent click behavior in browser layouts. Trade dialog fields now use semantic `<div role="group">` wrappers with accessible labels, preserving normal input styling while giving level buttons direct click targets. Regression coverage now explicitly clicks both `SBR/TJL1` and `RBS/TJL1` in the Edit Trade path.
 
-The follow-up release gate passed with **68 test files passed, 217 tests passed; 1 test file and 2 opt-in Supabase integration tests skipped**, plus TypeScript, schema audit, and production build success.
+The follow-up release gate passed with **68 test files passed, 219 tests passed; 1 test file and 2 opt-in Supabase integration tests skipped**, plus TypeScript, schema audit, and production build success. The migration-arity and PostgreSQL 42601 regression tests are included.
 
 
 ## Follow-up for `SYNC_UNAVAILABLE`

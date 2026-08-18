@@ -5,7 +5,7 @@ const root = process.cwd();
 const read = path => readFileSync(join(root, path), "utf8");
 const schema = read("drizzle/schema.ts");
 const migrationDir = join(root, "supabase/migrations");
-const migrations = readdirSync(migrationDir).filter(name => /^000[1-9]_.*\.sql$/.test(name)).sort();
+const migrations = readdirSync(migrationDir).filter(name => /^\d{4}_.*\.sql$/.test(name)).sort();
 const expectedMigrations = [
   "0001_source_gold_journal.sql",
   "0002_security_rls_and_storage.sql",
@@ -16,6 +16,7 @@ const expectedMigrations = [
   "0007_fix_trade_summary_and_accounts.sql",
   "0008_production_integrity_and_analysis.sql",
   "0009_ai_report_history.sql",
+  "0010_fix_mt5_rpc_trade_insert_arity.sql",
 ];
 const expectedNames = [
   "gj_accounts_id_user_unique",

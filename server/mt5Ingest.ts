@@ -54,7 +54,7 @@ function syncFailureDiagnostic(error: unknown) {
   const wrapped = error as SupabaseWrappedError;
   const providerCode = String(wrapped?.supabaseCode || "").toUpperCase();
   const text = errorText(error);
-  if (providerCode === "PGRST202" || /schema cache|could not find the function|function .*gj_sync_mt5_position|column .* does not exist|relation .* does not exist|migration|position_payload/.test(text)) return "Supabase RPC/schema mismatch; verify migration 0008 and reload the PostgREST schema.";
+  if (providerCode === "PGRST202" || providerCode === "42601" || /schema cache|could not find the function|function .*gj_sync_mt5_position|column .* does not exist|relation .* does not exist|migration|position_payload|syntax error|insert has more target columns/.test(text)) return "Supabase MT5 RPC migration is invalid or stale; apply migration 0010 after 0008/0009 and reload the PostgREST schema.";
   if (providerCode === "22P02" || providerCode === "22007" || /invalid input syntax|date\/time field|numeric value out of range/.test(text)) return "MT5 history contains an invalid timestamp or numeric value.";
   if (providerCode === "42501" || /permission denied|account unavailable|not authorized/.test(text)) return "Supabase rejected the MT5 account or service-role operation.";
   if (/supabase database is unavailable|server configuration is unavailable|fetch failed|econnreset|enotfound/.test(text)) return "The server could not reach Supabase or its server configuration is incomplete.";
@@ -68,7 +68,7 @@ function classifySyncFailure(error: unknown): Mt5FailureCode {
   const wrapped = error as SupabaseWrappedError;
   const providerCode = String(wrapped?.supabaseCode || "").toUpperCase();
   const message = errorText(error);
-  if (providerCode === "PGRST202" || /schema cache|could not find the function|function .*gj_sync_mt5_position|column .* does not exist|relation .* does not exist|migration|position_payload/.test(message)) return "MIGRATION_REQUIRED_0008";
+  if (providerCode === "PGRST202" || providerCode === "42601" || /schema cache|could not find the function|function .*gj_sync_mt5_position|column .* does not exist|relation .* does not exist|migration|position_payload|syntax error|insert has more target columns/.test(message)) return "MIGRATION_REQUIRED_0008";
   if (providerCode === "22P02" || providerCode === "22007" || /invalid input syntax|date\/time field|numeric value out of range/.test(message)) return "INVALID_SYNC_DATA";
   if (providerCode === "42501" || /permission denied|account unavailable|not authorized/.test(message)) return "SYNC_PERMISSION_DENIED";
   if (/deadlock|timeout|timed out|lock not available|temporarily unavailable/.test(message)) return "DATABASE_RETRYABLE";

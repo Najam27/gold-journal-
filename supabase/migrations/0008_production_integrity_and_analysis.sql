@@ -171,7 +171,7 @@ begin
       "emotionBefore", "emotionDuring", "emotionAfter", "mt5Ticket"
     ) values (
       target_user_id, target_account_id, (position_payload->>'tradeTime')::timestamptz, position_payload->>'session', position_payload->>'direction', position_payload->>'result',
-      '', '', '', '', '', '', '', '', '', '', null, (position_payload->>'riskUsd')::numeric, (position_payload->>'rewardUsd')::numeric,
+      '', '', '', '', '', '', '', '', '', '', '', null, (position_payload->>'riskUsd')::numeric, (position_payload->>'rewardUsd')::numeric,
       (position_payload->>'pnl')::numeric, effective_open_time, nullif(position_payload->>'closeTime', '')::timestamptz, '', '', '', '', target_ticket
     )
     on conflict ("accountId", "mt5Ticket") do update set

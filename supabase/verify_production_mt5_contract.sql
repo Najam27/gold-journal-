@@ -1,4 +1,4 @@
--- Read-only verification for Gold Journal MT5 migrations 0001-0009.
+-- Read-only verification for Gold Journal MT5 migrations 0001-0010.
 -- Run in the Supabase SQL Editor. This script does not modify data or schema.
 
 select
@@ -14,6 +14,8 @@ join pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public'
   and p.proname = 'gj_sync_mt5_position';
 
+-- The live definition should contain the 28-column Trade Log insert with the
+-- holdQuality placeholder supplied by migration 0010.
 select to_regclass('public.gj_accounts') as accounts_table,
        to_regclass('public.gj_mt5_connections') as connections_table,
        to_regclass('public.gj_mt5_live_positions') as live_positions_table,

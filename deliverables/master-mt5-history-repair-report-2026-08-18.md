@@ -36,17 +36,17 @@ The repair range from the production-hardening baseline through commit `784a812`
 | MT5 server path | `netlify/functions/api.ts`, `server/_core/index.ts`, `server/mt5Http.ts`, `server/mt5Ingest.ts`, `server/mt5Db.ts`, `server/atomicOperations.ts`, `server/goldRouter.ts`, `server/supabaseQuery.ts` |
 | Regression tests | `server/mt5EaContract.test.ts`, `server/mt5Ingest.test.ts`, `server/mt5Route.test.ts`, `server/atomicOperations.test.ts`, `server/supabaseQuery.test.ts`, `server/supabase.integration.test.ts` |
 | Tenant and analysis hardening | `drizzle/schema.ts`, `server/analysisDb.ts`, `server/analysisAi.ts`, `server/aiReportDb.ts`, `server/rateLimit.ts`, associated tests, and `shared/analysisEngine.ts` with tests |
-| Production SQL | `supabase/migrations/0008_production_integrity_and_analysis.sql`, `supabase/migrations/0009_ai_report_history.sql`, `supabase/verify_production_mt5_contract.sql` |
+| Production SQL | `supabase/migrations/0004_atomic_operations.sql`, `supabase/migrations/0008_production_integrity_and_analysis.sql`, `supabase/migrations/0009_ai_report_history.sql`, `supabase/migrations/0010_fix_mt5_rpc_trade_insert_arity.sql`, `supabase/verify_production_mt5_contract.sql` |
 | App resilience and safety | `client/src/pages/GoldJournal.tsx`, `client/src/lib/accountScope.ts`, account/analysis/Trade Dialog components and tests, removal of the unreferenced `client/public/__manus__/debug-collector.js`, and `scripts/schema-source-audit.mjs` |
 | Documentation | `README.md` and the audit reports under `deliverables/` |
 
 ### 3. Exact database migration(s) changed
 
-The production migration additions are `0008_production_integrity_and_analysis.sql` and `0009_ai_report_history.sql`. Migration 0008 adds analysis timestamps and excursion fields, composite owner-account constraints, the terminal/idempotent MT5 RPC, and the distributed rate limiter. Migration 0009 adds account-scoped AI report history with RLS and service-role-only table grants. The repository schema audit confirms migrations 0001 through 0009 are ordered and all expected production artifacts are present. [3] [4]
+The repair changes `0004_atomic_operations.sql` and `0008_production_integrity_and_analysis.sql` so fresh installations contain the correct `gj_trades` INSERT arity. Migration `0009_ai_report_history.sql` remains the AI history migration. New forward migration `0010_fix_mt5_rpc_trade_insert_arity.sql` replaces the already-deployed RPC body for projects that previously applied a defective 0008/0004 function. The repository schema audit now validates migrations 0001 through 0010. [3] [4]
 
 ### 4. Exact function(s) changed
 
-The MT5 synchronization chain changed in `syncMt5PositionAtomic` (`server/atomicOperations.ts`), `upsertMt5ClosedPosition` and related open-position helpers (`server/mt5Db.ts`), `processMt5Payload` and history/open-batch handling (`server/mt5Ingest.ts`), and the Supabase RPC `public.gj_sync_mt5_position` in migration 0008. Error metadata preservation was hardened in the Supabase adapter functions in `server/supabaseQuery.ts`. The Trade Log pre-sync path in `goldRouter.ts` now preserves the main journal response and returns actionable sync diagnostics instead of crashing the whole view.
+The MT5 synchronization chain changed in `syncMt5PositionAtomic` (`server/atomicOperations.ts`), `upsertMt5ClosedPosition` and related open-position helpers (`server/mt5Db.ts`), `processMt5Payload` and history/open-batch handling (`server/mt5Ingest.ts`), and the Supabase RPC `public.gj_sync_mt5_position` in migrations 0004, 0008, and 0010. Error metadata preservation was hardened in `server/supabaseQuery.ts`; PostgreSQL 42601 is now classified as a migration/RPC defect with migration 0010 guidance. The Trade Log pre-sync path in `goldRouter.ts` now preserves the main journal response and returns actionable sync diagnostics instead of crashing the whole view.
 
 ### 5. Exact reason account snapshot worked
 
@@ -54,7 +54,7 @@ The account snapshot and open-position summary use the EA’s summary/open-batch
 
 ### 6. Exact reason history failed
 
-History failed when the server invoked the PostgreSQL RPC with `position` instead of `position_payload`. The database function’s identity argument was `gj_sync_mt5_position(integer, integer, jsonb)` with the named parameter `position_payload`. PostgREST could not resolve the named-parameter call, so the history batch was rejected before the position could be committed. The v2.1 EA also corrects the independent data-quality issue in the old history reconstruction logic.
+History had two sequential blockers. The earlier server wrapper used `position` instead of `position_payload`, causing PGRST202 routine resolution failures. After that wrapper fix, the deployed RPC body still had a malformed `INSERT INTO public.gj_trades`: the target list contained 28 columns, but the VALUES list omitted the empty `holdQuality` expression before `patienceScore`. PostgreSQL therefore returned provider code 42601 when a CLOSED history record reached the Trade Log branch. The v2.1 EA also corrects the independent data-quality issue in the old history reconstruction logic.
 
 ### 7. Exact reason Trade Log remained empty
 
@@ -62,11 +62,11 @@ A Trade Log row is created only when the RPC receives a position with `status = 
 
 ### 8. Whether production Supabase schema was behind GitHub
 
-The repository proves that the required RPC and migrations exist in GitHub, but the available session did not directly query the user’s live Supabase project. Therefore, production schema lag is **not claimed as proven**. The observed PGRST202-style routine-resolution failure is consistent with an unapplied migration, stale PostgREST schema cache, or a named-argument mismatch; the server-side `position`/`position_payload` mismatch was proven and fixed in source. Run `supabase/verify_production_mt5_contract.sql` after applying migrations 0008 and 0009 to establish the live state.
+The repository proves that the required RPC and migrations exist in GitHub, but the available session did not directly query the user’s live Supabase project. Therefore, production schema lag is **not claimed as proven**. The observed PGRST202 routine-resolution failure led to the named-argument fix; the new observed provider code 42601 proves a second defect in the deployed RPC body. Production schema lag is still not claimed without a live SQL query. Apply migration 0010 after 0008/0009 and run `supabase/verify_production_mt5_contract.sql` to establish the live state.
 
 ### 9. Whether `gj_sync_mt5_position` existed
 
-In the repository, the function is defined in both the historical atomic migration 0004 and the production replacement migration 0008. Live existence was not directly queried from the operator’s Supabase project in this session. The verification SQL returns the function definition, identity arguments, security-definer status, and function configuration so the operator can confirm that the live database exposes the expected function.
+In the repository, the function is defined in 0004, replaced in 0008, and repaired forward in 0010. Live existence was not directly queried from the operator’s Supabase project in this session. The verification SQL returns the function definition, identity arguments, security-definer status, and function configuration so the operator can confirm that migration 0010 is active.
 
 ### 10. Whether the RPC signature matched
 
@@ -74,11 +74,11 @@ The intended and corrected signature is `public.gj_sync_mt5_position(integer, in
 
 ### 11. Exact PostgreSQL/Supabase error encountered
 
-The user-visible error was `History batch failed: SYNC_UNAVAILABLE`. The preserved provider metadata and failure classifier identify the underlying class as a PostgREST routine-resolution failure, specifically PGRST202, when the named RPC parameter did not match the deployed function contract. The repaired adapter preserves provider code, details, and hint instead of reducing every provider failure to a generic message. The client now distinguishes migration-required, invalid-payload, permission, retryable database, and unknown provider failures where the provider supplies enough metadata.
+The latest user-visible error was `History batch failed: SYNC_UNAVAILABLE: Supabase returned provider code 42601; inspect the Netlify function log for its redacted details.` PostgreSQL 42601 is the syntax-error class caused here by the 28-column/27-expression `gj_trades` INSERT in the deployed RPC body. Earlier history failures also included PGRST202 from the `position`/`position_payload` mismatch. The adapter preserves provider code, details, and hint; `server/mt5Ingest.ts` now classifies 42601 as a migration-specific failure and tells the operator to apply 0010.
 
 ### 12. Exact fix applied
 
-The exact RPC fix is changing the server call from `{ target_user_id, target_account_id, position }` to `{ target_user_id, target_account_id, position_payload }` in `server/atomicOperations.ts`. The open-batch Zod schema was also corrected so an `open_batch` is validated as a batch rather than inheriting single-position required fields. Writes are sequential per account to reduce row-lock contention, and Supabase errors are preserved through `server/supabaseQuery.ts` for classification and diagnostics. The fix is covered by focused tests and the full suite.
+The exact fixes are: (1) send `position_payload` from `syncMt5PositionAtomic`; (2) add the missing `holdQuality` empty expression to the 28-column Trade Log INSERT in 0004 and 0008; (3) add forward migration 0010 to replace the defective RPC in existing deployments; (4) classify provider code 42601 with actionable migration guidance; and (5) add arity regression tests in `server/schemaIntegrity.test.ts`. The open-batch Zod schema, sequential writes, Supabase metadata preservation, idempotency, ownership checks, and single authoritative RPC path remain intact.
 
 ### 13. MT5 EA changes
 
@@ -102,11 +102,11 @@ The server derives the target user from the authenticated/account-scoped connect
 
 ### 18. Tests added
 
-The new EA contract suite is `server/mt5EaContract.test.ts`; it covers entry-based direction, SL/TP preservation, commission/swap/fee-inclusive P&L source usage, position aggregation/bounded batching, empty history completion, and no-silent-discard behavior. The repair also expanded `server/mt5Ingest.test.ts`, `server/atomicOperations.test.ts`, `server/supabaseQuery.test.ts`, and `client/src/components/Mt5LiveView.test.tsx` for sequential writes, migration/provider diagnostics, exact RPC argument names, and the v2.1 UI contract.
+The new EA contract suite is `server/mt5EaContract.test.ts`; it covers entry-based direction, SL/TP preservation, commission/swap/fee-inclusive P&L source usage, position aggregation/bounded batching, empty history completion, and no-silent-discard behavior. `server/schemaIntegrity.test.ts` now parses the 0004/0008/0010 RPC INSERT lists and rejects column/value arity drift. `server/mt5Ingest.test.ts` covers provider code 42601 and migration 0010 guidance. Existing atomic, Supabase adapter, and MT5 Live UI tests continue to cover the earlier fixes.
 
 ### 19. Test results
 
-The full Vitest run completed with **68 test files passed, 1 opt-in integration file skipped; 217 tests passed, 2 opt-in Supabase integration tests skipped**. The skipped tests require live staging identifiers and were not falsely represented as production execution. The focused MT5/RPC/UI gate completed with **5 files passed and 32 tests passed**.
+The full Vitest run completed with **68 test files passed, 1 opt-in integration file skipped; 219 tests passed, 2 opt-in Supabase integration tests skipped**. The skipped tests require live staging identifiers and were not falsely represented as production execution. The focused MT5/RPC/schema/UI gate completed with **6 files passed and 39 tests passed**.
 
 ### 20. `pnpm check` result
 
@@ -126,11 +126,11 @@ The public Netlify site was checked read-only. The unauthenticated site shell at
 
 ### 24. Supabase production verification
 
-The live Supabase project was not directly queried because this task did not have an authenticated SQL Editor or project-level integration session. The repository-side schema audit passed: migrations 0001–0009 are ordered, expected names exist in the canonical schema and migration sources, and migrations 0008/0009 are present. The operator must apply/reconfirm 0008 and 0009, reload the PostgREST schema cache, and run `supabase/verify_production_mt5_contract.sql`. The required live result is `gj_sync_mt5_position(integer, integer, jsonb)` with `position_payload`, SECURITY DEFINER, and service-role execution only.
+The live Supabase project was not directly queried because this task did not have an authenticated SQL Editor or project-level integration session. The repository-side schema audit must now pass with migrations 0001–0010 ordered. The operator must apply/reconfirm 0008, 0009, and 0010, reload the PostgREST schema cache, and run `supabase/verify_production_mt5_contract.sql`. The required live result is `gj_sync_mt5_position(integer, integer, jsonb)` with `position_payload`, a 28-column/28-expression Trade Log INSERT, SECURITY DEFINER, and service-role execution only.
 
 ### 25. Exact remaining risks
 
-The remaining risks are operational, not untested source changes. First, migrations 0008 and 0009 may still need to be applied in the correct Supabase project, followed by a PostgREST schema reload. Second, the operator must compile the EA in MetaEditor, remove the old chart instance, attach v2.1, configure the endpoint/API key/broker offset, and leave `ConnectionId` blank unless intentionally using a real connection. Third, the authenticated end-to-end scenario—sign-in, active connection, history batch, Supabase write, Trade Log display, replay, correct direction/P&L, and account isolation—must be exercised with real user/account data. Finally, the large frontend chunk warning should be addressed in a separate performance change; it is not a synchronization correctness failure.
+The remaining risks are operational, not untested source changes. First, migrations 0008, 0009, and 0010 may still need to be applied in the correct Supabase project, followed by a PostgREST schema reload. Second, the operator must compile the EA in MetaEditor, remove the old chart instance, attach v2.1, configure the endpoint/API key/broker offset, and leave `ConnectionId` blank unless intentionally using a real connection. Third, the authenticated end-to-end scenario—sign-in, active connection, history batch, Supabase write, Trade Log display, replay, correct direction/P&L, and account isolation—must be exercised with real user/account data. Finally, the large frontend chunk warning should be addressed in a separate performance change; it is not a synchronization correctness failure.
 
 ## Operator runbook
 
@@ -138,12 +138,13 @@ The remaining risks are operational, not untested source changes. First, migrati
 |---:|---|---|
 | 1 | Apply `0008_production_integrity_and_analysis.sql` after 0001–0007. | MT5 RPC, composite ownership, analysis fields, and distributed limiter exist. |
 | 2 | Apply `0009_ai_report_history.sql`. | AI history tables exist with RLS and service-role-only grants. |
-| 3 | Reload Supabase PostgREST schema cache. | Named RPC calls resolve using the current signature. |
-| 4 | Run `supabase/verify_production_mt5_contract.sql`. | Function signature and constraints match the expected contract. |
-| 5 | Download and compile `GoldJournal_EA.mq5` v2.1 in MetaEditor. | MetaEditor compiles without errors; attach only the new EA instance. |
-| 6 | Configure endpoint, one-time API key, broker offset, and optional blank ConnectionId. | MT5 sends summary/open/history requests to `/api/mt5`. |
-| 7 | Retry history and replay the same batch. | One Trade Log row per ticket; no duplicates; CLOSED remains terminal. |
-| 8 | Verify two accounts and direction/P&L edge cases. | No cross-account visibility; BUY/SELL, SL/TP, timestamps, and fee-inclusive P&L are correct. |
+| 3 | Apply `0010_fix_mt5_rpc_trade_insert_arity.sql`. | The live RPC has 28 Trade Log target columns and 28 value expressions, including `holdQuality`. |
+| 4 | Reload Supabase PostgREST schema cache. | Named RPC calls resolve using the current signature. |
+| 5 | Run `supabase/verify_production_mt5_contract.sql`. | Function signature, 28/28 arity, and constraints match the expected contract. |
+| 6 | Download and compile `GoldJournal_EA.mq5` v2.1 in MetaEditor. | MetaEditor compiles without errors; attach only the new EA instance. |
+| 7 | Configure endpoint, one-time API key, broker offset, and optional blank ConnectionId. | MT5 sends summary/open/history requests to `/api/mt5`. |
+| 8 | Retry history and replay the same batch. | One Trade Log row per ticket; no duplicates; CLOSED remains terminal. |
+| 9 | Verify two accounts and direction/P&L edge cases. | No cross-account visibility; BUY/SELL, SL/TP, timestamps, and fee-inclusive P&L are correct. |
 
 ## References
 
