@@ -5,8 +5,8 @@ import { httpBatchLink, TRPCClientError } from "@trpc/client";
 import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 import App from "./App";
-import { supabase } from "./lib/supabase";
 import { queryClient } from "./lib/queryClient";
+import { getSupabaseAccessToken } from "./lib/authSession";
 import { fetchTrpcResponse } from "./lib/trpcFetch";
 import "./index.css";
 import "./uiux-system.css";
@@ -44,7 +44,7 @@ const trpcClient = trpc.createClient({
       url: "/api/trpc",
       transformer: superjson,
       async headers() {
-        const token = (await supabase?.auth.getSession())?.data.session?.access_token;
+        const token = await getSupabaseAccessToken();
         return token ? { Authorization: `Bearer ${token}` } : {};
       },
       fetch(input, init) {
