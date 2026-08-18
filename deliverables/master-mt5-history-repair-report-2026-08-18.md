@@ -2,7 +2,7 @@
 
 **Date:** 18 August 2026  
 **Repository:** [Najam27/gold-journal-](https://github.com/Najam27/gold-journal-)  
-**Release commit:** [`784a812`](https://github.com/Najam27/gold-journal-/commit/784a81272b97a617355ce6a2306568d5d610aff6)  
+**Release commit:** [`c7b8ee7`](https://github.com/Najam27/gold-journal-/commit/c7b8ee7)  
 **Scope:** Production-grade, idempotent, tenant-safe synchronization of closed MT5 positions into exactly one Gold Journal Trade Log entry per MT5 ticket.
 
 > **Release conclusion.** The repository-side repair is complete and pushed to `origin/main`. The MT5 path now remains server-mediated from EA to Netlify to Supabase RPC to the Trade Log. Automated checks pass, the public Netlify site serves the EA v2.1 asset, and the remaining production steps are applying/verifying Supabase migrations and compiling/attaching the EA in MetaEditor. An authenticated end-to-end MT5 smoke test was not claimed because it requires the operator’s live Supabase and MT5 sessions.
@@ -148,16 +148,18 @@ The remaining risks are operational, not untested source changes. First, migrati
 
 ## References
 
-[1]: https://github.com/Najam27/gold-journal-/commit/784a81272b97a617355ce6a2306568d5d610aff6 "EA v2.1 release commit"
+[1]: https://github.com/Najam27/gold-journal-/commit/c7b8ee7 "EA v2.1 release commit"
 
-[2]: https://github.com/Najam27/gold-journal-/blob/784a81272b97a617355ce6a2306568d5d610aff6/server/atomicOperations.ts "Atomic Supabase RPC wrapper"
+[2]: https://github.com/Najam27/gold-journal-/blob/c7b8ee7/server/atomicOperations.ts "Atomic Supabase RPC wrapper"
 
-[3]: https://github.com/Najam27/gold-journal-/blob/784a81272b97a617355ce6a2306568d5d610aff6/supabase/migrations/0008_production_integrity_and_analysis.sql "Production integrity and MT5 RPC migration"
+[3]: https://github.com/Najam27/gold-journal-/blob/c7b8ee7/supabase/migrations/0008_production_integrity_and_analysis.sql "Production integrity and MT5 RPC migration"
 
-[4]: https://github.com/Najam27/gold-journal-/blob/784a81272b97a617355ce6a2306568d5d610aff6/supabase/migrations/0009_ai_report_history.sql "AI report history migration"
+[4]: https://github.com/Najam27/gold-journal-/blob/c7b8ee7/supabase/migrations/0009_ai_report_history.sql "AI report history migration"
 
-[5]: https://github.com/Najam27/gold-journal-/blob/784a81272b97a617355ce6a2306568d5d610aff6/client/public/GoldJournal_EA.mq5 "Gold Journal EA v2.1 source"
+[8]: https://github.com/Najam27/gold-journal-/blob/c7b8ee7/supabase/migrations/0010_fix_mt5_rpc_trade_insert_arity.sql "Forward MT5 RPC arity repair migration"
 
-[6]: https://github.com/Najam27/gold-journal-/blob/784a81272b97a617355ce6a2306568d5d610aff6/server/mt5EaContract.test.ts "EA source-contract regression tests"
+[5]: https://github.com/Najam27/gold-journal-/blob/c7b8ee7/client/public/GoldJournal_EA.mq5 "Gold Journal EA v2.1 source"
+
+[6]: https://github.com/Najam27/gold-journal-/blob/c7b8ee7/server/mt5EaContract.test.ts "EA source-contract regression tests"
 
 [7]: https://topgjournal.netlify.app/ "Gold Journal public deployment"
