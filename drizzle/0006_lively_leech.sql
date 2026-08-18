@@ -1,1 +1,0 @@
-ALTER TABLE `gj_mt5_connections` ADD `brokerUtcOffsetMinutes` int DEFAULT 180 NOT NULL;

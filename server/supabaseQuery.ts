@@ -26,13 +26,19 @@ export const desc = (column: ColumnLike): Order => ({ column: columnName(column)
 export const asc = (column: ColumnLike): Order => ({ column: columnName(column), ascending: true });
 export const count = () => ({ kind: "count" as const });
 
+function renderFilterOperand(filter: Filter): string {
+  if (filter.kind === "and") return `and(${filter.parts.map(renderFilterOperand).join(",")})`;
+  if (filter.kind === "or") return `or(${filter.parts.map(renderFilterOperand).join(",")})`;
+  return renderPostgrestFilter(filter);
+}
+
 function applyFilter(query: any, filter?: Filter): any {
   if (!filter) return query;
   if (filter.kind === "eq") return filter.value === null ? query.is(filter.column, null) : query.eq(filter.column, postgrestValue(filter.value));
   if (filter.kind === "like") return query.ilike(filter.column, filter.value);
   if (filter.kind === "gte") return query.gte(filter.column, postgrestValue(filter.value));
   if (filter.kind === "and") return filter.parts.reduce((current, part) => applyFilter(current, part), query);
-  if (filter.kind === "or") return query.or(filter.parts.map(renderPostgrestFilter).join(","));
+  if (filter.kind === "or") return query.or(filter.parts.map(renderFilterOperand).join(","));
   return query;
 }
 
@@ -40,8 +46,8 @@ export function renderPostgrestFilter(filter: Filter): string {
   if (filter.kind === "eq") return filter.value === null ? `${filter.column}.is.null` : `${filter.column}.eq.${valueForFilter(filter.value)}`;
   if (filter.kind === "like") return `${filter.column}.ilike.${valueForFilter(filter.value)}`;
   if (filter.kind === "gte") return `${filter.column}.gte.${valueForFilter(filter.value)}`;
-  if (filter.kind === "and") return filter.parts.map(renderPostgrestFilter).join("&");
-  if (filter.kind === "or") return `or(${filter.parts.map(renderPostgrestFilter).join(",")})`;
+  if (filter.kind === "and") return `and(${filter.parts.map(renderFilterOperand).join(",")})`;
+  if (filter.kind === "or") return `or(${filter.parts.map(renderFilterOperand).join(",")})`;
   return "";
 }
 

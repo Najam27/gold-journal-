@@ -1,13 +1,31 @@
 -- Defense in depth: every account-scoped child must carry the same owner id as its account.
 -- Existing rows are not modified; constraint creation fails explicitly if legacy data is inconsistent.
 create unique index if not exists "gj_accounts_id_user_unique" on public.gj_accounts ("id", "userId");
-alter table public.gj_trades add constraint "gj_trades_account_owner_fk" foreign key ("accountId", "userId") references public.gj_accounts ("id", "userId") on delete cascade;
-alter table public.gj_cash_movements add constraint "gj_cash_account_owner_fk" foreign key ("accountId", "userId") references public.gj_accounts ("id", "userId") on delete cascade;
-alter table public.gj_goals add constraint "gj_goals_account_owner_fk" foreign key ("accountId", "userId") references public.gj_accounts ("id", "userId") on delete cascade;
-alter table public.gj_skipped_trades add constraint "gj_skipped_account_owner_fk" foreign key ("accountId", "userId") references public.gj_accounts ("id", "userId") on delete cascade;
-alter table public.gj_daily_plans add constraint "gj_daily_plan_account_owner_fk" foreign key ("accountId", "userId") references public.gj_accounts ("id", "userId") on delete cascade;
-alter table public.gj_notification_history add constraint "gj_notification_account_owner_fk" foreign key ("accountId", "userId") references public.gj_accounts ("id", "userId") on delete cascade;
-alter table public.gj_mt5_connections add constraint "gj_mt5_connection_account_owner_fk" foreign key ("accountId", "userId") references public.gj_accounts ("id", "userId") on delete cascade;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'gj_trades_account_owner_fk') then
+    alter table public.gj_trades add constraint "gj_trades_account_owner_fk" foreign key ("accountId", "userId") references public.gj_accounts ("id", "userId") on delete cascade;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'gj_cash_account_owner_fk') then
+    alter table public.gj_cash_movements add constraint "gj_cash_account_owner_fk" foreign key ("accountId", "userId") references public.gj_accounts ("id", "userId") on delete cascade;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'gj_goals_account_owner_fk') then
+    alter table public.gj_goals add constraint "gj_goals_account_owner_fk" foreign key ("accountId", "userId") references public.gj_accounts ("id", "userId") on delete cascade;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'gj_skipped_account_owner_fk') then
+    alter table public.gj_skipped_trades add constraint "gj_skipped_account_owner_fk" foreign key ("accountId", "userId") references public.gj_accounts ("id", "userId") on delete cascade;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'gj_daily_plan_account_owner_fk') then
+    alter table public.gj_daily_plans add constraint "gj_daily_plan_account_owner_fk" foreign key ("accountId", "userId") references public.gj_accounts ("id", "userId") on delete cascade;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'gj_notification_account_owner_fk') then
+    alter table public.gj_notification_history add constraint "gj_notification_account_owner_fk" foreign key ("accountId", "userId") references public.gj_accounts ("id", "userId") on delete cascade;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'gj_mt5_connection_account_owner_fk') then
+    alter table public.gj_mt5_connections add constraint "gj_mt5_connection_account_owner_fk" foreign key ("accountId", "userId") references public.gj_accounts ("id", "userId") on delete cascade;
+  end if;
+end;
+$$;
 
 create or replace function public.gj_account_trade_summary(
   target_user_id integer,
