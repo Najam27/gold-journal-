@@ -60,3 +60,12 @@ The build still reports a non-fatal bundle-size warning for the existing large f
 ## Remaining limitation
 
 The sandbox browser cannot authenticate into the user’s Supabase session, so final live account-specific smoke tests must be performed by the operator after deployment. The code, schema audit, focused tests, full tests, and production build are complete; the remaining production dependency is applying the database migrations and installing the rebuilt EA on the user’s terminal.
+
+
+## Follow-up findings from the latest screenshots
+
+The `MIGRATION_REQUIRED_0008` status was caused by a server-to-Supabase RPC contract mismatch, not necessarily by an unapplied migration. Migrations 0004 and 0008 define the JSON parameter as `position_payload`, while the server wrapper sent the parameter under the name `position`. PostgREST therefore could not resolve the function signature and the error classifier correctly surfaced the failure as migration-related. The wrapper now sends `position_payload`, and `server/atomicOperations.test.ts` verifies the exact argument contract.
+
+The first level chips were rendered inside a `<label>` field wrapper while containing interactive `<button>` elements. That invalid nested-interactive structure can produce inconsistent click behavior in browser layouts. Trade dialog fields now use semantic `<div role="group">` wrappers with accessible labels, preserving normal input styling while giving level buttons direct click targets. Regression coverage now explicitly clicks both `SBR/TJL1` and `RBS/TJL1` in the Edit Trade path.
+
+The follow-up release gate passed with **67 test files passed, 210 tests passed; 1 test file and 2 opt-in Supabase integration tests skipped**, plus TypeScript, schema audit, and production build success.

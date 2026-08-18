@@ -27,6 +27,13 @@ describe("atomic Supabase operation wrappers", () => {
     expect(rpc).toHaveBeenCalledWith("gj_record_goal_alerts", { target_user_id: 7, target_account_id: 12, alerts });
   });
 
+  it("uses the migration-defined position_payload RPC argument for MT5 sync", async () => {
+    rpc.mockResolvedValue({ data: true, error: null });
+    const position = { ticket: "42", status: "CLOSED" };
+    await expect(syncMt5PositionAtomic(7, 12, position)).resolves.toBe(true);
+    expect(rpc).toHaveBeenCalledWith("gj_sync_mt5_position", { target_user_id: 7, target_account_id: 12, position_payload: position });
+  });
+
   it("fails closed when the atomic function reports an error", async () => {
     rpc.mockResolvedValue({ data: null, error: { message: "migration missing" } });
     await expect(syncMt5PositionAtomic(7, 12, { ticket: "42" })).rejects.toThrow("atomic operation sync MT5 position failed");

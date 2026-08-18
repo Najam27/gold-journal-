@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ add: vi.fn(), invalidate: vi.fn() }));
@@ -53,6 +53,16 @@ describe("TradeDialogWithCustomOptions", () => {
     expect(setForm).toHaveBeenCalledWith(expect.objectContaining({ marketCondition: "Trending" }));
   });
 
+  it("selects the first two level chips by explicit click", () => {
+    const form = { tradeDate: "2026-08-12", session: "London", direction: "BUY", result: "WIN", level: "", timeframe: "", setupQuality: "", executionType: "", marketCondition: "", confirmationType: "", mistake: "", patienceScore: "", risk: "", reward: "", pnl: "", notes: "", emotionBefore: "", emotionDuring: "", emotionAfter: "" };
+    const setForm = vi.fn();
+    render(<TradeDialogWithCustomOptions open setOpen={vi.fn()} form={form} setForm={setForm} editing={{ id: 1 }} onSave={vi.fn()} pending={false} screenshot={undefined} setScreenshot={vi.fn()} progress={0} />);
+    fireEvent.click(screen.getByRole("button", { name: "SBR/TJL1" }));
+    expect(setForm).toHaveBeenCalledWith(expect.objectContaining({ level: "SBR/TJL1" }));
+    fireEvent.click(screen.getByRole("button", { name: "RBS/TJL1" }));
+    expect(setForm).toHaveBeenCalledWith(expect.objectContaining({ level: "RBS/TJL1" }));
+  });
+
   it("does not select a chip on hover; only an explicit click changes the form", () => {
     const form = { tradeDate: "2026-08-12", session: "London", direction: "BUY", result: "WIN", level: "", timeframe: "", setupQuality: "", executionType: "", marketCondition: "", confirmationType: "", mistake: "", patienceScore: "", risk: "", reward: "", pnl: "", notes: "", emotionBefore: "", emotionDuring: "", emotionAfter: "" };
     const setForm = vi.fn();
@@ -69,8 +79,8 @@ describe("TradeDialogWithCustomOptions", () => {
     const form = { tradeDate: "2026-08-12", session: "London", direction: "", result: "", level: "", timeframe: "", setupQuality: "", executionType: "", marketCondition: "", confirmationType: "", patienceScore: "", risk: "", reward: "", pnl: "", notes: "", emotionBefore: "", emotionDuring: "", emotionAfter: "" };
     const setForm = vi.fn();
     render(<TradeDialogWithCustomOptions open setOpen={vi.fn()} form={form} setForm={setForm} editing={undefined} onSave={vi.fn()} pending={false} screenshot={undefined} setScreenshot={vi.fn()} progress={0} />);
-    const direction = screen.getByLabelText("Direction", { exact: true }) as HTMLSelectElement;
-    const result = screen.getByLabelText("Result", { exact: true }) as HTMLSelectElement;
+    const direction = within(screen.getByRole("group", { name: "Direction" })).getByRole("combobox") as HTMLSelectElement;
+    const result = within(screen.getByRole("group", { name: "Result" })).getByRole("combobox") as HTMLSelectElement;
     expect(direction.value).toBe("");
     expect(result.value).toBe("");
     expect(screen.getByRole("option", { name: "Select direction" })).toHaveProperty("disabled", true);

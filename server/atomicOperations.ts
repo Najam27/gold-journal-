@@ -41,7 +41,7 @@ export async function syncMt5PositionAtomic(userId: number, accountId: number, p
   const { data, error } = await getSupabaseAdmin().rpc("gj_sync_mt5_position", {
     target_user_id: userId,
     target_account_id: accountId,
-    position,
+    position_payload: position,
   });
   if (error) throwRpcError("sync MT5 position", error);
   return data === true;

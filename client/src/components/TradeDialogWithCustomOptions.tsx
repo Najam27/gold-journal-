@@ -9,7 +9,7 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
 function Field({ label, children, className = "" }: { label: string; children: React.ReactNode; className?: string }) {
-  return <label className={`field ${className}`}><span>{label}</span>{children}</label>;
+  return <div className={`field ${className}`} role="group" aria-label={label}><span>{label}</span>{children}</div>;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
