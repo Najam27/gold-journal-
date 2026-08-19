@@ -8,6 +8,7 @@
   --gj-chart-grid: color-mix(in srgb, var(--border) 76%, transparent);
   --gj-chart-axis: var(--muted-foreground);
   --gj-chart-tooltip: var(--popover);
+  --gj-control-hover: color-mix(in srgb, var(--gj-control-active) 88%, var(--gj-gold) 12%);
   --gj-fab-right: max(0.75rem, env(safe-area-inset-right));
   --gj-fab-bottom: max(0.75rem, env(safe-area-inset-bottom));
 }
@@ -93,6 +94,9 @@ a:focus-visible {
 .toolbar select,
 .field select,
 .mt5-settings select,
+.inline-form select,
+.journal-value-control select,
+.analysis-filter-grid select,
 .field input,
 .field textarea,
 .stacked-fields input,
@@ -107,13 +111,18 @@ a:focus-visible {
   background: var(--gj-control);
   color: var(--gj-text);
 }
+.gj-shell select { color-scheme: light; }
+.dark .gj-shell select { color-scheme: dark; }
+.gj-shell select option { background: var(--gj-control-option); color: var(--gj-control-text); }
+.gj-shell select option:checked { background: var(--gj-control-active); color: var(--gj-control-text); }
+.gj-shell select:focus { border-color: var(--ring); box-shadow: 0 0 0 3px var(--gj-control-focus); }
 .field,
 .mt5-settings label { color: var(--gj-subtext); }
 .field input::placeholder,
 .field textarea::placeholder,
 .stacked-fields input::placeholder,
 .stacked-fields textarea::placeholder,
-.journal-value-add input::placeholder { color: var(--gj-dim); opacity: 1; }
+.journal-value-add input::placeholder { color: var(--gj-control-placeholder); opacity: 1; }
 .toolbar select:focus,
 .field select:focus,
 .field input:focus,

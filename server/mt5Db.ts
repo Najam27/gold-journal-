@@ -141,12 +141,12 @@ export async function recordMt5HistoryFailure(connectionId: number, message: str
 
 type LiveBase = { ticket: bigint; symbol: string; direction: "BUY" | "SELL"; lots: number; openPrice: number; slPrice: number | null; tpPrice: number | null; riskUsd: number; rewardUsd: number; rrRatio: number; openTime: Date };
 
-type SyncedMt5Position = LiveBase & { pnl: number; result: "WIN" | "LOSS" | "BREAK_EVEN" | "OPEN"; tradeTime: Date };
+type SyncedMt5Position = LiveBase & { pnl: number; result: "WIN" | "LOSS" | "BREAK_EVEN" | "OPEN"; tradeTime: Date; closeTime?: Date | null };
 
 async function upsertTradeRecord(db: any, record: any) {
   const query = db.insert(trades).values(record) as any;
-  if (typeof query.onConflictDoUpdate === "function") return query.onConflictDoUpdate({ target: [trades.accountId, trades.mt5Ticket], set: { tradeDate: record.tradeDate, session: record.session, direction: record.direction, result: record.result, risk: record.risk, reward: record.reward, pnl: record.pnl } });
-  return query.onDuplicateKeyUpdate({ set: { tradeDate: record.tradeDate, session: record.session, direction: record.direction, result: record.result, risk: record.risk, reward: record.reward, pnl: record.pnl } });
+  if (typeof query.onConflictDoUpdate === "function") return query.onConflictDoUpdate({ target: [trades.accountId, trades.mt5Ticket], set: { tradeDate: record.tradeDate, session: record.session, direction: record.direction, result: record.result, risk: record.risk, reward: record.reward, pnl: record.pnl, openTime: record.openTime, closeTime: record.closeTime } });
+  return query.onDuplicateKeyUpdate({ set: { tradeDate: record.tradeDate, session: record.session, direction: record.direction, result: record.result, risk: record.risk, reward: record.reward, pnl: record.pnl, openTime: record.openTime, closeTime: record.closeTime } });
 }
 
 async function syncMt5PositionToTradeLog(userId: number, accountId: number, position: SyncedMt5Position, database?: any) {
@@ -173,6 +173,8 @@ async function syncMt5PositionToTradeLog(userId: number, accountId: number, posi
     risk: position.riskUsd.toFixed(2),
     reward: position.rewardUsd.toFixed(2),
     pnl: position.pnl.toFixed(2),
+    openTime: position.openTime,
+    closeTime: position.closeTime ?? null,
     notes: "",
     emotionBefore: "",
     emotionDuring: "",
@@ -185,7 +187,7 @@ async function syncMt5PositionToTradeLog(userId: number, accountId: number, posi
 export async function syncStoredMt5PositionsToTradeLog(userId: number, accountId: number) {
   const db = await requireDb();
   const [positions, resetAt] = await Promise.all([
-    db.select().from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, accountId), eq(mt5LivePositions.status, "CLOSED"))).orderBy(desc(mt5LivePositions.updatedAt)).limit(500),
+    db.select().from(mt5LivePositions).where(eq(mt5LivePositions.accountId, accountId)).orderBy(desc(mt5LivePositions.updatedAt)).limit(500),
     getJournalDataResetAt(db, accountId),
   ]);
   let synchronized = 0;
@@ -203,9 +205,10 @@ export async function syncStoredMt5PositionsToTradeLog(userId: number, accountId
       rewardUsd: Number(position.rewardUsd),
       rrRatio: Number(position.rrRatio),
       openTime: position.openTime,
-      pnl: Number(position.realizedPnl),
-      result: ((position.result as "WIN" | "LOSS" | "BREAK_EVEN" | null) ?? "BREAK_EVEN"),
-      tradeTime: position.closeTime ?? position.openTime,
+      pnl: position.status === "OPEN" ? Number(position.floatingPnl) : Number(position.realizedPnl),
+      result: position.status === "OPEN" ? "OPEN" : ((position.result as "WIN" | "LOSS" | "BREAK_EVEN" | null) ?? "BREAK_EVEN"),
+      tradeTime: position.status === "OPEN" ? position.openTime : (position.closeTime ?? position.openTime),
+      closeTime: position.status === "OPEN" ? null : position.closeTime,
     });
     synchronized += 1;
   }

@@ -26,7 +26,11 @@ describe("ThemeToggle", () => {
     expect(styles).toMatch(/\.dark\s*\{[\s\S]*?--gj-shell:\s*#10141a[\s\S]*?--gj-text:\s*#eef1f5/);
     expect(styles).toMatch(/:root\s*\{[\s\S]*?--profit:[\s\S]*?--danger:/);
     expect(styles).toMatch(/\.dark\s*\{[\s\S]*?--profit:[\s\S]*?--danger:/);
+    expect(styles).toMatch(/:root\s*\{[\s\S]*?--gj-control-active:[\s\S]*?--gj-control-focus:/);
+    expect(styles).toMatch(/\.dark\s*\{[\s\S]*?--gj-control-active:[\s\S]*?--gj-control-focus:/);
     expect(systemStyles).toMatch(/--gj-chart-grid:[\s\S]*?--gj-fab-bottom:/);
+    expect(systemStyles).toContain(".gj-shell select option");
+    expect(systemStyles).toContain("var(--gj-control-option)");
     expect(systemStyles).toContain("@media (prefers-reduced-motion: reduce)");
 
     render(<ThemeProvider defaultTheme="dark" switchable><ThemeToggle /></ThemeProvider>);

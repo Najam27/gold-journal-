@@ -53,7 +53,12 @@ describe("MT5 position lifecycle", () => {
   it("finalizes one OPEN record to CLOSED, preserves manual journal context, and ignores delayed OPEN retries", async () => {
     await upsertMt5OpenPosition(7, 12, open());
     const journal = store.journal.get(key(12, 1001n));
+    expect(journal).toMatchObject({ result: "OPEN", pnl: "1.00" });
     journal.notes = "Trader context remains private and unchanged";
+
+    await upsertMt5OpenPosition(7, 12, { ...open(), floatingPnl: 4.5 });
+    expect(store.journal).toHaveLength(1);
+    expect(store.journal.get(key(12, 1001n))).toMatchObject({ result: "OPEN", pnl: "4.50" });
 
     await upsertMt5ClosedPosition(7, 12, close());
     await upsertMt5OpenPosition(7, 12, { ...open(), floatingPnl: 99 });
@@ -61,7 +66,7 @@ describe("MT5 position lifecycle", () => {
     expect(store.positions).toHaveLength(1);
     expect(store.positions.get(key(12, 1001n))).toMatchObject({ status: "CLOSED", realizedPnl: "10.00", openTime: open().openTime });
     expect(store.journal.get(key(12, 1001n))).toMatchObject({ result: "WIN", pnl: "10.00", notes: "Trader context remains private and unchanged" });
-    expect(store.atomicCalls).toBe(3);
+    expect(store.atomicCalls).toBe(4);
   });
 
   it("treats repeated closes as idempotent without altering the finalized journal result", async () => {
@@ -72,6 +77,16 @@ describe("MT5 position lifecycle", () => {
     expect(store.positions).toHaveLength(1);
     expect(store.positions.get(key(12, 1001n))).toMatchObject({ status: "CLOSED", realizedPnl: "10.00" });
     expect(store.journal).toHaveLength(1);
+  });
+
+  it("keeps the same MT5 ticket independent across separate journal accounts", async () => {
+    await upsertMt5OpenPosition(7, 12, open(1001n));
+    await upsertMt5OpenPosition(7, 13, open(1001n));
+
+    expect(store.positions).toHaveLength(2);
+    expect(store.journal).toHaveLength(2);
+    expect(store.journal.get(key(12, 1001n))).toMatchObject({ result: "OPEN", pnl: "1.00" });
+    expect(store.journal.get(key(13, 1001n))).toMatchObject({ result: "OPEN", pnl: "1.00" });
   });
 
   it("ignores pre-reset position events while retaining a terminal close that occurs after a clear", () => {
