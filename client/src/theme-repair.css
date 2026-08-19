@@ -1,0 +1,257 @@
+/*
+ * Last-resort semantic repair layer for legacy Gold Journal UI. It deliberately
+ * contains presentation only: no state, data, MT5, or trading-rule behavior.
+ * Loaded after all earlier styles so light and dark use one consistent contract.
+ */
+
+/* Shared cards and nested widgets must use calm layered surfaces in either theme. */
+.goal-card,
+.account-list button,
+.manager-account-list button,
+.notification-settings,
+.notification-history > button,
+.pdf-range-mode button,
+.pdf-selection-summary,
+.mt5-connection-card,
+.mt5-position-card,
+.mt5-account-metric,
+.mt5-empty,
+.mt5-secret-row,
+.mt5-inline-copy,
+.mt5-live-strip article {
+  border-color: var(--gj-line);
+  background: var(--gj-panel-2);
+  color: var(--gj-text);
+  box-shadow: none;
+}
+
+.goal-card,
+.mt5-connection-card,
+.mt5-position-card {
+  background: var(--gj-panel);
+  box-shadow: 0 10px 26px var(--gj-shadow);
+}
+
+.goal-card-head p,
+.goal-value span,
+.mt5-connection-card small,
+.mt5-position-card footer,
+.mt5-no-closed,
+.mt5-empty p,
+.mt5-secret-row > span,
+.mt5-account-metric > span,
+.mt5-account-metric small,
+.mt5-account-detail,
+.mt5-history-status,
+.mt5-table th,
+.mt5-table td,
+.notification-history-head,
+.notification-history > button p,
+.notification-history > button small,
+.manager-danger p,
+.manager-confirm p,
+.table-pagination {
+  color: var(--gj-subtext);
+}
+
+.goal-card-head strong,
+.goal-value b,
+.mt5-connection-card h4,
+.mt5-position-card h4,
+.mt5-position-card header strong,
+.mt5-metrics b,
+.mt5-table td,
+.mt5-secret-row code,
+.mt5-inline-copy code,
+.mt5-guide-toggle,
+.mt5-guide strong,
+.mt5-empty h3 {
+  color: var(--gj-text);
+}
+
+/* Inputs and native selects get a visible, tokenized active and option state. */
+.gj-shell select,
+.mt5-add-form select,
+.mt5-offset-field,
+.option-create select,
+.option-page-create select,
+.pdf-date-range input,
+.manager-create-row input,
+.manager-rename-row input {
+  border-color: var(--gj-control-border);
+  background: var(--gj-control);
+  color: var(--gj-control-text);
+  color-scheme: light;
+}
+
+.dark .gj-shell select,
+.dark .mt5-add-form select,
+.dark .mt5-offset-field,
+.dark .option-create select,
+.dark .option-page-create select,
+.dark .pdf-date-range input,
+.dark .manager-create-row input,
+.dark .manager-rename-row input {
+  color-scheme: dark;
+}
+
+.gj-shell select option,
+.mt5-add-form select option,
+.option-create select option,
+.option-page-create select option {
+  background: var(--gj-control-option);
+  color: var(--gj-control-text);
+}
+
+.gj-shell select option:checked,
+.mt5-add-form select option:checked,
+.option-create select option:checked,
+.option-page-create select option:checked {
+  background: var(--gj-control-active);
+  color: var(--gj-control-text);
+}
+
+/* Hover, current, and selected states are restrained instead of graphite- or neon-only. */
+.account-list button:hover,
+.manager-account-list button:hover,
+.notification-history > button:hover,
+.pdf-range-mode button:hover,
+.pill-options button:hover,
+.mini-day-grid button:hover,
+.option-groups label:hover,
+.option-pills label:hover {
+  border-color: color-mix(in srgb, var(--gj-gold) 38%, var(--gj-line));
+  background: var(--gj-control-hover);
+  color: var(--gj-text);
+}
+
+.account-list button.current,
+.manager-account-list button.current,
+.pdf-range-mode button.active,
+.pill-options button.selected,
+.mini-day-grid button.selected,
+.option-groups label:has(input:checked),
+.option-pills label:has(input:checked) {
+  border-color: color-mix(in srgb, var(--gj-gold) 58%, var(--gj-line));
+  background: color-mix(in srgb, var(--gj-gold) 13%, var(--gj-control));
+  color: var(--gj-gold);
+}
+
+.goal-status,
+.mt5-sync-indicator,
+.mt5-live-dot,
+.mt5-metrics span,
+.side-badge,
+.result-badge {
+  background: color-mix(in srgb, var(--gj-dim) 10%, var(--gj-panel-2));
+  color: var(--gj-subtext);
+}
+
+.goal-card.met,
+.professional-goal-card.met,
+.professional-goal-card.safe,
+.mt5-position-card:not(.loss) {
+  border-color: color-mix(in srgb, var(--profit) 46%, var(--gj-line));
+}
+
+.goal-card.breached,
+.professional-goal-card.breached,
+.mt5-position-card.loss {
+  border-color: color-mix(in srgb, var(--loss) 46%, var(--gj-line));
+  background: color-mix(in srgb, var(--loss) 6%, var(--gj-panel));
+}
+
+.goal-card.at.risk,
+.professional-goal-card.at_risk {
+  border-color: color-mix(in srgb, var(--warning) 46%, var(--gj-line));
+}
+
+.goal-status.met,
+.professional-goal-card.met .professional-goal-status,
+.professional-goal-card.safe .professional-goal-status,
+.mt5-status.live,
+.mt5-live-dot,
+.mt5-journaled {
+  background: color-mix(in srgb, var(--profit) 12%, var(--gj-panel-2));
+  color: var(--profit);
+}
+
+.goal-status.breached,
+.professional-goal-card.breached .professional-goal-status,
+.mt5-status.offline {
+  background: color-mix(in srgb, var(--loss) 12%, var(--gj-panel-2));
+  color: var(--loss);
+}
+
+.goal-status.at.risk,
+.professional-goal-card.at_risk .professional-goal-status,
+.mt5-status.idle {
+  background: color-mix(in srgb, var(--warning) 12%, var(--gj-panel-2));
+  color: var(--warning);
+}
+
+.mt5-status.live i,
+.mt5-live-dot i { background: var(--profit); }
+.mt5-status.offline i { background: var(--loss); }
+.mt5-status.idle i { background: var(--warning); }
+.mt5-position-card { border-left-color: var(--profit); }
+.mt5-position-card.loss { border-left-color: var(--loss); }
+.mt5-account-metric.gold strong { color: var(--gj-gold); }
+.mt5-account-metric.profit strong { color: var(--profit); }
+.mt5-account-metric.loss strong,
+.text-danger { color: var(--loss); }
+
+/* Fixed widgets, login readouts, and dialogs must not retain dark-only graphite surfaces. */
+.pwa-update-banner,
+.account-rename-fab,
+.mt5-import-fab,
+.options-fab,
+.notification-fab,
+.sync-chip,
+.icon-button,
+.theme-toggle {
+  border-color: var(--gj-line);
+  background: var(--gj-popover);
+  color: var(--gj-text);
+  box-shadow: 0 10px 26px var(--gj-shadow);
+}
+
+.pwa-update-banner > svg,
+.mt5-import-fab,
+.options-fab:hover,
+.account-rename-fab:hover,
+.notification-fab:hover,
+.sync-chip svg,
+.icon-button:hover {
+  color: var(--gj-gold);
+}
+
+.login-lockup span,
+.login-card > .eyebrow { color: var(--gj-gold-text); }
+.login-lockup strong { color: var(--gj-text); }
+.instrument-readout { border-color: var(--gj-line); background: var(--gj-control); }
+.instrument-readout span { border-color: var(--gj-line); color: var(--gj-subtext); }
+.instrument-readout span:first-child { color: var(--gj-gold); }
+
+.manager-danger,
+.manager-confirm { border-color: color-mix(in srgb, var(--loss) 40%, var(--gj-line)); background: color-mix(in srgb, var(--loss) 8%, var(--gj-panel)); }
+.manager-danger strong,
+.manager-confirm strong { color: var(--loss); }
+.mt5-security-note { background: color-mix(in srgb, var(--profit) 9%, var(--gj-panel-2)); color: var(--profit); }
+.mt5-security-note svg { color: var(--profit); }
+
+@media (hover: hover) and (pointer: fine) {
+  .mt5-connection-card:hover,
+  .mt5-position-card:hover,
+  .goal-card:hover,
+  .account-list button:hover,
+  .manager-account-list button:hover { border-color: color-mix(in srgb, var(--gj-gold) 42%, var(--gj-line)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mt5-connection-card,
+  .mt5-position-card,
+  .goal-card,
+  .account-list button,
+  .manager-account-list button { transition: none; }
+}

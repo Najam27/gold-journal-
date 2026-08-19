@@ -10,6 +10,7 @@ import { getSupabaseAccessToken } from "./lib/authSession";
 import { fetchTrpcResponse } from "./lib/trpcFetch";
 import "./index.css";
 import "./uiux-system.css";
+import "./theme-repair.css";
 
 const redirectToLoginIfUnauthorized = (error: unknown) => {
   if (!(error instanceof TRPCClientError)) return;

@@ -80,6 +80,15 @@
   --gj-control-option: #ffffff;
   --gj-control-placeholder: #67788a;
   --gj-control-focus: rgba(165, 108, 19, .22);
+  --gj-popover: var(--popover);
+  --gj-subtle: var(--gj-panel-2);
+  --gj-muted: var(--gj-subtext);
+  --gj-border: var(--gj-line);
+  --gj-shadow-sm: 0 10px 26px var(--gj-shadow);
+  --gj-success: var(--success);
+  --gj-danger: var(--danger);
+  --gj-mono: "DM Mono", monospace;
+  --gj-ui: "Inter", sans-serif;
   --gj-text: #15202b;
   --gj-subtext: #4e5f70;
   --gj-dim: #67788a;
