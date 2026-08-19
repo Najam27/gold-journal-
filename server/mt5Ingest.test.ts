@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ getActive: vi.fn(), touch: vi.fn(), open: vi.fn(), close: vi.fn(), summary: vi.fn(), completeHistory: vi.fn(), historyAttempt: vi.fn(), historyAccepted: vi.fn(), historyFailure: vi.fn() }));
-vi.mock("./mt5Db", () => ({ getActiveMt5Connection: mocks.getActive, touchMt5Connection: mocks.touch, upsertMt5OpenPosition: mocks.open, upsertMt5ClosedPosition: mocks.close, updateMt5AccountSummary: mocks.summary, completeMt5HistorySync: mocks.completeHistory, recordMt5HistoryAttempt: mocks.historyAttempt, recordMt5HistoryAccepted: mocks.historyAccepted, recordMt5HistoryFailure: mocks.historyFailure }));
+const mocks = vi.hoisted(() => ({ getActive: vi.fn(), touch: vi.fn(), open: vi.fn(), close: vi.fn(), closeBatch: vi.fn(), summary: vi.fn(), completeHistory: vi.fn(), historyAttempt: vi.fn(), historyAccepted: vi.fn(), historyFailure: vi.fn() }));
+vi.mock("./mt5Db", () => ({ getActiveMt5Connection: mocks.getActive, touchMt5Connection: mocks.touch, upsertMt5OpenPosition: mocks.open, upsertMt5ClosedPosition: mocks.close, upsertMt5ClosedPositionBatch: mocks.closeBatch, updateMt5AccountSummary: mocks.summary, completeMt5HistorySync: mocks.completeHistory, recordMt5HistoryAttempt: mocks.historyAttempt, recordMt5HistoryAccepted: mocks.historyAccepted, recordMt5HistoryFailure: mocks.historyFailure }));
 
 import { mt5RateLimitTestHooks, processMt5Payload } from "./mt5Ingest";
 
@@ -16,6 +16,7 @@ describe("MT5 EA ingest", () => {
     mocks.touch.mockResolvedValue(undefined);
     mocks.open.mockResolvedValue(undefined);
     mocks.close.mockResolvedValue(undefined);
+    mocks.closeBatch.mockResolvedValue(0);
     mocks.summary.mockResolvedValue(undefined);
     mocks.completeHistory.mockResolvedValue(undefined);
     mocks.historyAttempt.mockResolvedValue(undefined);
@@ -73,36 +74,35 @@ describe("MT5 EA ingest", () => {
     const { floating_pnl, api_key: _nestedApiKeyMustBeAbsent, ...position } = openPayload(key("history"));
     const closed = { ...position, close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00" };
     await expect(processMt5Payload({ event: "history_batch", api_key: key("history"), positions: [closed], complete: true })).resolves.toMatchObject({ status: 200, body: { ok: true, event: "history_batch", synced: 1, complete: true, compatible: false } });
-    expect(mocks.close).toHaveBeenCalledWith(77, 12, expect.objectContaining({ ticket: 123456789n, result: "WIN" }));
+    expect(mocks.closeBatch).toHaveBeenCalledWith(77, 12, [expect.objectContaining({ ticket: 123456789n, result: "WIN" })]);
     expect(mocks.historyAttempt).toHaveBeenCalledWith(44, 1);
     expect(mocks.historyAccepted).toHaveBeenCalledWith(44, 1, true);
     expect(mocks.completeHistory).toHaveBeenCalledWith(44, 12);
   });
 
-  it("persists a history batch sequentially to avoid account-row lock contention", async () => {
-    const order: string[] = [];
-    mocks.close.mockImplementation(async (_userId: number, _accountId: number, position: { ticket: bigint }) => { order.push(position.ticket.toString()); });
+  it("persists a history batch in one account-scoped atomic operation", async () => {
     const first = { ...openPayload(key("history-seq")), ticket: "1001", close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00" };
     const second = { ...first, ticket: "1002" };
     await expect(processMt5Payload({ event: "history_batch", api_key: key("history-seq"), positions: [first, second], complete: true })).resolves.toMatchObject({ status: 200, body: { synced: 2 } });
-    expect(order).toEqual(["1001", "1002"]);
+    expect(mocks.closeBatch).toHaveBeenCalledTimes(1);
+    expect(mocks.closeBatch).toHaveBeenCalledWith(77, 12, [expect.objectContaining({ ticket: 1001n }), expect.objectContaining({ ticket: 1002n })]);
   });
 
   it("records a migration-specific history failure when the sync RPC is unavailable", async () => {
-    mocks.close.mockRejectedValue(new Error("column openTime does not exist"));
+    mocks.closeBatch.mockRejectedValue(new Error("column openTime does not exist"));
     await expect(processMt5Payload({ event: "history_batch", api_key: key("migration"), positions: [{ ...openPayload(key("migration")), close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00" }], complete: false })).rejects.toThrow("column openTime does not exist");
     expect(mocks.historyFailure).toHaveBeenCalledWith(44, expect.stringContaining("MIGRATION_REQUIRED_0008"));
   });
 
   it("classifies PostgreSQL syntax errors as migration-specific history failures", async () => {
-    mocks.close.mockRejectedValue(Object.assign(new Error("syntax error in gj_sync_mt5_position"), { supabaseCode: "42601" }));
+    mocks.closeBatch.mockRejectedValue(Object.assign(new Error("syntax error in gj_sync_mt5_position"), { supabaseCode: "42601" }));
     await expect(processMt5Payload({ event: "history_batch", api_key: key("syntax-provider"), positions: [{ ...openPayload(key("syntax-provider")), close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00" }], complete: false })).rejects.toThrow("syntax error in gj_sync_mt5_position");
     expect(mocks.historyFailure).toHaveBeenCalledWith(44, expect.stringContaining("MIGRATION_REQUIRED_0008"));
     expect(mocks.historyFailure).toHaveBeenCalledWith(44, expect.stringContaining("migration 0010"));
   });
 
   it("preserves an unknown Supabase provider code in the safe history diagnostic", async () => {
-    mocks.close.mockRejectedValue(Object.assign(new Error("provider rejected the write"), { supabaseCode: "XX999" }));
+    mocks.closeBatch.mockRejectedValue(Object.assign(new Error("provider rejected the write"), { supabaseCode: "XX999" }));
     await expect(processMt5Payload({ event: "history_batch", api_key: key("unknown-provider"), positions: [{ ...openPayload(key("unknown-provider")), close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00" }], complete: false })).rejects.toThrow("provider rejected the write");
     expect(mocks.historyFailure).toHaveBeenCalledWith(44, expect.stringContaining("XX999"));
   });

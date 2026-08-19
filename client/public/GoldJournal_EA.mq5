@@ -1,5 +1,5 @@
 #property strict
-#property version   "2.1"
+#property version   "2.2"
 #property description "Gold Journal authoritative MT5 bridge: summary, open positions, close events, and replay-safe history batches."
 
 input string Endpoint = "https://YOUR-SITE.netlify.app/api/mt5";
@@ -7,13 +7,14 @@ input string ApiKey = "PASTE_ONCE_FROM_GOLD_JOURNAL";
 input string ConnectionId = "";
 input int BrokerUtcOffsetMinutes = 180;
 input int SyncSeconds = 3;
-input int HistoryDays = 30;
+input int HistoryDays = 3650;
 input bool SendHistoryOnInit = true;
 
-const string EA_VERSION = "2.1.0";
+const string EA_VERSION = "2.2.0";
 const string PAYLOAD_VERSION = "2";
 const int REQUEST_TIMEOUT_MS = 15000;
 const int HISTORY_BATCH_SIZE = 50;
+const int FULL_HISTORY_RETRY_SECONDS = 24 * 60 * 60;
 
 datetime g_last_history_sync = 0;
 datetime g_last_history_attempt = 0;
@@ -27,7 +28,9 @@ string JsonEscape(string value) {
 }
 
 string Number(double value, int digits = 2) { return DoubleToString(value, digits); }
-string Unix(datetime value) { return IntegerToString((long)value); }
+// MT5 datetime values are broker-server clock values. Send an offset-free string so
+// the API can apply BrokerUtcOffsetMinutes before deriving fixed PKT session/date.
+string BrokerTimestamp(datetime value) { return "\"" + TimeToString(value, TIME_DATE | TIME_SECONDS) + "\""; }
 string Direction(ENUM_POSITION_TYPE type) { return type == POSITION_TYPE_BUY ? "BUY" : "SELL"; }
 string DealDirection(long type) { return type == DEAL_TYPE_BUY ? "BUY" : "SELL"; }
 string OppositeDirection(long type) { return type == DEAL_TYPE_BUY ? "SELL" : "BUY"; }
@@ -41,8 +44,13 @@ bool SendJson(string payload, string expectedEvent) {
    string response_headers;
    string headers = "Content-Type: application/json\r\n";
    int status = WebRequest("POST", Endpoint, headers, REQUEST_TIMEOUT_MS, data, response, response_headers);
+   string response_text = CharArrayToString(response, 0, WHOLE_ARRAY, CP_UTF8);
    if(status < 200 || status >= 300) {
-      PrintFormat("Gold Journal %s sync failed: HTTP %d", expectedEvent, status);
+      PrintFormat("Gold Journal %s sync failed: HTTP %d — %s", expectedEvent, status, response_text);
+      return false;
+   }
+   if(StringFind(response_text, "\"ok\":true") < 0) {
+      PrintFormat("Gold Journal %s sync returned an unexpected response: %s", expectedEvent, response_text);
       return false;
    }
    return true;
@@ -66,7 +74,7 @@ string PositionJson(ulong ticket) {
    reward = MathAbs(reward);
    double rr = risk > 0.0 ? reward / risk : 0.0;
    datetime open_time = (datetime)PositionGetInteger(POSITION_TIME);
-   return "{\"ticket\":\"" + IntegerToString((long)ticket) + "\",\"symbol\":\"" + JsonEscape(symbol) + "\",\"direction\":\"" + Direction(type) + "\",\"lots\":" + Number(volume, 2) + ",\"open_price\":" + Number(open_price, 6) + ",\"sl_price\":" + Number(sl, 6) + ",\"tp_price\":" + Number(tp, 6) + ",\"risk_usd\":" + Number(risk, 2) + ",\"reward_usd\":" + Number(reward, 2) + ",\"rr_ratio\":" + Number(rr, 2) + ",\"floating_pnl\":" + Number(floating, 2) + ",\"open_time\":" + Unix(open_time) + "}";
+   return "{\"ticket\":\"" + IntegerToString((long)ticket) + "\",\"symbol\":\"" + JsonEscape(symbol) + "\",\"direction\":\"" + Direction(type) + "\",\"lots\":" + Number(volume, 2) + ",\"open_price\":" + Number(open_price, 6) + ",\"sl_price\":" + Number(sl, 6) + ",\"tp_price\":" + Number(tp, 6) + ",\"risk_usd\":" + Number(risk, 2) + ",\"reward_usd\":" + Number(reward, 2) + ",\"rr_ratio\":" + Number(rr, 2) + ",\"floating_pnl\":" + Number(floating, 2) + ",\"open_time\":" + BrokerTimestamp(open_time) + "}";
 }
 
 void SendCompatibility() {
@@ -182,7 +190,7 @@ string ClosedPositionJson(ulong position_id) {
    reward = MathAbs(reward);
    double rr = risk > 0.0 ? reward / risk : 0.0;
    string result = realized > 0.005 ? "WIN" : realized < -0.005 ? "LOSS" : "BREAK_EVEN";
-   return "{\"ticket\":\"" + IntegerToString((long)position_id) + "\",\"symbol\":\"" + JsonEscape(symbol) + "\",\"direction\":\"" + direction + "\",\"lots\":" + Number(lots, 2) + ",\"open_price\":" + Number(open_price, 6) + ",\"sl_price\":" + Number(sl, 6) + ",\"tp_price\":" + Number(tp, 6) + ",\"risk_usd\":" + Number(risk, 2) + ",\"reward_usd\":" + Number(reward, 2) + ",\"rr_ratio\":" + Number(rr, 2) + ",\"close_price\":" + Number(close_price, 6) + ",\"realized_pnl\":" + Number(realized, 2) + ",\"result\":\"" + result + "\",\"open_time\":" + Unix(open_time) + ",\"close_time\":" + Unix(close_time) + "}";
+   return "{\"ticket\":\"" + IntegerToString((long)position_id) + "\",\"symbol\":\"" + JsonEscape(symbol) + "\",\"direction\":\"" + direction + "\",\"lots\":" + Number(lots, 2) + ",\"open_price\":" + Number(open_price, 6) + ",\"sl_price\":" + Number(sl, 6) + ",\"tp_price\":" + Number(tp, 6) + ",\"risk_usd\":" + Number(risk, 2) + ",\"reward_usd\":" + Number(reward, 2) + ",\"rr_ratio\":" + Number(rr, 2) + ",\"close_price\":" + Number(close_price, 6) + ",\"realized_pnl\":" + Number(realized, 2) + ",\"result\":\"" + result + "\",\"open_time\":" + BrokerTimestamp(open_time) + ",\"close_time\":" + BrokerTimestamp(close_time) + "}";
 }
 
 void SendHistory(bool fullReplay) {
@@ -233,7 +241,7 @@ void SendHistory(bool fullReplay) {
 void Sync() {
    SendSummary();
    SendOpenPositions();
-   if(SendHistoryOnInit && (g_last_history_attempt == 0 || TimeCurrent() - g_last_history_attempt >= 300) && (g_last_history_sync == 0 || TimeCurrent() - g_last_history_sync >= MathMax(60, HistoryDays * 60))) SendHistory(true);
+   if(SendHistoryOnInit && (g_last_history_attempt == 0 || TimeCurrent() - g_last_history_attempt >= 300) && (g_last_history_sync == 0 || TimeCurrent() - g_last_history_sync >= FULL_HISTORY_RETRY_SECONDS)) SendHistory(true);
 }
 
 int OnInit() {

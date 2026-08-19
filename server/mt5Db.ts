@@ -3,7 +3,7 @@ import { accounts, mt5Connections, mt5LivePositions, trades } from "../drizzle/s
 import { getOwnedAccount } from "./goldDb";
 import { getDb } from "./db";
 import { mt5ApiKeyFingerprint } from "./mt5Security";
-import { syncMt5PositionAtomic } from "./atomicOperations";
+import { syncMt5HistoryBatchAtomic, syncMt5PositionAtomic } from "./atomicOperations";
 
 async function requireDb() { const db = await getDb(); if (!db) throw new Error("Supabase database is unavailable. Please retry shortly."); return db; }
 
@@ -240,4 +240,37 @@ export async function upsertMt5ClosedPosition(userId: number, accountId: number,
     openTime: value.openTime.toISOString(), closeTime: value.closeTime.toISOString(), status: "CLOSED",
     session: pktSession(value.closeTime), tradeTime: value.closeTime.toISOString(), pnl: value.realizedPnl.toFixed(2),
   });
+}
+
+type ClosedMt5Position = LiveBase & {
+  closePrice: number;
+  realizedPnl: number;
+  result: "WIN" | "LOSS" | "BREAK_EVEN";
+  closeTime: Date;
+};
+
+function closedPositionPayload(value: ClosedMt5Position) {
+  return {
+    ticket: value.ticket.toString(), symbol: value.symbol, direction: value.direction,
+    lots: value.lots.toFixed(2), openPrice: value.openPrice.toFixed(6),
+    closePrice: value.closePrice.toFixed(6), slPrice: value.slPrice?.toFixed(6) ?? null, tpPrice: value.tpPrice?.toFixed(6) ?? null,
+    riskUsd: value.riskUsd.toFixed(2), rewardUsd: value.rewardUsd.toFixed(2), rrRatio: value.rrRatio.toFixed(2),
+    floatingPnl: "0.00", realizedPnl: value.realizedPnl.toFixed(2), result: value.result,
+    openTime: value.openTime.toISOString(), closeTime: value.closeTime.toISOString(), status: "CLOSED",
+    session: pktSession(value.closeTime), tradeTime: value.closeTime.toISOString(), pnl: value.realizedPnl.toFixed(2),
+  };
+}
+
+/**
+ * Preserves terminal CLOSE semantics while syncing one EA history batch in a single
+ * Supabase RPC/transaction. This avoids one serverless round-trip per historic ticket.
+ */
+export async function upsertMt5ClosedPositionBatch(userId: number, accountId: number, values: ClosedMt5Position[]) {
+  const db = await requireDb();
+  const resetAt = await getJournalDataResetAt(db, accountId);
+  const payloads = values
+    .filter(value => isMt5PositionAfterJournalReset(resetAt, { status: "CLOSED", openTime: value.openTime, closeTime: value.closeTime }))
+    .map(closedPositionPayload);
+  if (!payloads.length) return 0;
+  return syncMt5HistoryBatchAtomic(userId, accountId, payloads);
 }

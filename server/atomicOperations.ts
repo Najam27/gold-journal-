@@ -52,3 +52,17 @@ export async function syncMt5PositionAtomic(userId: number, accountId: number, p
   if (error) throwRpcError("sync MT5 position", error);
   return data === true;
 }
+
+export async function syncMt5HistoryBatchAtomic(userId: number, accountId: number, positions: Array<Record<string, unknown>>) {
+  const { data, error } = await getSupabaseAdmin().rpc("gj_sync_mt5_history_batch", {
+    target_user_id: userId,
+    target_account_id: accountId,
+    position_payloads: positions,
+  });
+  if (error) throwRpcError("sync MT5 history batch", error);
+  const synchronized = Number(data ?? 0);
+  if (!Number.isInteger(synchronized) || synchronized < 0 || synchronized > positions.length) {
+    throw new Error("Supabase atomic MT5 history batch returned an invalid count.");
+  }
+  return synchronized;
+}
