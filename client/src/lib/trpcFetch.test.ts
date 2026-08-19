@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { API_REQUEST_TIMEOUT_MESSAGE, API_REQUEST_TIMEOUT_MS, fetchTrpcResponse, PREVIEW_API_UNAVAILABLE_MESSAGE, UNEXPECTED_API_RESPONSE_MESSAGE } from "./trpcFetch";
+import { AI_REQUEST_TIMEOUT_MS, API_REQUEST_TIMEOUT_MESSAGE, API_REQUEST_TIMEOUT_MS, fetchTrpcResponse, PREVIEW_API_UNAVAILABLE_MESSAGE, trpcTimeoutMs, UNEXPECTED_API_RESPONSE_MESSAGE } from "./trpcFetch";
 
 const originalFetch = globalThis.fetch;
 
@@ -25,6 +25,11 @@ describe("tRPC response guard", () => {
     await vi.advanceTimersByTimeAsync(API_REQUEST_TIMEOUT_MS);
     await rejection;
     vi.useRealTimers();
+  });
+
+  it("reserves a bounded one-minute request window for shared AI Analysis and AI Mentor mutations only", () => {
+    expect(trpcTimeoutMs("/api/trpc/analysis.ai?batch=1")).toBe(AI_REQUEST_TIMEOUT_MS);
+    expect(trpcTimeoutMs("/api/trpc/journal.get?batch=1")).toBe(API_REQUEST_TIMEOUT_MS);
   });
 
   it("converts terminated-preview HTML responses into a recoverable error", async () => {

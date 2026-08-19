@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildAnalysis } from "@shared/analysisEngine";
-import { aiTestHooks, analyzeWithOpenRouter, getOpenRouterStatus } from "./analysisAi";
+import { aiTestHooks, analyzeWithOpenRouter, DEFAULT_AI_TIMEOUT_MS, getOpenRouterStatus } from "./analysisAi";
 
 const report = {
   executiveSummary: "Evidence is limited and should be treated as a hypothesis.",
@@ -65,6 +65,13 @@ describe("server OpenRouter analysis", () => {
     const timedOut = await analyzeWithOpenRouter(1, 5, analysis);
     expect(timedOut.available).toBe(false);
     expect(aiTestHooks.cacheSize()).toBe(0);
+  });
+
+  it("defaults to a bounded one-minute shared AI budget and never lets configuration exceed it", () => {
+    expect(DEFAULT_AI_TIMEOUT_MS).toBe(60_000);
+    expect(aiTestHooks.resolveAiTimeoutMs(undefined)).toBe(60_000);
+    expect(aiTestHooks.resolveAiTimeoutMs("120000")).toBe(60_000);
+    expect(aiTestHooks.resolveAiTimeoutMs("5000")).toBe(5_000);
   });
 
   it("reports readiness without exposing the OpenRouter secret", () => {

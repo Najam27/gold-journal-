@@ -2,10 +2,16 @@ export const PREVIEW_API_UNAVAILABLE_MESSAGE = "The local preview API was tempor
 export const UNEXPECTED_API_RESPONSE_MESSAGE = "The API returned an unexpected non-JSON response. Please retry the request.";
 export const API_REQUEST_TIMEOUT_MESSAGE = "The API request timed out. Check the deployment and network connection, then retry.";
 export const API_REQUEST_TIMEOUT_MS = 15_000;
+export const AI_REQUEST_TIMEOUT_MS = 60_000;
+
+export function trpcTimeoutMs(input: RequestInfo | URL) {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  return url.includes("/api/trpc/analysis.ai") ? AI_REQUEST_TIMEOUT_MS : API_REQUEST_TIMEOUT_MS;
+}
 
 export async function fetchTrpcResponse(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const controller = new AbortController();
-  const timeout = globalThis.setTimeout(() => controller.abort(new DOMException("API request timed out", "TimeoutError")), API_REQUEST_TIMEOUT_MS);
+  const timeout = globalThis.setTimeout(() => controller.abort(new DOMException("API request timed out", "TimeoutError")), trpcTimeoutMs(input));
   const sourceSignal = init?.signal;
   const forwardAbort = () => controller.abort(sourceSignal?.reason);
   if (sourceSignal?.aborted) forwardAbort();
