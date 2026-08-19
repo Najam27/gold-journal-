@@ -4,14 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { formatDate, formatMoney, getPktSession, sessions, toNumber } from "@/lib/gold";
+import { formatDate, formatMoney, getPktDateInput, getPktSession, sessions, toNumber } from "@/lib/gold";
+import { pktDateToTimestamp } from "@shared/pktDate";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
-function todayInput() {
-  const date = new Date();
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
-}
+function todayInput() { return getPktDateInput(); }
+export function skippedTradeTimestamp(value: string) { return pktDateToTimestamp(value); }
 
 function freshOpportunity() {
   return { date: todayInput(), session: getPktSession(), direction: "", reason: "", confidence: "", outcome: "", missed: "", notes: "" };
@@ -35,7 +34,7 @@ export function MissedTradesView({ rows, account, refresh }: any) {
       return;
     }
     try {
-      await createSkipped.mutateAsync({ accountId: account.id, tradeDate: new Date(`${form.date}T12:00:00`).getTime(), session: form.session, level: "", timeframe: "", direction: form.direction as "BUY" | "SELL", skipReason: form.reason.trim(), confidence: Number(form.confidence), outcome: form.outcome.trim(), estimatedMissed: Number(form.missed || 0), notes: form.notes });
+      await createSkipped.mutateAsync({ accountId: account.id, tradeDate: skippedTradeTimestamp(form.date), session: form.session, level: "", timeframe: "", direction: form.direction as "BUY" | "SELL", skipReason: form.reason.trim(), confidence: Number(form.confidence), outcome: form.outcome.trim(), estimatedMissed: Number(form.missed || 0), notes: form.notes });
       toast.success("Skipped trade logged.");
       close();
       refresh();

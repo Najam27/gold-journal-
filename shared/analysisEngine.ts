@@ -1,3 +1,5 @@
+import { pktDateToTimestamp } from "./pktDate";
+
 export type AnalysisTrade = {
   id?: number | string;
   tradeDate?: number | string | Date | null;
@@ -191,7 +193,7 @@ function conditionalRows(trades: AnalysisTrade[], dimensions: Array<keyof Analys
 function edgeDirection(a: MetricRow, b: MetricRow) { if (a.sample < 10 || b.sample < 10) return "INSUFFICIENT DATA" as const; const delta = a.expectancy - b.expectancy; return delta > Math.max(0.05, Math.abs(b.expectancy) * 0.1) ? "IMPROVING" as const : delta < -Math.max(0.05, Math.abs(b.expectancy) * 0.1) ? "DETERIORATING" as const : "STABLE" as const; }
 
 export function filterAnalysisTrades(trades: AnalysisTrade[], filters: AnalysisFilters = {}) {
-  const start = filters.startDate ? dateValue(filters.startDate) : 0; const end = filters.endDate ? dateValue(`${filters.endDate}T23:59:59.999Z`) : Infinity;
+  const start = filters.startDate ? pktDateToTimestamp(filters.startDate, 0) : 0; const end = filters.endDate ? pktDateToTimestamp(filters.endDate, 0) + 86_400_000 - 1 : Infinity;
   return trades.filter(trade => { const date = dateValue(trade.tradeDate); return (!start || date >= start) && date <= end && (!filters.session || clean(trade.session) === clean(filters.session)) && (!filters.timeframe || clean(trade.timeframe) === clean(filters.timeframe)) && (!filters.level || clean(trade.level) === clean(filters.level)) && (!filters.setup || clean(trade.setupQuality) === clean(filters.setup)) && (!filters.direction || clean(trade.direction) === filters.direction) && (!filters.result || clean(trade.result) === filters.result); });
 }
 

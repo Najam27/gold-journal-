@@ -10,11 +10,15 @@ vi.mock("@/components/ui/button", () => ({ Button: ({ children, ...props }: any)
 vi.mock("@/components/ui/input", () => ({ Input: (props: any) => <input {...props} /> }));
 vi.mock("@/components/ui/textarea", () => ({ Textarea: (props: any) => <textarea {...props} /> }));
 
-import { PlanExecutionEditor } from "@/components/PlanExecutionEditor";
+import { PlanExecutionEditor, planDateTimestamp } from "@/components/PlanExecutionEditor";
 
 describe("PlanExecutionEditor", () => {
   beforeEach(() => { mocks.save.mockReset(); mocks.remove.mockReset(); mocks.save.mockResolvedValue({ success: true }); mocks.remove.mockResolvedValue({ success: true }); });
   afterEach(() => cleanup());
+
+  it("serializes one daily protocol at a canonical PKT instant", () => {
+    expect(planDateTimestamp("2026-08-04")).toBe(Date.parse("2026-08-04T12:00:00+05:00"));
+  });
 
   it("loads a saved daily entry and writes its complete execution review on update", async () => {
     const today = new Date();

@@ -10,7 +10,7 @@ vi.mock("@/components/ui/input", () => ({ Input: (props: any) => <input {...prop
 vi.mock("@/components/ui/textarea", () => ({ Textarea: (props: any) => <textarea {...props} /> }));
 vi.mock("@/components/ui/dialog", () => ({ Dialog: ({ children }: any) => <>{children}</>, DialogContent: ({ children }: any) => <div>{children}</div>, DialogDescription: ({ children }: any) => <p>{children}</p>, DialogHeader: ({ children }: any) => <header>{children}</header>, DialogTitle: ({ children }: any) => <h2>{children}</h2> }));
 
-import { MissedTradesView } from "./MissedTradesView";
+import { MissedTradesView, skippedTradeTimestamp } from "./MissedTradesView";
 
 describe("MissedTradesView", () => {
   it("opens a blank trader-entered skipped-trade form rather than seeded reason or outcome examples", () => {
@@ -22,5 +22,9 @@ describe("MissedTradesView", () => {
     expect((screen.getByLabelText("Outcome") as HTMLInputElement).value).toBe("");
     expect(screen.getByPlaceholderText("Why did you pass this setup?")).toBeTruthy();
     expect(screen.getByPlaceholderText("What happened afterwards?")).toBeTruthy();
+  });
+
+  it("serializes an opportunity under its fixed PKT business day", () => {
+    expect(skippedTradeTimestamp("2026-08-04")).toBe(Date.parse("2026-08-04T12:00:00+05:00"));
   });
 });

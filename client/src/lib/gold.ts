@@ -1,3 +1,5 @@
+import { getPktDateKey } from "@shared/pktDate";
+
 export const sessions = ["Pre-Asian", "Asian", "Post-Asian", "Pre-London", "London", "Post-London", "Pre-NY", "New York", "Post-NY"];
 export const levels = ["SBR/TJL1", "RBS/TJL1", "TJL2", "QML", "FIB", "LVL4", "LVL2"];
 export const executionTypes = ["Manual Direct", "Limit Order", "Stop Order", "Manual After Confirmation"];
@@ -11,11 +13,7 @@ export function formatDate(value: Date | string | number | null | undefined) {
 }
 
 export function getPktDateInput(value: Date | string | number = new Date()) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Karachi", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date);
-  const part = (type: string) => parts.find(item => item.type === type)?.value ?? "";
-  return `${part("year")}-${part("month")}-${part("day")}`;
+  return getPktDateKey(value);
 }
 
 export function isFuturePktDate(value: string, now: Date | string | number = new Date()) {

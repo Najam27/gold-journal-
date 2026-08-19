@@ -17,6 +17,8 @@ const expectedMigrations = [
   "0008_production_integrity_and_analysis.sql",
   "0009_ai_report_history.sql",
   "0010_fix_mt5_rpc_trade_insert_arity.sql",
+  "0011_atomic_mt5_history_batch.sql",
+  "0012_mt5_open_trade_lifecycle.sql",
 ];
 const expectedNames = [
   "gj_accounts_id_user_unique",
@@ -63,6 +65,8 @@ const report = {
   tradeSummaryHotfixQualified: (() => { const hotfix = read("supabase/migrations/0007_fix_trade_summary_and_accounts.sql"); return hotfix.includes("from public.gj_trades as trade") && ["trade.\"result\"", "trade.\"pnl\"", "trade.\"userId\"", "trade.\"accountId\""].every(token => hotfix.includes(token)); })(),
   productionIntegrityMigrationHardened: (() => { const hotfix = read("supabase/migrations/0008_production_integrity_and_analysis.sql"); return ["gj_trades_account_owner_fk", "gj_cash_account_owner_fk", "gj_remove_account", "gj_consume_rate_limit", "grant execute on function public.gj_consume_rate_limit"].every(token => hotfix.includes(token)); })(),
   aiHistoryMigrationHardened: (() => { const hotfix = read("supabase/migrations/0009_ai_report_history.sql"); return ["gj_ai_reports_account_owner_fk", "gj_ai_edge_history_report_owner_fk", "gj_ai_experiment_history_report_owner_fk", "alter table public.gj_ai_reports enable row level security"].every(token => hotfix.includes(token)); })(),
+  mt5HistoryBatchMigrationHardened: (() => { const hotfix = read("supabase/migrations/0011_atomic_mt5_history_batch.sql"); return ["gj_sync_mt5_history_batch", "security definer", "set search_path = public", "grant execute on function public.gj_sync_mt5_history_batch"].every(token => hotfix.includes(token)); })(),
+  mt5OpenLifecycleMigrationHardened: (() => { const hotfix = read("supabase/migrations/0012_mt5_open_trade_lifecycle.sql"); return ["gj_sync_mt5_position", "target_status not in ('OPEN', 'CLOSED')", "on conflict (\"accountId\", \"mt5Ticket\")", "grant execute on function public.gj_sync_mt5_position"].every(token => hotfix.includes(token)); })(),
 };
 console.log(JSON.stringify(report, null, 2));
-if (!report.migrationOrderValid || !report.staleDrizzleArtifactsRemoved || !report.expectedNamesInDrizzleSchema || !report.expectedNamesInSupabaseMigrations || !report.tradeSummaryHotfixQualified || !report.productionIntegrityMigrationHardened || !report.aiHistoryMigrationHardened || missingMigrations.length) process.exitCode = 1;
+if (!report.migrationOrderValid || !report.staleDrizzleArtifactsRemoved || !report.expectedNamesInDrizzleSchema || !report.expectedNamesInSupabaseMigrations || !report.tradeSummaryHotfixQualified || !report.productionIntegrityMigrationHardened || !report.aiHistoryMigrationHardened || !report.mt5HistoryBatchMigrationHardened || !report.mt5OpenLifecycleMigrationHardened || missingMigrations.length) process.exitCode = 1;

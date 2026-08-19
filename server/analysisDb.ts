@@ -3,6 +3,7 @@ import { trades } from "../drizzle/schema";
 import { buildAnalysis, type AnalysisFilters, type AnalysisResult, type AnalysisTrade } from "@shared/analysisEngine";
 import { getDb } from "./db";
 import { getOwnedAccount } from "./goldDb";
+import { pktDateToTimestamp } from "@shared/pktDate";
 
 const ANALYSIS_PAGE_SIZE = 1_000;
 const ANALYSIS_MAX_TRADES = 10_000;
@@ -31,8 +32,8 @@ async function requireDb() { const db = await getDb(); if (!db) throw new Error(
 
 function analysisWhere(userId: number, accountId: number, filters: AnalysisFilters) {
   const parts = [eq(trades.userId, userId), eq(trades.accountId, accountId)];
-  if (filters.startDate) parts.push(gte(trades.tradeDate, new Date(`${filters.startDate}T00:00:00.000Z`)));
-  if (filters.endDate) parts.push(lt(trades.tradeDate, new Date(`${filters.endDate}T00:00:00.000Z`).getTime() + 86_400_000));
+  if (filters.startDate) parts.push(gte(trades.tradeDate, new Date(pktDateToTimestamp(filters.startDate, 0))));
+  if (filters.endDate) parts.push(lt(trades.tradeDate, new Date(pktDateToTimestamp(filters.endDate, 0) + 86_400_000)));
   if (filters.session) parts.push(eq(trades.session, filters.session));
   if (filters.timeframe) parts.push(eq(trades.timeframe, filters.timeframe));
   if (filters.level) parts.push(eq(trades.level, filters.level));

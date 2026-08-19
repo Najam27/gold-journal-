@@ -41,4 +41,9 @@ describe("Gold Journal trading primitives", () => {
     await expect(caller.trades.list({ accountId: 7, page: 0, pageSize: 12 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(caller.trades.list({ accountId: 7, page: 1, pageSize: 51 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
+
+  it("rejects a future manual trade date before any account or database access", async () => {
+    const caller = goldRouter.createCaller({ user: { id: 7 } } as any);
+    await expect(caller.trades.create({ accountId: 7, tradeDate: Date.now() + 3 * 86_400_000, session: "London", direction: "BUY", result: "WIN", patienceScore: null, risk: null, reward: null, pnl: 0 })).rejects.toMatchObject({ code: "BAD_REQUEST", message: "Future trade dates are not allowed." });
+  });
 });
