@@ -2,11 +2,11 @@ export const PREVIEW_API_UNAVAILABLE_MESSAGE = "The local preview API was tempor
 export const UNEXPECTED_API_RESPONSE_MESSAGE = "The API returned an unexpected non-JSON response. Please retry the request.";
 export const API_REQUEST_TIMEOUT_MESSAGE = "The API request timed out. Check the deployment and network connection, then retry.";
 export const API_REQUEST_TIMEOUT_MS = 15_000;
-export const AI_REQUEST_TIMEOUT_MS = 60_000;
+export const AI_REQUEST_TIMEOUT_MS = 120_000;
 
 export function trpcTimeoutMs(input: RequestInfo | URL) {
   const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-  return url.includes("/api/trpc/analysis.ai") ? AI_REQUEST_TIMEOUT_MS : API_REQUEST_TIMEOUT_MS;
+  return url.includes("/api/trpc/analysis.ai") || url.includes("/api/trpc/mt5.riskCoach") ? AI_REQUEST_TIMEOUT_MS : API_REQUEST_TIMEOUT_MS;
 }
 
 export async function fetchTrpcResponse(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -32,7 +32,7 @@ export async function fetchTrpcResponse(input: RequestInfo | URL, init?: Request
 
     return response;
   } catch (error) {
-    if (controller.signal.aborted && !sourceSignal?.aborted) throw new Error(API_REQUEST_TIMEOUT_MESSAGE);
+    if (controller.signal.aborted && !sourceSignal?.aborted) throw new Error(trpcTimeoutMs(input) === AI_REQUEST_TIMEOUT_MS ? "The AI request timed out after 2 minutes. Please retry; your journal data is unchanged." : API_REQUEST_TIMEOUT_MESSAGE);
     throw error;
   } finally {
     globalThis.clearTimeout(timeout);

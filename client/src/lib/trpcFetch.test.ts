@@ -27,8 +27,10 @@ describe("tRPC response guard", () => {
     vi.useRealTimers();
   });
 
-  it("reserves a bounded one-minute request window for shared AI Analysis and AI Mentor mutations only", () => {
+  it("reserves the selected two-minute request window for all AI mutations while normal APIs stay short", () => {
+    expect(AI_REQUEST_TIMEOUT_MS).toBe(120_000);
     expect(trpcTimeoutMs("/api/trpc/analysis.ai?batch=1")).toBe(AI_REQUEST_TIMEOUT_MS);
+    expect(trpcTimeoutMs("/api/trpc/mt5.riskCoach?batch=1")).toBe(AI_REQUEST_TIMEOUT_MS);
     expect(trpcTimeoutMs("/api/trpc/journal.get?batch=1")).toBe(API_REQUEST_TIMEOUT_MS);
   });
 

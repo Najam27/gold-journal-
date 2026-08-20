@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { compactAnalysisForAi, type AnalysisResult, type Confidence, type MetricRow } from "@shared/analysisEngine";
 
-export const DEFAULT_AI_TIMEOUT_MS = 60_000;
+export const DEFAULT_AI_TIMEOUT_MS = 120_000;
 const MIN_AI_TIMEOUT_MS = 1_000;
 const AI_CACHE_TTL_MS = 15 * 60_000;
 const AI_CACHE_MAX = 128;
@@ -92,7 +92,7 @@ export async function analyzeWithOpenRouter(userId: number, accountId: number, a
   } catch (error) {
     console.warn("[analysis-ai]", JSON.stringify({ userId, accountId, model: selectedModel || null, success: false, latencyMs: Date.now() - started, reason: error instanceof Error ? error.message : "provider_failure" }));
     const timedOut = error instanceof DOMException && error.name === "TimeoutError";
-    return { available: false, cached: false, model: selectedModel || null, report: null, message: timedOut ? "AI analysis timed out after 60 seconds. Deterministic analysis remains available; please retry." : "AI analysis temporarily unavailable. Deterministic analysis remains available." };
+    return { available: false, cached: false, model: selectedModel || null, report: null, message: timedOut ? `AI analysis timed out after ${Math.round(resolveAiTimeoutMs() / 1_000)} seconds. Deterministic analysis remains available; please retry.` : "AI analysis temporarily unavailable. Deterministic analysis remains available." };
   }
 }
 
