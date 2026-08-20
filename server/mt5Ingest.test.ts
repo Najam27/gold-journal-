@@ -70,6 +70,11 @@ describe("MT5 EA ingest", () => {
     expect(mocks.summary).toHaveBeenCalledWith(44, expect.objectContaining({ mt5Login: 90123456n, balance: 10000, equity: 10042.5, floatingPnl: 42.5, brokerServer: "Broker-Live" }));
   });
 
+  it("forwards complete broker symbol constraints only through the authenticated account summary", async () => {
+    await expect(processMt5Payload({ event: "summary", api_key: key("risk-spec"), mt5_login: "90123456", broker_server: "Broker-Live", currency: "USD", balance: 10000, equity: 10042.5, margin: 250, free_margin: 9792.5, floating_pnl: 42.5, risk_symbol: "XAUUSDm", risk_tick_size: 0.1, risk_tick_value_loss: 10, risk_contract_size: 100, risk_volume_min: 0.01, risk_volume_max: 50, risk_volume_step: 0.01 })).resolves.toMatchObject({ status: 200, body: { ok: true, event: "summary" } });
+    expect(mocks.summary).toHaveBeenCalledWith(44, expect.objectContaining({ riskSymbol: "XAUUSDm", riskTickSize: 0.1, riskTickValueLoss: 10, riskContractSize: 100, riskVolumeMin: 0.01, riskVolumeMax: 50, riskVolumeStep: 0.01 }));
+  });
+
   it("upserts a bounded historical closed-trade batch under the resolved account and marks a completed backfill", async () => {
     const { floating_pnl, api_key: _nestedApiKeyMustBeAbsent, ...position } = openPayload(key("history"));
     const closed = { ...position, close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00" };

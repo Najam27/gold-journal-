@@ -24,6 +24,7 @@ vi.mock("@/lib/trpc", () => ({
           isFetching: false, isLoading: false, refetch: mocks.refetch,
         }),
       },
+      integrity: { useQuery: () => ({ data: { health: { label: "Live MT5 sync" }, findings: [] }, isFetching: false }) },
       createConnection: { useMutation: () => ({ mutateAsync: mocks.create, isPending: false }) },
       updateConnectionOffset: { useMutation: () => ({ mutateAsync: mocks.updateOffset }) },
       setConnectionActive: { useMutation: () => ({ mutateAsync: mocks.setActive }) },

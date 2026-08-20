@@ -240,6 +240,66 @@
 .mt5-security-note { background: color-mix(in srgb, var(--profit) 9%, var(--gj-panel-2)); color: var(--profit); }
 .mt5-security-note svg { color: var(--profit); }
 
+/* Reliability and risk controls remain calm, legible, and non-directional in either theme. */
+.queue-sync-chip,
+.risk-calculator-badge {
+  border: 1px solid color-mix(in srgb, var(--gj-gold) 42%, var(--gj-line));
+  background: color-mix(in srgb, var(--gj-gold) 10%, var(--gj-popover));
+  color: var(--gj-gold);
+}
+
+.risk-calculator-panel {
+  margin: 0 0 1rem;
+  border-color: color-mix(in srgb, var(--gj-gold) 35%, var(--gj-line));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--gj-gold) 8%, var(--gj-panel)), var(--gj-panel));
+}
+
+.risk-calculator-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  border-radius: 999px;
+  padding: .4rem .65rem;
+  font-size: .75rem;
+  font-weight: 700;
+}
+
+.risk-calculator-grid,
+.risk-result-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .75rem;
+  margin-top: 1rem;
+}
+
+.risk-calculator-grid .field,
+.risk-result-grid .mt5-account-metric {
+  min-width: 0;
+}
+
+.risk-verification {
+  margin-top: 1rem;
+  padding: .85rem 1rem;
+  border: 1px solid var(--gj-line);
+  border-radius: .75rem;
+  background: var(--gj-panel-2);
+  color: var(--gj-subtext);
+}
+
+.risk-verification strong { color: var(--gj-text); }
+.risk-verification p { margin: .35rem 0 0; }
+
+@media (max-width: 900px) {
+  .risk-calculator-grid,
+  .risk-result-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 540px) {
+  .risk-calculator-grid,
+  .risk-result-grid { grid-template-columns: 1fr; }
+  .risk-calculator-panel .mt5-section-head { gap: .75rem; align-items: flex-start; }
+}
+
 @media (hover: hover) and (pointer: fine) {
   .mt5-connection-card:hover,
   .mt5-position-card:hover,

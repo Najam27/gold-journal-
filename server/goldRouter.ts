@@ -8,6 +8,9 @@ import { ensureAccount, getJournal, getOwnedAccount, ownsTrade } from "./goldDb"
 import { getDb } from "./db";
 import { getMt5History, getMt5Workspace, syncStoredMt5PositionsToTradeLog } from "./mt5Db";
 import { mt5ApiKeyFingerprint } from "./mt5Security";
+import { getMt5Integrity } from "./mt5Reliability";
+import { calculateAccountMt5Risk } from "./mt5Risk";
+import { coachRiskWithOpenRouter } from "./riskCoachAi";
 import { toSafeAccount, toSafeAccountListItem, toSafeJournalRecord, toSafeTrade } from "./journalPrivacy";
 import { protectedProcedure, router } from "./_core/trpc";
 import { hasImageSignature, storageGetSignedUrl, storagePut } from "./storage";
@@ -24,7 +27,9 @@ const optionalText = (max = 5000) => z.string().trim().max(max).optional().defau
 const money = (min = -MAX_MONEY) => z.number().finite().min(min).max(MAX_MONEY);
 const timestampInput = z.number().finite().int().positive().max(8_640_000_000_000_000);
 const accountIdInput = z.object({ accountId: z.number().int().positive() });
+const riskCalculatorInput = accountIdInput.extend({ basis: z.enum(["EQUITY", "BALANCE"]), riskPercent: z.number().finite().positive().max(10), entryPrice: z.number().finite().positive(), stopLoss: z.number().finite().positive() });
 const mt5TicketInput = z.string().regex(/^\d+$/).max(20).optional();
+const clientMutationIdInput = z.string().regex(/^[A-Za-z0-9_-]{16,64}$/, "Invalid offline replay id.").optional();
 const pktDateInput = z.string().refine(isPktDateKey, "Use a valid PKT calendar date.");
 const analysisFiltersInput = z.object({ startDate: pktDateInput.nullable().optional(), endDate: pktDateInput.nullable().optional(), session: z.string().trim().max(40).nullable().optional(), timeframe: z.string().trim().max(20).nullable().optional(), level: z.string().trim().max(100).nullable().optional(), setup: z.string().trim().max(40).nullable().optional(), direction: z.enum(["BUY", "SELL"]).nullable().optional(), result: z.enum(["WIN", "LOSS", "BREAK_EVEN", "OPEN"]).nullable().optional() }).default({});
 const isFuturePktTimestamp = (timestamp: number, now = new Date()) => getPktDateKey(timestamp) > getPktDateKey(now);
@@ -63,6 +68,7 @@ const tradeInput = z.object({
   emotionDuring: optionalText(2000),
   emotionAfter: optionalText(2000),
   mt5Ticket: mt5TicketInput,
+  clientMutationId: clientMutationIdInput,
 });
 
 async function dbOrThrow() { const db = await getDb(); if (!db) throw new Error("Supabase database is unavailable. Please retry shortly."); return db; }
@@ -141,6 +147,13 @@ export const goldRouter = router({
   }),
   mt5: router({
     workspace: protectedProcedure.input(accountIdInput).query(({ ctx, input }) => getMt5Workspace(ctx.user.id, input.accountId)),
+    integrity: protectedProcedure.input(accountIdInput).query(({ ctx, input }) => getMt5Integrity(ctx.user.id, input.accountId)),
+    risk: protectedProcedure.input(riskCalculatorInput).query(({ ctx, input }) => calculateAccountMt5Risk(ctx.user.id, input.accountId, input)),
+    riskCoach: protectedProcedure.input(riskCalculatorInput).mutation(async ({ ctx, input }) => {
+      if (!(await consumeRateLimit("risk-coach", ctx.user.id, 6, 10 * 60_000))) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "AI risk-coach limit reached. Please retry later." });
+      const calculation = await calculateAccountMt5Risk(ctx.user.id, input.accountId, input);
+      return { calculation, coach: await coachRiskWithOpenRouter(calculation) };
+    }),
     history: protectedProcedure.input(accountIdInput.extend({ page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(50).default(20) })).query(({ ctx, input }) => getMt5History(ctx.user.id, input.accountId, input.page, input.pageSize)),
     syncTradeLog: protectedProcedure.input(accountIdInput).mutation(async ({ ctx, input }) => {
       await getOwnedAccount(ctx.user.id, input.accountId);
@@ -201,6 +214,10 @@ export const goldRouter = router({
       if (isFuturePktTimestamp(input.tradeDate)) throw new TRPCError({ code: "BAD_REQUEST", message: "Future trade dates are not allowed." });
       await getOwnedAccount(ctx.user.id, input.accountId);
       const db = await dbOrThrow();
+      if (input.clientMutationId) {
+        const existing = await db.select({ id: trades.id }).from(trades).where(and(eq(trades.userId, ctx.user.id), eq(trades.accountId, input.accountId), eq(trades.clientMutationId, input.clientMutationId))).limit(1);
+        if (existing[0]) return { id: existing[0].id, replayed: true };
+      }
       if (input.mt5Ticket) {
         const linked = await db.select({ id: mt5LivePositions.id }).from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, input.accountId), eq(mt5LivePositions.ticket, BigInt(input.mt5Ticket)), eq(mt5LivePositions.status, "CLOSED"))).limit(1);
         if (!linked[0]) throw new Error("The selected MT5 ticket is not an unjournaled closed position for this account.");
@@ -213,9 +230,9 @@ export const goldRouter = router({
         tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality, patienceScore: input.patienceScore,
         risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null, pnl: input.pnl.toFixed(2),
         notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
-        mt5Ticket: input.mt5Ticket ? BigInt(input.mt5Ticket) : null,
+        mt5Ticket: input.mt5Ticket ? BigInt(input.mt5Ticket) : null, clientMutationId: input.clientMutationId ?? null,
       }).returning({ id: trades.id });
-      return { id: inserted[0].id };
+      return { id: inserted[0].id, replayed: false };
     }),
     update: protectedProcedure.input(tradeInput.extend({ tradeId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       const current = await ownsTrade(ctx.user.id, input.tradeId);
@@ -266,11 +283,15 @@ export const goldRouter = router({
     }),
   }),
   cash: router({
-    create: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), movementDate: timestampInput, type: z.enum(["DEPOSIT", "WITHDRAW"]), amount: money(0.01), note: optionalText(1000) })).mutation(async ({ ctx, input }) => {
+    create: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), movementDate: timestampInput, type: z.enum(["DEPOSIT", "WITHDRAW"]), amount: money(0.01), note: optionalText(1000), clientMutationId: clientMutationIdInput })).mutation(async ({ ctx, input }) => {
       await getOwnedAccount(ctx.user.id, input.accountId);
       const db = await dbOrThrow();
-      await db.insert(cashMovements).values({ userId: ctx.user.id, accountId: input.accountId, movementDate: new Date(input.movementDate), type: input.type, amount: input.amount.toFixed(2), note: input.note });
-      return { success: true };
+      if (input.clientMutationId) {
+        const existing = await db.select({ id: cashMovements.id }).from(cashMovements).where(and(eq(cashMovements.userId, ctx.user.id), eq(cashMovements.accountId, input.accountId), eq(cashMovements.clientMutationId, input.clientMutationId))).limit(1);
+        if (existing[0]) return { success: true, replayed: true };
+      }
+      await db.insert(cashMovements).values({ userId: ctx.user.id, accountId: input.accountId, movementDate: new Date(input.movementDate), type: input.type, amount: input.amount.toFixed(2), note: input.note, clientMutationId: input.clientMutationId ?? null });
+      return { success: true, replayed: false };
     }),
   }),
   goals: router({

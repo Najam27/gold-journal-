@@ -26,7 +26,7 @@ const openPosition = positionBase.merge(openFields);
 export const mt5Payload = z.discriminatedUnion("event", [
   z.object({ event: z.literal("ping"), api_key: z.string().trim().min(24).max(96) }).merge(versionSchema),
   z.object({ event: z.literal("compat"), api_key: z.string().trim().min(24).max(96), ea_version: z.string().trim().min(1).max(32), payload_version: z.string().trim().min(1).max(16), connection_id: z.string().trim().max(128).optional() }),
-  z.object({ event: z.literal("summary"), api_key: z.string().trim().min(24).max(96), mt5_login: ticket, broker_server: z.string().trim().min(1).max(160), currency: z.string().trim().min(1).max(16), balance: numeric, equity: numeric, margin: numeric.min(0), free_margin: numeric, floating_pnl: numeric }).merge(versionSchema),
+  z.object({ event: z.literal("summary"), api_key: z.string().trim().min(24).max(96), mt5_login: ticket, broker_server: z.string().trim().min(1).max(160), currency: z.string().trim().min(1).max(16), balance: numeric, equity: numeric, margin: numeric.min(0), free_margin: numeric, floating_pnl: numeric, risk_symbol: z.string().trim().min(1).max(32).optional(), risk_tick_size: numeric.positive().optional(), risk_tick_value_loss: numeric.positive().optional(), risk_contract_size: numeric.positive().optional(), risk_volume_min: numeric.positive().optional(), risk_volume_max: numeric.positive().optional(), risk_volume_step: numeric.positive().optional() }).merge(versionSchema),
   base.extend({ event: z.literal("open") }).merge(openFields),
   z.object({ event: z.literal("open_batch"), api_key: z.string().trim().min(24).max(96), positions: z.array(openPosition).max(200), broker_utc_offset_minutes: z.number().int().min(-720).max(840) }).merge(versionSchema),
   base.merge(closedFields).extend({ event: z.literal("close") }),
@@ -87,7 +87,8 @@ export async function processMt5Payload(body: unknown) {
   const normalize = (value: z.infer<typeof timestamp>, offset = connectionOffset) => normalizeMt5TimestampToUtcPlus5(value, offset);
   if (payload.event === "ping") return { status: 200, body: { ok: true, event: "ping", ...versionBody(payload) } };
   if (payload.event === "summary") {
-    await updateMt5AccountSummary(connection.id, { mt5Login: payload.mt5_login, brokerServer: payload.broker_server, currency: payload.currency, balance: payload.balance, equity: payload.equity, margin: payload.margin, freeMargin: payload.free_margin, floatingPnl: payload.floating_pnl });
+    const hasRiskSpec = Boolean(payload.risk_symbol && payload.risk_tick_size && payload.risk_tick_value_loss && payload.risk_contract_size && payload.risk_volume_min && payload.risk_volume_max && payload.risk_volume_step && payload.risk_volume_max >= payload.risk_volume_min);
+    await updateMt5AccountSummary(connection.id, { mt5Login: payload.mt5_login, brokerServer: payload.broker_server, currency: payload.currency, balance: payload.balance, equity: payload.equity, margin: payload.margin, freeMargin: payload.free_margin, floatingPnl: payload.floating_pnl, ...(hasRiskSpec ? { riskSymbol: payload.risk_symbol!, riskTickSize: payload.risk_tick_size!, riskTickValueLoss: payload.risk_tick_value_loss!, riskContractSize: payload.risk_contract_size!, riskVolumeMin: payload.risk_volume_min!, riskVolumeMax: payload.risk_volume_max!, riskVolumeStep: payload.risk_volume_step! } : {}) });
     return { status: 200, body: { ok: true, event: "summary", ...versionBody(payload) } };
   }
   try {

@@ -3,7 +3,6 @@ import { accounts, cashMovements, dailyPlans, goals, skippedTrades, trades } fro
 import { storageGetSignedUrl } from "./storage";
 import { getSupabaseAdmin } from "./supabaseAdmin";
 import { getDb } from "./db";
-import { hydrateSignedScreenshots } from "./journalScreenshots";
 import { toSafeAccount, toSafeJournalRecord, toSafeTrade } from "./journalPrivacy";
 
 async function requireDb() { const db = await getDb(); if (!db) throw new Error("Supabase database is unavailable. Please retry shortly."); return db; }
@@ -66,11 +65,13 @@ export async function getJournal(userId: number, accountId?: number) {
   const cashNet = resolveDerivedCashNet(cashResult);
   const cashNetValue = cashNet.source === "rpc" ? cashNet.value : movementList.reduce((total, movement) => total + (movement.type === "DEPOSIT" ? Number(movement.amount ?? 0) : -Number(movement.amount ?? 0)), 0);
   const tradeSummary = resolveDerivedTradeSummary(tradeSummaryResult);
-  const ownedTrades = await hydrateSignedScreenshots(tradeList, storageGetSignedUrl);
   return {
     activeAccount: toSafeAccount(activeAccount),
     accounts: accountList.map(toSafeAccount),
-    trades: ownedTrades.map(toSafeTrade),
+    // Trade Log retrieves only its visible page with signed screenshots through
+    // trades.list. Journal-wide calendar, goal, and summary consumers need no
+    // signed object URL for every historical row.
+    trades: tradeList.map(toSafeTrade),
     goalTrades: goalTradeList.map(toSafeTrade),
     cashMovements: movementList.map(toSafeJournalRecord),
     cashNet: Number.isFinite(cashNetValue) ? cashNetValue : 0,

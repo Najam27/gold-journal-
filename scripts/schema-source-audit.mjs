@@ -19,6 +19,7 @@ const expectedMigrations = [
   "0010_fix_mt5_rpc_trade_insert_arity.sql",
   "0011_atomic_mt5_history_batch.sql",
   "0012_mt5_open_trade_lifecycle.sql",
+  "0013_offline_replay_and_mt5_symbol_specs.sql",
 ];
 const expectedNames = [
   "gj_accounts_id_user_unique",
@@ -45,6 +46,8 @@ const expectedNames = [
   "gj_ai_edge_history_report_evidence_unique",
   "gj_ai_experiment_history_report_owner_fk",
   "gj_ai_experiment_history_account_owner_fk",
+  "gj_trades_owner_account_client_mutation_unique",
+  "gj_cash_owner_account_client_mutation_unique",
 ];
 const migrationText = expectedMigrations.map(name => read(join("supabase/migrations", name))).join("\n");
 const staleDrizzleArtifacts = readdirSync(join(root, "drizzle")).filter(name => /^\d{4}_.*\.sql$/.test(name) || name === "meta");
@@ -67,6 +70,7 @@ const report = {
   aiHistoryMigrationHardened: (() => { const hotfix = read("supabase/migrations/0009_ai_report_history.sql"); return ["gj_ai_reports_account_owner_fk", "gj_ai_edge_history_report_owner_fk", "gj_ai_experiment_history_report_owner_fk", "alter table public.gj_ai_reports enable row level security"].every(token => hotfix.includes(token)); })(),
   mt5HistoryBatchMigrationHardened: (() => { const hotfix = read("supabase/migrations/0011_atomic_mt5_history_batch.sql"); return ["gj_sync_mt5_history_batch", "security definer", "set search_path = public", "grant execute on function public.gj_sync_mt5_history_batch"].every(token => hotfix.includes(token)); })(),
   mt5OpenLifecycleMigrationHardened: (() => { const hotfix = read("supabase/migrations/0012_mt5_open_trade_lifecycle.sql"); return ["gj_sync_mt5_position", "target_status not in ('OPEN', 'CLOSED')", "on conflict (\"accountId\", \"mt5Ticket\")", "grant execute on function public.gj_sync_mt5_position"].every(token => hotfix.includes(token)); })(),
+  offlineReplayAndRiskMigrationHardened: (() => { const migration = read("supabase/migrations/0013_offline_replay_and_mt5_symbol_specs.sql"); return ["clientMutationId", "gj_trades_owner_account_client_mutation_unique", "gj_cash_owner_account_client_mutation_unique", "riskTickSize", "riskTickValueLoss", "riskVolumeStep", "gj_mt5_risk_tick_size_valid", "gj_mt5_risk_tick_value_valid", "gj_mt5_risk_volume_valid"].every(token => migration.includes(token)); })(),
 };
 console.log(JSON.stringify(report, null, 2));
-if (!report.migrationOrderValid || !report.staleDrizzleArtifactsRemoved || !report.expectedNamesInDrizzleSchema || !report.expectedNamesInSupabaseMigrations || !report.tradeSummaryHotfixQualified || !report.productionIntegrityMigrationHardened || !report.aiHistoryMigrationHardened || !report.mt5HistoryBatchMigrationHardened || !report.mt5OpenLifecycleMigrationHardened || missingMigrations.length) process.exitCode = 1;
+if (!report.migrationOrderValid || !report.staleDrizzleArtifactsRemoved || !report.expectedNamesInDrizzleSchema || !report.expectedNamesInSupabaseMigrations || !report.tradeSummaryHotfixQualified || !report.productionIntegrityMigrationHardened || !report.aiHistoryMigrationHardened || !report.mt5HistoryBatchMigrationHardened || !report.mt5OpenLifecycleMigrationHardened || !report.offlineReplayAndRiskMigrationHardened || missingMigrations.length) process.exitCode = 1;

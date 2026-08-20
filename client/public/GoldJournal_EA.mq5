@@ -1,6 +1,6 @@
 #property strict
-#property version   "2.2"
-#property description "Gold Journal authoritative MT5 bridge: summary, open positions, close events, and replay-safe history batches."
+#property version   "2.3"
+#property description "Gold Journal authoritative MT5 bridge: summary, broker risk-symbol specifications, open positions, close events, and replay-safe history batches."
 
 input string Endpoint = "https://YOUR-SITE.netlify.app/api/mt5";
 input string ApiKey = "PASTE_ONCE_FROM_GOLD_JOURNAL";
@@ -9,8 +9,9 @@ input int BrokerUtcOffsetMinutes = 180;
 input int SyncSeconds = 3;
 input int HistoryDays = 3650;
 input bool SendHistoryOnInit = true;
+input string RiskSymbol = "";
 
-const string EA_VERSION = "2.2.0";
+const string EA_VERSION = "2.3.0";
 const string PAYLOAD_VERSION = "2";
 const int REQUEST_TIMEOUT_MS = 15000;
 const int HISTORY_BATCH_SIZE = 50;
@@ -83,7 +84,15 @@ void SendCompatibility() {
 }
 
 void SendSummary() {
-   string payload = "{\"event\":\"summary\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"connection_id\":\"" + JsonEscape(ConnectionId) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\",\"mt5_login\":\"" + IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN)) + "\",\"broker_server\":\"" + JsonEscape(AccountInfoString(ACCOUNT_SERVER)) + "\",\"currency\":\"" + JsonEscape(AccountInfoString(ACCOUNT_CURRENCY)) + "\",\"balance\":" + Number(AccountInfoDouble(ACCOUNT_BALANCE), 2) + ",\"equity\":" + Number(AccountInfoDouble(ACCOUNT_EQUITY), 2) + ",\"margin\":" + Number(AccountInfoDouble(ACCOUNT_MARGIN), 2) + ",\"free_margin\":" + Number(AccountInfoDouble(ACCOUNT_MARGIN_FREE), 2) + ",\"floating_pnl\":" + Number(AccountInfoDouble(ACCOUNT_PROFIT), 2) + "}";
+   string risk_symbol = RiskSymbol == "" ? _Symbol : RiskSymbol;
+   SymbolSelect(risk_symbol, true);
+   double tick_size = SymbolInfoDouble(risk_symbol, SYMBOL_TRADE_TICK_SIZE);
+   double tick_value_loss = SymbolInfoDouble(risk_symbol, SYMBOL_TRADE_TICK_VALUE_LOSS);
+   double contract_size = SymbolInfoDouble(risk_symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+   double volume_min = SymbolInfoDouble(risk_symbol, SYMBOL_VOLUME_MIN);
+   double volume_max = SymbolInfoDouble(risk_symbol, SYMBOL_VOLUME_MAX);
+   double volume_step = SymbolInfoDouble(risk_symbol, SYMBOL_VOLUME_STEP);
+   string payload = "{\"event\":\"summary\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"connection_id\":\"" + JsonEscape(ConnectionId) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\",\"mt5_login\":\"" + IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN)) + "\",\"broker_server\":\"" + JsonEscape(AccountInfoString(ACCOUNT_SERVER)) + "\",\"currency\":\"" + JsonEscape(AccountInfoString(ACCOUNT_CURRENCY)) + "\",\"balance\":" + Number(AccountInfoDouble(ACCOUNT_BALANCE), 2) + ",\"equity\":" + Number(AccountInfoDouble(ACCOUNT_EQUITY), 2) + ",\"margin\":" + Number(AccountInfoDouble(ACCOUNT_MARGIN), 2) + ",\"free_margin\":" + Number(AccountInfoDouble(ACCOUNT_MARGIN_FREE), 2) + ",\"floating_pnl\":" + Number(AccountInfoDouble(ACCOUNT_PROFIT), 2) + ",\"risk_symbol\":\"" + JsonEscape(risk_symbol) + "\",\"risk_tick_size\":" + Number(tick_size, 8) + ",\"risk_tick_value_loss\":" + Number(tick_value_loss, 8) + ",\"risk_contract_size\":" + Number(contract_size, 8) + ",\"risk_volume_min\":" + Number(volume_min, 8) + ",\"risk_volume_max\":" + Number(volume_max, 8) + ",\"risk_volume_step\":" + Number(volume_step, 8) + "}";
    SendJson(payload, "summary");
 }
 

@@ -1,6 +1,7 @@
 import { and, count, desc, eq, or } from "./supabaseQuery";
 import { accounts, mt5Connections, mt5LivePositions, trades } from "../drizzle/schema";
 import { getOwnedAccount } from "./goldDb";
+import { classifyMt5SyncHealth } from "./mt5Reliability";
 import { getDb } from "./db";
 import { mt5ApiKeyFingerprint } from "./mt5Security";
 import { syncMt5HistoryBatchAtomic, syncMt5PositionAtomic } from "./atomicOperations";
@@ -74,7 +75,7 @@ export async function getMt5Workspace(userId: number, accountId: number) {
   const journalRows = visibleTickets.length ? await db.select({ mt5Ticket: trades.mt5Ticket }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId), or(...visibleTickets.map(ticket => eq(trades.mt5Ticket, ticket))))) : [];
   const journaledTickets = new Set(journalRows.flatMap(row => row.mt5Ticket == null ? [] : [row.mt5Ticket.toString()]));
   return {
-    connections: connections.map(connection => ({ id: connection.id, accountName: account.name, label: connection.label, active: connection.active, brokerUtcOffsetMinutes: (connection as typeof connection & { brokerUtcOffsetMinutes?: number }).brokerUtcOffsetMinutes ?? 180, lastPing: connection.lastPing, mt5Login: connection.mt5Login?.toString() ?? null, brokerServer: connection.brokerServer, currency: connection.currency, balance: connection.balance, equity: connection.equity, margin: connection.margin, freeMargin: connection.freeMargin, floatingPnl: connection.floatingPnl, lastHistorySync: connection.lastHistorySync, historySyncedCount: connection.historySyncedCount, lastHistoryAttempt: connection.lastHistoryAttempt, lastHistoryStatus: connection.lastHistoryStatus, lastHistoryMessage: connection.lastHistoryMessage, lastHistoryBatchSize: connection.lastHistoryBatchSize, createdAt: connection.createdAt })),
+    connections: connections.map(connection => ({ id: connection.id, accountName: account.name, label: connection.label, active: connection.active, brokerUtcOffsetMinutes: (connection as typeof connection & { brokerUtcOffsetMinutes?: number }).brokerUtcOffsetMinutes ?? 180, lastPing: connection.lastPing, mt5Login: connection.mt5Login?.toString() ?? null, brokerServer: connection.brokerServer, currency: connection.currency, balance: connection.balance, equity: connection.equity, margin: connection.margin, freeMargin: connection.freeMargin, floatingPnl: connection.floatingPnl, riskSymbol: connection.riskSymbol, riskTickSize: connection.riskTickSize, riskTickValueLoss: connection.riskTickValueLoss, riskContractSize: connection.riskContractSize, riskVolumeMin: connection.riskVolumeMin, riskVolumeMax: connection.riskVolumeMax, riskVolumeStep: connection.riskVolumeStep, riskSymbolUpdatedAt: connection.riskSymbolUpdatedAt, syncHealth: classifyMt5SyncHealth(connection), lastHistorySync: connection.lastHistorySync, historySyncedCount: connection.historySyncedCount, lastHistoryAttempt: connection.lastHistoryAttempt, lastHistoryStatus: connection.lastHistoryStatus, lastHistoryMessage: connection.lastHistoryMessage, lastHistoryBatchSize: connection.lastHistoryBatchSize, createdAt: connection.createdAt })),
     openPositions: openPositions.map(position => safePosition(position, journaledTickets)),
     closedPositions: closedPositions.map(position => safePosition(position, journaledTickets)),
   };
@@ -111,11 +112,11 @@ export async function touchMt5Connection(connectionId: number) {
   await db.update(mt5Connections).set({ lastPing: new Date() }).where(eq(mt5Connections.id, connectionId));
 }
 
-type AccountSummary = { mt5Login: bigint; brokerServer: string; currency: string; balance: number; equity: number; margin: number; freeMargin: number; floatingPnl: number };
+type AccountSummary = { mt5Login: bigint; brokerServer: string; currency: string; balance: number; equity: number; margin: number; freeMargin: number; floatingPnl: number; riskSymbol?: string; riskTickSize?: number; riskTickValueLoss?: number; riskContractSize?: number; riskVolumeMin?: number; riskVolumeMax?: number; riskVolumeStep?: number };
 
 export async function updateMt5AccountSummary(connectionId: number, value: AccountSummary) {
   const db = await requireDb();
-  await db.update(mt5Connections).set({ mt5Login: value.mt5Login, brokerServer: value.brokerServer, currency: value.currency, balance: value.balance.toFixed(2), equity: value.equity.toFixed(2), margin: value.margin.toFixed(2), freeMargin: value.freeMargin.toFixed(2), floatingPnl: value.floatingPnl.toFixed(2), lastPing: new Date() }).where(eq(mt5Connections.id, connectionId));
+  await db.update(mt5Connections).set({ mt5Login: value.mt5Login, brokerServer: value.brokerServer, currency: value.currency, balance: value.balance.toFixed(2), equity: value.equity.toFixed(2), margin: value.margin.toFixed(2), freeMargin: value.freeMargin.toFixed(2), floatingPnl: value.floatingPnl.toFixed(2), ...(value.riskSymbol ? { riskSymbol: value.riskSymbol, riskTickSize: value.riskTickSize!.toFixed(8), riskTickValueLoss: value.riskTickValueLoss!.toFixed(8), riskContractSize: value.riskContractSize!.toFixed(8), riskVolumeMin: value.riskVolumeMin!.toFixed(8), riskVolumeMax: value.riskVolumeMax!.toFixed(8), riskVolumeStep: value.riskVolumeStep!.toFixed(8), riskSymbolUpdatedAt: new Date() } : {}), lastPing: new Date() }).where(eq(mt5Connections.id, connectionId));
 }
 
 export async function completeMt5HistorySync(connectionId: number, accountId: number) {
