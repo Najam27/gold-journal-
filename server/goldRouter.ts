@@ -11,6 +11,7 @@ import { mt5ApiKeyFingerprint } from "./mt5Security";
 import { getMt5Integrity } from "./mt5Reliability";
 import { calculateAccountMt5Risk } from "./mt5Risk";
 import { coachRiskWithOpenRouter } from "./riskCoachAi";
+import { deleteUserAiCredential, getUserAiProviderStatus, saveUserAiCredential, testUserAiCredential } from "./userAiProviderVault";
 import { toSafeAccount, toSafeAccountListItem, toSafeJournalRecord, toSafeTrade } from "./journalPrivacy";
 import { protectedProcedure, router } from "./_core/trpc";
 import { hasImageSignature, storageGetSignedUrl, storagePut } from "./storage";
@@ -103,7 +104,7 @@ export const goldRouter = router({
     }),
   }),
   analysis: router({
-    config: protectedProcedure.query(() => getOpenRouterStatus()),
+    config: protectedProcedure.query(({ ctx }) => getOpenRouterStatus(ctx.user.id)),
     get: protectedProcedure.input(analysisInput).query(({ ctx, input }) => getAccountAnalysis(ctx.user.id, input.accountId, input.filters)),
     ai: protectedProcedure.input(analysisInput).mutation(async ({ ctx, input }) => {
       if (!(await consumeRateLimit("analysis-ai", ctx.user.id, 3, 10 * 60_000))) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "AI analysis limit reached. Please retry later." });
@@ -122,6 +123,18 @@ export const goldRouter = router({
       const [current, previous] = await Promise.all([getAccountAnalysis(ctx.user.id, input.accountId, input.current), getAccountAnalysis(ctx.user.id, input.accountId, input.previous)]);
       return { current, previous, delta: compareAnalysis(current, previous) };
     }),
+  }),
+  aiSettings: router({
+    status: protectedProcedure.query(({ ctx }) => getUserAiProviderStatus(ctx.user.id)),
+    test: protectedProcedure.input(z.object({ key: z.string().trim().min(20).max(512) })).mutation(async ({ ctx, input }) => {
+      if (!(await consumeRateLimit("ai-key-test", ctx.user.id, 5, 10 * 60_000))) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Too many key tests. Please retry later." });
+      return testUserAiCredential(input.key);
+    }),
+    save: protectedProcedure.input(z.object({ key: z.string().trim().min(20).max(512), model: z.string().trim().min(1).max(160) })).mutation(async ({ ctx, input }) => {
+      if (!(await consumeRateLimit("ai-key-save", ctx.user.id, 10, 10 * 60_000))) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Too many key changes. Please retry later." });
+      return saveUserAiCredential(ctx.user.id, input.key, input.model);
+    }),
+    remove: protectedProcedure.input(z.object({ confirmed: z.literal(true) })).mutation(({ ctx }) => deleteUserAiCredential(ctx.user.id)),
   }),
   accounts: router({
     list: protectedProcedure.query(async ({ ctx }) => {
@@ -152,7 +165,7 @@ export const goldRouter = router({
     riskCoach: protectedProcedure.input(riskCalculatorInput).mutation(async ({ ctx, input }) => {
       if (!(await consumeRateLimit("risk-coach", ctx.user.id, 6, 10 * 60_000))) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "AI risk-coach limit reached. Please retry later." });
       const calculation = await calculateAccountMt5Risk(ctx.user.id, input.accountId, input);
-      return { calculation, coach: await coachRiskWithOpenRouter(calculation) };
+      return { calculation, coach: await coachRiskWithOpenRouter(ctx.user.id, calculation) };
     }),
     history: protectedProcedure.input(accountIdInput.extend({ page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(50).default(20) })).query(({ ctx, input }) => getMt5History(ctx.user.id, input.accountId, input.page, input.pageSize)),
     syncTradeLog: protectedProcedure.input(accountIdInput).mutation(async ({ ctx, input }) => {

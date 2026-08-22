@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { compactAnalysisForAi, type AnalysisResult, type Confidence, type MetricRow } from "@shared/analysisEngine";
+import { getUserAiCredential, getUserAiProviderStatus } from "./userAiProviderVault";
 
 export const DEFAULT_AI_TIMEOUT_MS = 120_000;
 const MIN_AI_TIMEOUT_MS = 1_000;
@@ -43,13 +44,12 @@ const responseSchema = {
 
 const systemPrompt = "You are a trading-performance analyst, not a market signal generator. You do not predict markets, recommend a BUY or SELL, promise outcomes, or invent statistics. You only interpret the supplied deterministic journal dataset. Every numerical statement must be traceable to a supplied row or aggregate. When evidence is insufficient, say so. Distinguish observed evidence from hypotheses. Use the supplied evidenceTier and confidence; never upgrade confidence from intuition. Keep the exact JSON schema. Do not mention or request credentials.";
 
-function config() { return { key: process.env.OPENROUTER_API_KEY?.trim() ?? "", model: process.env.OPENROUTER_MODEL?.trim() ?? "", fallback: process.env.OPENROUTER_FALLBACK_MODEL?.trim() ?? "" }; }
 export function resolveAiTimeoutMs(value = process.env.OPENROUTER_TIMEOUT_MS) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return DEFAULT_AI_TIMEOUT_MS;
   return Math.min(DEFAULT_AI_TIMEOUT_MS, Math.max(MIN_AI_TIMEOUT_MS, Math.floor(parsed)));
 }
-export function getOpenRouterStatus() { const settings = config(); return { configured: Boolean(settings.key && settings.model), model: settings.model || null, fallbackConfigured: Boolean(settings.fallback) }; }
+export async function getOpenRouterStatus(userId: number) { return getUserAiProviderStatus(userId); }
 export type EvidenceObject = { evidenceId: string; dimension: string; context: string; sample: number; wins: number; losses: number; expectancy: number; profitFactor: number | null; averageR: number | null; maxDrawdown: number; confidence: Confidence; evidenceTier: string };
 function evidenceId(dimension: string, row: MetricRow) { return `ev-${createHash("sha256").update(JSON.stringify([dimension, row.key, row.sample, row.wins, row.losses, row.expectancy, row.profitFactor, row.averageR, row.maxDrawdown])).digest("hex").slice(0, 16)}`; }
 export function buildEvidenceManifest(analysis: AnalysisResult): EvidenceObject[] { const groups: Array<[string, MetricRow[]]> = [["overview", [analysis.overview]], ["session", analysis.sessions], ["timeframe", analysis.timeframes], ["level", analysis.levels], ["setup", analysis.setups], ["direction", analysis.directions], ["day", analysis.days], ["hour", analysis.hours], ["session-timeframe", analysis.sessionTimeframes], ["level-session", analysis.levelSessions], ["level-timeframe", analysis.levelTimeframes]]; return groups.flatMap(([dimension, rows]) => rows.map(row => ({ evidenceId: evidenceId(dimension, row), dimension, context: row.label, sample: row.sample, wins: row.wins, losses: row.losses, expectancy: row.expectancy, profitFactor: row.profitFactor, averageR: row.averageR, maxDrawdown: row.maxDrawdown, confidence: row.confidence, evidenceTier: row.evidenceTier }))); }
@@ -77,14 +77,12 @@ async function callModel(model: string, compact: unknown, manifest: EvidenceObje
 }
 
 export async function analyzeWithOpenRouter(userId: number, accountId: number, analysis: AnalysisResult): Promise<AiOutcome> {
-  removeExpiredCache(); const settings = config(); if (!settings.key || !settings.model) return { available: false, cached: false, model: settings.model || null, report: null, message: "AI analysis is not configured. Deterministic analysis remains available." };
+  removeExpiredCache(); const settings = await getUserAiCredential(userId); if (!settings) return { available: false, cached: false, model: null, report: null, message: "AI is not configured. Add your OpenRouter key in Options; deterministic analysis remains available." };
   const manifest = buildEvidenceManifest(analysis); const promptData = { analysis: compactAnalysisForAi(analysis), evidence: manifest }; const key = cacheKey(userId, accountId, analysis); const cached = aiCache.get(key); if (cached && cached.expiresAt > Date.now()) return { ...cached.result, cached: true };
-  const started = Date.now(); const deadline = started + resolveAiTimeoutMs(); let selectedModel = settings.model;
+  const started = Date.now(); const deadline = started + resolveAiTimeoutMs(); const selectedModel = settings.model;
   const remainingTimeout = () => Math.max(0, deadline - Date.now());
   try {
-    let report: AiReport;
-    try { report = await callModel(settings.model, promptData, manifest, settings.key, remainingTimeout()); }
-    catch (error) { if (!settings.fallback || settings.fallback === settings.model || remainingTimeout() <= 0) throw error; selectedModel = settings.fallback; report = await callModel(settings.fallback, promptData, manifest, settings.key, remainingTimeout()); }
+    const report = await callModel(settings.model, promptData, manifest, settings.key, remainingTimeout());
     const result: AiOutcome = { available: true, cached: false, model: selectedModel, report };
     aiCache.set(key, { expiresAt: Date.now() + AI_CACHE_TTL_MS, result });
     console.info("[analysis-ai]", JSON.stringify({ userId, accountId, model: selectedModel, success: true, cached: false, latencyMs: Date.now() - started }));

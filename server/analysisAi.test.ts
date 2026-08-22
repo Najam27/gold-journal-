@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildAnalysis } from "@shared/analysisEngine";
+vi.mock("./userAiProviderVault", () => ({ getUserAiCredential: vi.fn(), getUserAiProviderStatus: vi.fn() }));
 import { aiTestHooks, analyzeWithOpenRouter, DEFAULT_AI_TIMEOUT_MS, getOpenRouterStatus } from "./analysisAi";
+import { getUserAiCredential, getUserAiProviderStatus } from "./userAiProviderVault";
 
 const report = {
   executiveSummary: "Evidence is limited and should be treated as a hypothesis.",
@@ -19,7 +21,7 @@ const analysis = buildAnalysis([
 function providerResponse(content: unknown, status = 200) { return new Response(JSON.stringify({ choices: [{ message: { content: typeof content === "string" ? content : JSON.stringify(content) } }] }), { status, headers: { "Content-Type": "application/json" } }); }
 
 describe("server OpenRouter analysis", () => {
-  beforeEach(() => { vi.restoreAllMocks(); aiTestHooks.clearCache(); process.env.OPENROUTER_API_KEY = "test-key"; process.env.OPENROUTER_MODEL = "test-model"; delete process.env.OPENROUTER_FALLBACK_MODEL; delete process.env.OPENROUTER_TIMEOUT_MS; });
+  beforeEach(() => { vi.restoreAllMocks(); aiTestHooks.clearCache(); vi.mocked(getUserAiCredential).mockResolvedValue({ key: "test-key", model: "test-model" }); vi.mocked(getUserAiProviderStatus).mockResolvedValue({ configured: true, model: "test-model", maskedKey: "sk-or-v1••••key", updatedAt: "2026-01-01T00:00:00.000Z" }); delete process.env.OPENROUTER_TIMEOUT_MS; });
 
   it("validates structured output, keeps the key server-side, and caches by analytics data", async () => {
     const fetchMock = vi.fn().mockResolvedValue(providerResponse(report));
@@ -46,14 +48,12 @@ describe("server OpenRouter analysis", () => {
     expect(hallucinated.message).toContain("temporarily unavailable");
   });
 
-  it("uses one configured fallback model after a primary provider failure", async () => {
-    process.env.OPENROUTER_FALLBACK_MODEL = "fallback-model";
-    const fetchMock = vi.fn().mockResolvedValueOnce(providerResponse(report, 404)).mockResolvedValueOnce(providerResponse(report));
+  it("does not fall back to a shared server model after a user-key provider failure", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(providerResponse(report, 404));
     vi.stubGlobal("fetch", fetchMock);
     const result = await analyzeWithOpenRouter(1, 7, analysis);
-    expect(result.available).toBe(true);
-    expect(result.model).toBe("fallback-model");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.available).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("isolates provider failures and aborts timed-out requests", async () => {
@@ -74,14 +74,12 @@ describe("server OpenRouter analysis", () => {
     expect(aiTestHooks.resolveAiTimeoutMs("5000")).toBe(5_000);
   });
 
-  it("reports readiness without exposing the OpenRouter secret", () => {
-    expect(getOpenRouterStatus()).toEqual({ configured: true, model: "test-model", fallbackConfigured: false });
-    delete process.env.OPENROUTER_API_KEY;
-    expect(getOpenRouterStatus()).toEqual({ configured: false, model: "test-model", fallbackConfigured: false });
+  it("reports masked user-vault readiness without exposing the OpenRouter secret", async () => {
+    await expect(getOpenRouterStatus(1)).resolves.toEqual({ configured: true, model: "test-model", maskedKey: "sk-or-v1••••key", updatedAt: "2026-01-01T00:00:00.000Z" });
   });
 
   it("returns a deterministic-unavailable result when server configuration is absent", async () => {
-    delete process.env.OPENROUTER_API_KEY;
+    vi.mocked(getUserAiCredential).mockResolvedValueOnce(null);
     const result = await analyzeWithOpenRouter(1, 6, analysis);
     expect(result.available).toBe(false);
     expect(result.message).toContain("not configured");

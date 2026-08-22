@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AI_REQUEST_TIMEOUT_MS, API_REQUEST_TIMEOUT_MESSAGE, API_REQUEST_TIMEOUT_MS, fetchTrpcResponse, PREVIEW_API_UNAVAILABLE_MESSAGE, trpcTimeoutMs, UNEXPECTED_API_RESPONSE_MESSAGE } from "./trpcFetch";
+import { AI_REQUEST_TIMEOUT_MS, AI_UNEXPECTED_API_RESPONSE_MESSAGE, API_REQUEST_TIMEOUT_MESSAGE, API_REQUEST_TIMEOUT_MS, fetchTrpcResponse, PREVIEW_API_UNAVAILABLE_MESSAGE, trpcTimeoutMs, UNEXPECTED_API_RESPONSE_MESSAGE } from "./trpcFetch";
 
 const originalFetch = globalThis.fetch;
 
@@ -44,5 +44,11 @@ describe("tRPC response guard", () => {
     globalThis.fetch = vi.fn().mockResolvedValue(new Response("<!doctype html><title>Unexpected</title>", { status: 200, headers: { "content-type": "text/html" } }));
 
     await expect(fetchTrpcResponse("/api/trpc/journal.get")).rejects.toThrow(UNEXPECTED_API_RESPONSE_MESSAGE);
+  });
+
+  it("explains the verified deployed HTML response on AI routes without leaking server details", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response("<!doctype html><title>Unexpected</title>", { status: 502, headers: { "content-type": "text/html" } }));
+
+    await expect(fetchTrpcResponse("/api/trpc/analysis.ai?batch=1")).rejects.toThrow(AI_UNEXPECTED_API_RESPONSE_MESSAGE);
   });
 });

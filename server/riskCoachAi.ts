@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { RiskCalculation } from "@shared/riskCalculator";
+import { getUserAiCredential } from "./userAiProviderVault";
 
 export const DEFAULT_RISK_COACH_TIMEOUT_MS = 120_000;
 const MIN_RISK_COACH_TIMEOUT_MS = 1_000;
@@ -9,13 +10,13 @@ const system = "You are a cautious trading-risk process coach. You receive a det
 export type RiskCoachOutcome = { available: boolean; coach: z.infer<typeof coachSchema> | null; message?: string };
 export function resolveRiskCoachTimeoutMs(value = process.env.OPENROUTER_RISK_COACH_TIMEOUT_MS ?? process.env.OPENROUTER_TIMEOUT_MS) { const parsed = Number(value); if (!Number.isFinite(parsed)) return DEFAULT_RISK_COACH_TIMEOUT_MS; return Math.min(DEFAULT_RISK_COACH_TIMEOUT_MS, Math.max(MIN_RISK_COACH_TIMEOUT_MS, Math.floor(parsed))); }
 
-export async function coachRiskWithOpenRouter(calculation: RiskCalculation): Promise<RiskCoachOutcome> {
-  const key = process.env.OPENROUTER_API_KEY?.trim(); const model = process.env.OPENROUTER_MODEL?.trim();
-  if (!key || !model) return { available: false, coach: null, message: "AI risk coach is not configured. The deterministic calculation remains available." };
+export async function coachRiskWithOpenRouter(userId: number, calculation: RiskCalculation): Promise<RiskCoachOutcome> {
+  const credential = await getUserAiCredential(userId);
+  if (!credential) return { available: false, coach: null, message: "AI Risk Coach is not configured. Add your OpenRouter key in Options; the deterministic calculation remains available." };
   const compact = { basis: calculation.basis, capital: calculation.capital, riskPercent: calculation.riskPercent, riskAmount: calculation.riskAmount, stopDistance: calculation.stopDistance, stopTicks: calculation.stopTicks, lossPerLot: calculation.lossPerLot, lots: calculation.lots, actualRisk: calculation.actualRisk, symbol: calculation.symbol, currency: calculation.currency, valid: calculation.valid, warnings: calculation.warnings, verification: calculation.verification };
   const timeoutMs = resolveRiskCoachTimeoutMs(); const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(new DOMException("AI risk coach timed out", "TimeoutError")), timeoutMs);
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}`, "HTTP-Referer": process.env.OPENROUTER_APP_URL?.trim() || "https://gold-journal.netlify.app", "X-Title": "Gold Journal Risk Coach" }, signal: controller.signal, body: JSON.stringify({ model, temperature: 0, messages: [{ role: "system", content: system }, { role: "user", content: JSON.stringify(compact) }], response_format: { type: "json_schema", json_schema: { name: "gold_journal_risk_coach", strict: true, schema: responseSchema } } }) });
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${credential.key}`, "HTTP-Referer": process.env.OPENROUTER_APP_URL?.trim() || "https://gold-journal.netlify.app", "X-Title": "Gold Journal Risk Coach" }, signal: controller.signal, body: JSON.stringify({ model: credential.model, temperature: 0, messages: [{ role: "system", content: system }, { role: "user", content: JSON.stringify(compact) }], response_format: { type: "json_schema", json_schema: { name: "gold_journal_risk_coach", strict: true, schema: responseSchema } } }) });
     const body = await response.json().catch(() => null); if (!response.ok) throw new Error(`OpenRouter ${response.status}`);
     const raw = String(body?.choices?.[0]?.message?.content ?? "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""); const parsed = coachSchema.safeParse(JSON.parse(raw));
     if (!parsed.success) throw new Error("invalid structured risk-coach response");
