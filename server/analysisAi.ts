@@ -31,7 +31,7 @@ const aiReportSchema = z.object({
 });
 
 export type AiReport = z.infer<typeof aiReportSchema>;
-export type AiOutcome = { available: boolean; cached: boolean; model: string | null; report: AiReport | null; message?: string; persistence?: { persisted: boolean; reportId: number | null; dataFingerprint: string } };
+export type AiOutcome = { available: boolean; cached: boolean; model: string | null; report: AiReport | null; message?: string; pending?: boolean; jobId?: string; persistence?: { persisted: boolean; reportId: number | null; dataFingerprint: string } };
 
 const responseSchema = {
   type: "object",

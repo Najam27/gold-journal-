@@ -10,16 +10,17 @@ import { getMt5History, getMt5Workspace, syncStoredMt5PositionsToTradeLog } from
 import { mt5ApiKeyFingerprint } from "./mt5Security";
 import { getMt5Integrity } from "./mt5Reliability";
 import { calculateAccountMt5Risk } from "./mt5Risk";
-import { coachRiskWithOpenRouter } from "./riskCoachAi";
 import { deleteUserAiCredential, getUserAiProviderStatus, saveUserAiCredential, testUserAiCredential } from "./userAiProviderVault";
+import { dispatchAiJob, failQueuedAiJob, getAiJobStatus, queueAnalysisJob, queueRiskCoachJob } from "./aiJobs";
 import { toSafeAccount, toSafeAccountListItem, toSafeJournalRecord, toSafeTrade } from "./journalPrivacy";
 import { protectedProcedure, router } from "./_core/trpc";
 import { hasImageSignature, storageGetSignedUrl, storagePut } from "./storage";
 import { consumeRateLimit } from "./rateLimit";
 import { clearAccountJournalDataAtomic, recordGoalAlertsAtomic, removeAccountAtomic } from "./atomicOperations";
 import { getAccountAnalysis } from "./analysisDb";
-import { analyzeWithOpenRouter, getOpenRouterStatus } from "./analysisAi";
-import { listAiExperiments, listAiReports, persistAiOutcome, updateAiExperiment } from "./aiReportDb";
+import { getOpenRouterStatus, type AiOutcome } from "./analysisAi";
+import type { RiskCoachOutcome } from "./riskCoachAi";
+import { listAiExperiments, listAiReports, updateAiExperiment } from "./aiReportDb";
 import { compareAnalysis } from "@shared/analysisEngine";
 import { getPktDateKey, isPktDateKey, pktDateToTimestamp } from "@shared/pktDate";
 
@@ -109,11 +110,12 @@ export const goldRouter = router({
     ai: protectedProcedure.input(analysisInput).mutation(async ({ ctx, input }) => {
       if (!(await consumeRateLimit("analysis-ai", ctx.user.id, 3, 10 * 60_000))) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "AI analysis limit reached. Please retry later." });
       const deterministic = await getAccountAnalysis(ctx.user.id, input.accountId, input.filters);
-      const ai = await analyzeWithOpenRouter(ctx.user.id, input.accountId, deterministic);
-      if (ai.available && ai.report) {
-        try { ai.persistence = await persistAiOutcome(ctx.user.id, input.accountId, deterministic, ai); }
-        catch (error) { console.warn("[analysis-ai] persistence degraded", error instanceof Error ? error.message : "unknown error"); ai.persistence = { persisted: false, reportId: null, dataFingerprint: "" }; }
-      }
+      const config = await getOpenRouterStatus(ctx.user.id);
+      if (!config.vaultAvailable) { const ai: AiOutcome = { available: false, cached: false, model: null, report: null, message: "Secure AI key storage is unavailable on this deployment. Deterministic analysis remains available." }; return { ...deterministic, ai }; }
+      if (!config.configured) { const ai: AiOutcome = { available: false, cached: false, model: null, report: null, message: "AI is not configured. Add your OpenRouter key in Options; deterministic analysis remains available." }; return { ...deterministic, ai }; }
+      const dispatch = await queueAnalysisJob(ctx.user.id, input.accountId, input.filters);
+      try { await dispatchAiJob(dispatch); } catch (error) { await failQueuedAiJob(ctx.user.id, dispatch.id); throw error; }
+      const ai: AiOutcome = { available: false, cached: false, model: config.model, report: null, pending: true, jobId: dispatch.id, message: "AI analysis is processing securely in the background." };
       return { ...deterministic, ai };
     }),
     history: protectedProcedure.input(accountIdInput.extend({ limit: z.number().int().min(1).max(50).default(20) })).query(async ({ ctx, input }) => { await getOwnedAccount(ctx.user.id, input.accountId); return listAiReports(ctx.user.id, input.accountId, input.limit); }),
@@ -123,6 +125,9 @@ export const goldRouter = router({
       const [current, previous] = await Promise.all([getAccountAnalysis(ctx.user.id, input.accountId, input.current), getAccountAnalysis(ctx.user.id, input.accountId, input.previous)]);
       return { current, previous, delta: compareAnalysis(current, previous) };
     }),
+  }),
+  aiJobs: router({
+    status: protectedProcedure.input(z.object({ jobId: z.string().uuid() })).query(({ ctx, input }) => getAiJobStatus(ctx.user.id, input.jobId)),
   }),
   aiSettings: router({
     status: protectedProcedure.query(({ ctx }) => getUserAiProviderStatus(ctx.user.id)),
@@ -165,7 +170,13 @@ export const goldRouter = router({
     riskCoach: protectedProcedure.input(riskCalculatorInput).mutation(async ({ ctx, input }) => {
       if (!(await consumeRateLimit("risk-coach", ctx.user.id, 6, 10 * 60_000))) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "AI risk-coach limit reached. Please retry later." });
       const calculation = await calculateAccountMt5Risk(ctx.user.id, input.accountId, input);
-      return { calculation, coach: await coachRiskWithOpenRouter(ctx.user.id, calculation) };
+      const config = await getOpenRouterStatus(ctx.user.id);
+      if (!config.vaultAvailable) { const coach: RiskCoachOutcome = { available: false, coach: null, message: "Secure AI key storage is unavailable on this deployment." }; return { calculation, coach }; }
+      if (!config.configured) { const coach: RiskCoachOutcome = { available: false, coach: null, message: "AI Risk Coach is not configured. Add your OpenRouter key in Options." }; return { calculation, coach }; }
+      const dispatch = await queueRiskCoachJob(ctx.user.id, input.accountId, calculation);
+      try { await dispatchAiJob(dispatch); } catch (error) { await failQueuedAiJob(ctx.user.id, dispatch.id); throw error; }
+      const coach: RiskCoachOutcome = { available: false, coach: null, pending: true, jobId: dispatch.id, message: "AI Risk Coach is processing securely in the background." };
+      return { calculation, coach };
     }),
     history: protectedProcedure.input(accountIdInput.extend({ page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(50).default(20) })).query(({ ctx, input }) => getMt5History(ctx.user.id, input.accountId, input.page, input.pageSize)),
     syncTradeLog: protectedProcedure.input(accountIdInput).mutation(async ({ ctx, input }) => {
