@@ -51,7 +51,7 @@ describe("Mt5LiveView", () => {
     expect(screen.getByText("$10,042.50")).toBeTruthy();
     expect(screen.getByText(/42 closed positions synced/i)).toBeTruthy();
     expect(screen.getByText(/Live refresh every 2\.5s/i)).toBeTruthy();
-    expect(screen.getByText(/SETUP GUIDE · EA v2\.1/i)).toBeTruthy();
+    expect(screen.getByText(/SETUP GUIDE · EA v2\.3/i)).toBeTruthy();
     const ea = screen.getByRole("link", { name: /Download EA/i });
     expect(ea.getAttribute("href")).toBe("/GoldJournal_EA.mq5");
     expect(screen.getByRole("columnheader", { name: "Trade Log" })).toBeTruthy();

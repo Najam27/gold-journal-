@@ -1,15 +1,16 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from "node:crypto";
 import { getSupabaseAdmin } from "./supabaseAdmin";
 
 type StoredSetting = { userId: number; keyCiphertext: string; keyIv: string; keyAuthTag: string; keyFingerprint: string; keyMask: string; model: string; updatedAt: string };
 export type UserAiCredential = { key: string; model: string };
 
+function vaultSecret() { return process.env.AI_KEY_ENCRYPTION_SECRET?.trim() || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || ""; }
 function masterKey() {
-  const secret = process.env.AI_KEY_ENCRYPTION_SECRET?.trim();
-  if (!secret) throw new Error("The secure AI key vault is unavailable. Configure AI_KEY_ENCRYPTION_SECRET on the server, then retry.");
-  return createHash("sha256").update(secret, "utf8").digest();
+  const secret = vaultSecret();
+  if (!secret) throw new Error("The secure AI key vault is unavailable. Configure a server encryption secret, then retry.");
+  return Buffer.from(hkdfSync("sha256", Buffer.from(secret, "utf8"), Buffer.from("gold-journal-ai-vault-v1", "utf8"), Buffer.from("per-user-openrouter-key", "utf8"), 32));
 }
-function vaultAvailable() { return Boolean(process.env.AI_KEY_ENCRYPTION_SECRET?.trim()); }
+function vaultAvailable() { return Boolean(vaultSecret()); }
 function maskKey(key: string) { return `${key.slice(0, 7)}••••${key.slice(-4)}`; }
 function fingerprint(key: string) { return createHash("sha256").update(key, "utf8").digest("hex"); }
 function encrypt(key: string) {
