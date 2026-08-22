@@ -1,6 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
-import { completeMt5HistorySync, getActiveMt5Connection, recordMt5HistoryAccepted, recordMt5HistoryAttempt, recordMt5HistoryFailure, touchMt5Connection, updateMt5AccountSummary, upsertMt5ClosedPosition, upsertMt5ClosedPositionBatch, upsertMt5OpenPosition } from "./mt5Db";
+import { completeMt5HistorySync, getActiveMt5Connection, recordMt5EventFailure, recordMt5EventSuccess, recordMt5HistoryAccepted, recordMt5HistoryAttempt, recordMt5HistoryFailure, touchMt5Connection, updateMt5AccountSummary, upsertMt5ClosedPosition, upsertMt5ClosedPositionBatch, upsertMt5OpenPosition, upsertMt5OpenPositionBatch } from "./mt5Db";
 import { mt5ApiKeyFingerprint } from "./mt5Security";
 import { consumeRateLimit, rateLimitTestHooks } from "./rateLimit";
 import { Mt5TimestampError, normalizeMt5TimestampToUtcPlus5 } from "./mt5Timestamp";
@@ -54,7 +54,7 @@ function syncFailureDiagnostic(error: unknown) {
   const wrapped = error as SupabaseWrappedError;
   const providerCode = String(wrapped?.supabaseCode || "").toUpperCase();
   const text = errorText(error);
-  if (providerCode === "PGRST202" || providerCode === "42601" || /schema cache|could not find the function|function .*gj_sync_mt5_position|column .* does not exist|relation .* does not exist|migration|position_payload|syntax error|insert has more target columns/.test(text)) return "Supabase MT5 RPC migration is invalid or stale; apply migration 0010 after 0008/0009 and reload the PostgREST schema.";
+  if (providerCode === "PGRST202" || providerCode === "42601" || /schema cache|could not find the function|function .*gj_sync_mt5_(position|open_batch)|function .*gj_record_mt5_event_failure|column .* does not exist|relation .* does not exist|migration|position_payload|syntax error|insert has more target columns/.test(text)) return "Supabase MT5 RPC migration is invalid or stale; apply migration 0016 and reload the PostgREST schema.";
   if (providerCode === "22P02" || providerCode === "22007" || /invalid input syntax|date\/time field|numeric value out of range/.test(text)) return "MT5 history contains an invalid timestamp or numeric value.";
   if (providerCode === "42501" || /permission denied|account unavailable|not authorized/.test(text)) return "Supabase rejected the MT5 account or service-role operation.";
   if (/supabase database is unavailable|server configuration is unavailable|fetch failed|econnreset|enotfound/.test(text)) return "The server could not reach Supabase or its server configuration is incomplete.";
@@ -68,14 +68,36 @@ function classifySyncFailure(error: unknown): Mt5FailureCode {
   const wrapped = error as SupabaseWrappedError;
   const providerCode = String(wrapped?.supabaseCode || "").toUpperCase();
   const message = errorText(error);
-  if (providerCode === "PGRST202" || providerCode === "42601" || /schema cache|could not find the function|function .*gj_sync_mt5_position|column .* does not exist|relation .* does not exist|migration|position_payload|syntax error|insert has more target columns/.test(message)) return "MIGRATION_REQUIRED_0008";
+  if (providerCode === "PGRST202" || providerCode === "42601" || /schema cache|could not find the function|function .*gj_sync_mt5_(position|open_batch)|function .*gj_record_mt5_event_failure|column .* does not exist|relation .* does not exist|migration|position_payload|syntax error|insert has more target columns/.test(message)) return "MIGRATION_REQUIRED_0008";
   if (providerCode === "22P02" || providerCode === "22007" || /invalid input syntax|date\/time field|numeric value out of range/.test(message)) return "INVALID_SYNC_DATA";
   if (providerCode === "42501" || /permission denied|account unavailable|not authorized/.test(message)) return "SYNC_PERMISSION_DENIED";
   if (/deadlock|timeout|timed out|lock not available|temporarily unavailable/.test(message)) return "DATABASE_RETRYABLE";
   return "SYNC_UNAVAILABLE";
 }
 
+function operationFor(payload: z.infer<typeof mt5Payload>): "summary" | "open_batch" | "history_batch" | null {
+  if (payload.event === "summary") return "summary";
+  if (payload.event === "open" || payload.event === "open_batch") return "open_batch";
+  if (payload.event === "close" || payload.event === "history_batch") return "history_batch";
+  return null;
+}
+
+function mt5Log(connection: { id: number; accountId: number }, operation: string, startedAt: number, result: "success" | "failed", details: Record<string, unknown> = {}) {
+  console.info("[MT5]", JSON.stringify({ connectionId: connection.id, accountId: connection.accountId, operation, durationMs: Date.now() - startedAt, result, ...details }));
+}
+
+async function persistFailureDiagnostic(connection: { id: number; accountId: number }, payload: z.infer<typeof mt5Payload>, code: Mt5FailureCode, error: unknown, startedAt: number) {
+  const operation = operationFor(payload); const diagnostic = syncFailureDiagnostic(error);
+  if (operation) {
+    try { await recordMt5EventFailure(connection.id, operation, code, diagnostic); }
+    catch (recordError) { console.error("[MT5] diagnostic persistence failed", JSON.stringify({ connectionId: connection.id, accountId: connection.accountId, operation, diagnostic: syncFailureDiagnostic(recordError) })); }
+  }
+  mt5Log(connection, operation ?? payload.event, startedAt, "failed", { code, diagnostic, ...(payload.event === "history_batch" ? { batchSize: payload.positions.length } : {}), ...(payload.event === "open_batch" ? { positionCount: payload.positions.length } : {}) });
+  return diagnostic;
+}
+
 export async function processMt5Payload(body: unknown) {
+  const startedAt = Date.now();
   const payload = mt5Payload.parse(body);
   if (!(await consumeRateLimit("mt5-ingest", mt5ApiKeyFingerprint(payload.api_key), 5, 1_000))) return { status: 429, body: { ok: false, code: "RATE_LIMITED" } };
   const connection = await getActiveMt5Connection(payload.api_key);
@@ -87,9 +109,16 @@ export async function processMt5Payload(body: unknown) {
   const normalize = (value: z.infer<typeof timestamp>, offset = connectionOffset) => normalizeMt5TimestampToUtcPlus5(value, offset);
   if (payload.event === "ping") return { status: 200, body: { ok: true, event: "ping", ...versionBody(payload) } };
   if (payload.event === "summary") {
-    const hasRiskSpec = Boolean(payload.risk_symbol && payload.risk_tick_size && payload.risk_tick_value_loss && payload.risk_contract_size && payload.risk_volume_min && payload.risk_volume_max && payload.risk_volume_step && payload.risk_volume_max >= payload.risk_volume_min);
-    await updateMt5AccountSummary(connection.id, { mt5Login: payload.mt5_login, brokerServer: payload.broker_server, currency: payload.currency, balance: payload.balance, equity: payload.equity, margin: payload.margin, freeMargin: payload.free_margin, floatingPnl: payload.floating_pnl, ...(hasRiskSpec ? { riskSymbol: payload.risk_symbol!, riskTickSize: payload.risk_tick_size!, riskTickValueLoss: payload.risk_tick_value_loss!, riskContractSize: payload.risk_contract_size!, riskVolumeMin: payload.risk_volume_min!, riskVolumeMax: payload.risk_volume_max!, riskVolumeStep: payload.risk_volume_step! } : {}) });
-    return { status: 200, body: { ok: true, event: "summary", ...versionBody(payload) } };
+    try {
+      const hasRiskSpec = Boolean(payload.risk_symbol && payload.risk_tick_size && payload.risk_tick_value_loss && payload.risk_contract_size && payload.risk_volume_min && payload.risk_volume_max && payload.risk_volume_step && payload.risk_volume_max >= payload.risk_volume_min);
+      await updateMt5AccountSummary(connection.id, { mt5Login: payload.mt5_login, brokerServer: payload.broker_server, currency: payload.currency, balance: payload.balance, equity: payload.equity, margin: payload.margin, freeMargin: payload.free_margin, floatingPnl: payload.floating_pnl, ...(hasRiskSpec ? { riskSymbol: payload.risk_symbol!, riskTickSize: payload.risk_tick_size!, riskTickValueLoss: payload.risk_tick_value_loss!, riskContractSize: payload.risk_contract_size!, riskVolumeMin: payload.risk_volume_min!, riskVolumeMax: payload.risk_volume_max!, riskVolumeStep: payload.risk_volume_step! } : {}) });
+      mt5Log(connection, "summary", startedAt, "success");
+      return { status: 200, body: { ok: true, event: "summary", ...versionBody(payload) } };
+    } catch (error) {
+      const code = classifySyncFailure(error); const diagnostic = await persistFailureDiagnostic(connection, payload, code, error, startedAt);
+      if (code === "INVALID_SYNC_DATA" || code === "SYNC_PERMISSION_DENIED") return { status: 422, body: { ok: false, code, diagnostic } };
+      throw error;
+    }
   }
   try {
     if (payload.event === "history_batch") {
@@ -99,19 +128,25 @@ export async function processMt5Payload(body: unknown) {
       await upsertMt5ClosedPositionBatch(connection.userId, connection.accountId, positions);
       await recordMt5HistoryAccepted(connection.id, payload.positions.length, payload.complete);
       if (payload.complete) await completeMt5HistorySync(connection.id, connection.accountId);
+      mt5Log(connection, "history_batch", startedAt, "success", { batchSize: payload.positions.length, acceptedCount: payload.positions.length, complete: payload.complete });
       return { status: 200, body: { ok: true, event: "history_batch", synced: payload.positions.length, complete: payload.complete, ...versionBody(payload) } };
     }
     if (payload.event === "open_batch") {
-      for (const position of payload.positions) await upsertMt5OpenPosition(connection.userId, connection.accountId, { ticket: position.ticket, symbol: position.symbol, direction: position.direction, lots: position.lots, openPrice: position.open_price, slPrice: position.sl_price > 0 ? position.sl_price : null, tpPrice: position.tp_price > 0 ? position.tp_price : null, riskUsd: position.risk_usd, rewardUsd: position.reward_usd, rrRatio: position.rr_ratio, floatingPnl: position.floating_pnl, openTime: normalize(position.open_time, payload.broker_utc_offset_minutes) });
-      return { status: 200, body: { ok: true, event: "open_batch", synced: payload.positions.length, ...versionBody(payload) } };
+      const synchronized = await upsertMt5OpenPositionBatch(connection.userId, connection.accountId, payload.positions.map(position => ({ ticket: position.ticket, symbol: position.symbol, direction: position.direction, lots: position.lots, openPrice: position.open_price, slPrice: position.sl_price > 0 ? position.sl_price : null, tpPrice: position.tp_price > 0 ? position.tp_price : null, riskUsd: position.risk_usd, rewardUsd: position.reward_usd, rrRatio: position.rr_ratio, floatingPnl: position.floating_pnl, openTime: normalize(position.open_time, payload.broker_utc_offset_minutes) })));
+      await recordMt5EventSuccess(connection.id, "open_batch");
+      mt5Log(connection, "open_batch", startedAt, "success", { positionCount: payload.positions.length, synchronized });
+      return { status: 200, body: { ok: true, event: "open_batch", synced: synchronized, ...versionBody(payload) } };
     }
     const shared = { ticket: payload.ticket, symbol: payload.symbol, direction: payload.direction, lots: payload.lots, openPrice: payload.open_price, slPrice: payload.sl_price > 0 ? payload.sl_price : null, tpPrice: payload.tp_price > 0 ? payload.tp_price : null, riskUsd: payload.risk_usd, rewardUsd: payload.reward_usd, rrRatio: payload.rr_ratio };
     if (payload.event === "open") {
       const openPayload = payload as typeof payload & { event: "open"; floating_pnl: number; open_time: z.infer<typeof timestamp> };
       await upsertMt5OpenPosition(connection.userId, connection.accountId, { ...shared, floatingPnl: openPayload.floating_pnl, openTime: normalize(openPayload.open_time) });
+      await recordMt5EventSuccess(connection.id, "open_batch");
+      mt5Log(connection, "open_batch", startedAt, "success", { positionCount: 1 });
       return { status: 200, body: { ok: true, event: "open", ...versionBody(payload) } };
     }
     await upsertMt5ClosedPosition(connection.userId, connection.accountId, { ...shared, closePrice: payload.close_price, realizedPnl: payload.realized_pnl, result: payload.result, closeTime: normalize(payload.close_time), openTime: normalize(payload.open_time ?? payload.close_time) });
+    mt5Log(connection, "history_batch", startedAt, "success", { batchSize: 1, acceptedCount: 1 });
     return { status: 200, body: { ok: true, event: "close", ...versionBody(payload) } };
   } catch (error) {
     const code = classifySyncFailure(error);
@@ -119,7 +154,8 @@ export async function processMt5Payload(body: unknown) {
       try { await recordMt5HistoryFailure(connection.id, `${code}: ${syncFailureDiagnostic(error)}`); }
       catch (statusError) { console.error("[MT5] failed to record history failure status", statusError instanceof Error ? statusError.message : "unknown error"); }
     }
-    if (code === "INVALID_SYNC_DATA" || code === "SYNC_PERMISSION_DENIED" || code === "INVALID_MT5_TIMESTAMP" || code === "FUTURE_TRADE") return { status: 422, body: { ok: false, code, diagnostic: syncFailureDiagnostic(error) } };
+    const diagnostic = await persistFailureDiagnostic(connection, payload, code, error, startedAt);
+    if (code === "INVALID_SYNC_DATA" || code === "SYNC_PERMISSION_DENIED" || code === "INVALID_MT5_TIMESTAMP" || code === "FUTURE_TRADE") return { status: 422, body: { ok: false, code, diagnostic } };
     throw error;
   }
 }

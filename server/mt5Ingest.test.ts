@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ getActive: vi.fn(), touch: vi.fn(), open: vi.fn(), close: vi.fn(), closeBatch: vi.fn(), summary: vi.fn(), completeHistory: vi.fn(), historyAttempt: vi.fn(), historyAccepted: vi.fn(), historyFailure: vi.fn() }));
-vi.mock("./mt5Db", () => ({ getActiveMt5Connection: mocks.getActive, touchMt5Connection: mocks.touch, upsertMt5OpenPosition: mocks.open, upsertMt5ClosedPosition: mocks.close, upsertMt5ClosedPositionBatch: mocks.closeBatch, updateMt5AccountSummary: mocks.summary, completeMt5HistorySync: mocks.completeHistory, recordMt5HistoryAttempt: mocks.historyAttempt, recordMt5HistoryAccepted: mocks.historyAccepted, recordMt5HistoryFailure: mocks.historyFailure }));
+const mocks = vi.hoisted(() => ({ getActive: vi.fn(), touch: vi.fn(), open: vi.fn(), openBatch: vi.fn(), close: vi.fn(), closeBatch: vi.fn(), summary: vi.fn(), eventSuccess: vi.fn(), eventFailure: vi.fn(), completeHistory: vi.fn(), historyAttempt: vi.fn(), historyAccepted: vi.fn(), historyFailure: vi.fn() }));
+vi.mock("./mt5Db", () => ({ getActiveMt5Connection: mocks.getActive, touchMt5Connection: mocks.touch, upsertMt5OpenPosition: mocks.open, upsertMt5OpenPositionBatch: mocks.openBatch, upsertMt5ClosedPosition: mocks.close, upsertMt5ClosedPositionBatch: mocks.closeBatch, updateMt5AccountSummary: mocks.summary, recordMt5EventSuccess: mocks.eventSuccess, recordMt5EventFailure: mocks.eventFailure, completeMt5HistorySync: mocks.completeHistory, recordMt5HistoryAttempt: mocks.historyAttempt, recordMt5HistoryAccepted: mocks.historyAccepted, recordMt5HistoryFailure: mocks.historyFailure }));
 
 import { mt5RateLimitTestHooks, processMt5Payload } from "./mt5Ingest";
 
@@ -15,9 +15,12 @@ describe("MT5 EA ingest", () => {
     mocks.getActive.mockResolvedValue({ id: 44, userId: 77, accountId: 12, active: true });
     mocks.touch.mockResolvedValue(undefined);
     mocks.open.mockResolvedValue(undefined);
+    mocks.openBatch.mockImplementation(async (_userId: number, _accountId: number, positions: unknown[]) => positions.length);
     mocks.close.mockResolvedValue(undefined);
     mocks.closeBatch.mockResolvedValue(0);
     mocks.summary.mockResolvedValue(undefined);
+    mocks.eventSuccess.mockResolvedValue(undefined);
+    mocks.eventFailure.mockResolvedValue(undefined);
     mocks.completeHistory.mockResolvedValue(undefined);
     mocks.historyAttempt.mockResolvedValue(undefined);
     mocks.historyAccepted.mockResolvedValue(undefined);
@@ -103,13 +106,20 @@ describe("MT5 EA ingest", () => {
     mocks.closeBatch.mockRejectedValue(Object.assign(new Error("syntax error in gj_sync_mt5_position"), { supabaseCode: "42601" }));
     await expect(processMt5Payload({ event: "history_batch", api_key: key("syntax-provider"), positions: [{ ...openPayload(key("syntax-provider")), close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00" }], complete: false })).rejects.toThrow("syntax error in gj_sync_mt5_position");
     expect(mocks.historyFailure).toHaveBeenCalledWith(44, expect.stringContaining("MIGRATION_REQUIRED_0008"));
-    expect(mocks.historyFailure).toHaveBeenCalledWith(44, expect.stringContaining("migration 0010"));
+    expect(mocks.historyFailure).toHaveBeenCalledWith(44, expect.stringContaining("migration 0016"));
   });
 
   it("preserves an unknown Supabase provider code in the safe history diagnostic", async () => {
     mocks.closeBatch.mockRejectedValue(Object.assign(new Error("provider rejected the write"), { supabaseCode: "XX999" }));
     await expect(processMt5Payload({ event: "history_batch", api_key: key("unknown-provider"), positions: [{ ...openPayload(key("unknown-provider")), close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00" }], complete: false })).rejects.toThrow("provider rejected the write");
     expect(mocks.historyFailure).toHaveBeenCalledWith(44, expect.stringContaining("XX999"));
+  });
+
+  it("records a transient summary persistence failure without deleting or deactivating the authenticated connection", async () => {
+    mocks.summary.mockRejectedValue(Object.assign(new Error("database request timed out"), { supabaseCode: "57014" }));
+    await expect(processMt5Payload({ event: "summary", api_key: key("summary-timeout"), mt5_login: "90123456", broker_server: "Broker-Live", currency: "USD", balance: 10000, equity: 10042.5, margin: 250, free_margin: 9792.5, floating_pnl: 42.5 })).rejects.toThrow("database request timed out");
+    expect(mocks.eventFailure).toHaveBeenCalledWith(44, "summary", "DATABASE_RETRYABLE", expect.stringContaining("temporarily unavailable"));
+    expect(mocks.getActive).toHaveBeenCalledWith(key("summary-timeout"));
   });
 
   it("derives the target account from the authenticated connection even when a payload attempts to supply another account", async () => {
@@ -126,13 +136,13 @@ describe("MT5 EA ingest", () => {
     expect(mocks.open).toHaveBeenCalledWith(77, 13, expect.objectContaining({ ticket: 123456789n }));
   });
 
-  it("persists an open batch sequentially to avoid account-row lock contention", async () => {
-    const order: string[] = [];
-    mocks.open.mockImplementation(async (_userId: number, _accountId: number, position: { ticket: bigint }) => { order.push(position.ticket.toString()); });
+  it("persists an open batch in one account-scoped atomic operation to avoid repeated account-row locks", async () => {
     const first = { ...openPayload(key("open-seq")), ticket: "2001" };
     const second = { ...openPayload(key("open-seq")), ticket: "2002" };
     await expect(processMt5Payload({ event: "open_batch", api_key: key("open-seq"), positions: [first, second], broker_utc_offset_minutes: 180 })).resolves.toMatchObject({ status: 200, body: { event: "open_batch", synced: 2 } });
-    expect(order).toEqual(["2001", "2002"]);
+    expect(mocks.openBatch).toHaveBeenCalledTimes(1);
+    expect(mocks.openBatch).toHaveBeenCalledWith(77, 12, [expect.objectContaining({ ticket: 2001n }), expect.objectContaining({ ticket: 2002n })]);
+    expect(mocks.eventSuccess).toHaveBeenCalledWith(44, "open_batch");
   });
 
   it("limits a single API key to five events per second", async () => {

@@ -3,13 +3,19 @@ import { getDb } from "./db";
 import { getOwnedAccount } from "./goldDb";
 import { and, eq } from "./supabaseQuery";
 
-type SyncConnection = { active: boolean; lastPing: Date | null; lastHistoryAttempt: Date | null; lastHistorySync: Date | null; lastHistoryStatus: string | null; lastHistoryMessage: string | null; historySyncedCount: number | null };
+type SyncConnection = { active: boolean; lastPing: Date | null; lastContactAt?: Date | null; lastSummaryAt?: Date | null; lastSummarySuccessAt?: Date | null; lastSummaryErrorAt?: Date | null; lastOpenSyncAt?: Date | null; lastOpenSyncSuccessAt?: Date | null; lastOpenSyncErrorAt?: Date | null; lastErrorAt?: Date | null; lastErrorCode?: string | null; lastErrorMessage?: string | null; consecutiveFailures?: number | null; lastHistoryAttempt: Date | null; lastHistorySync: Date | null; lastHistoryStatus: string | null; lastHistoryMessage: string | null; historySyncedCount: number | null };
 export function classifyMt5SyncHealth(connection: SyncConnection | null, now = Date.now()) {
-  if (!connection) return { state: "UNAVAILABLE" as const, label: "No active MT5 connection", lastContactAgeSeconds: null, historyState: "NOT_STARTED" as const, message: "Create a connection, then attach the Expert Advisor." };
-  const age = connection.lastPing ? Math.max(0, Math.floor((now - connection.lastPing.getTime()) / 1_000)) : null;
-  const state = age == null ? "WAITING" : age <= 10 ? "LIVE" : age <= 60 ? "IDLE" : "STALE";
+  if (!connection) return { state: "MISSING" as const, label: "MT5 connection record missing", lastContactAgeSeconds: null, lastSummaryAgeSeconds: null, lastOpenSyncAgeSeconds: null, historyState: "NOT_STARTED" as const, message: "No private MT5 connection record exists for this journal account. Reconnect required." };
+  const ageOf = (value?: Date | null) => value ? Math.max(0, Math.floor((now - value.getTime()) / 1_000)) : null;
+  const contactAge = ageOf(connection.lastContactAt ?? connection.lastPing);
+  const summaryAge = ageOf(connection.lastSummarySuccessAt);
+  const openAge = ageOf(connection.lastOpenSyncSuccessAt);
+  const summaryFailedAfterSuccess = Boolean(connection.lastSummaryErrorAt && (!connection.lastSummarySuccessAt || connection.lastSummaryErrorAt.getTime() > connection.lastSummarySuccessAt.getTime()));
+  const latestError = connection.lastErrorCode ? `${connection.lastErrorCode}${connection.lastErrorMessage ? `: ${connection.lastErrorMessage}` : ""}` : null;
+  const state = contactAge == null ? "WAITING" : contactAge > 300 ? "OFFLINE" : contactAge > 60 ? "STALE" : summaryAge == null || summaryAge > 15 || summaryFailedAfterSuccess ? "DEGRADED" : "CONNECTED";
   const historyState = connection.lastHistoryStatus === "FAILED" ? "FAILED" : connection.lastHistorySync ? "COMPLETE" : connection.lastHistoryAttempt ? "IN_PROGRESS" : "NOT_STARTED";
-  return { state, label: state === "LIVE" ? "Live MT5 sync" : state === "IDLE" ? "MT5 sync idle" : state === "STALE" ? "MT5 sync stale" : "Waiting for MT5", lastContactAgeSeconds: age, historyState, message: historyState === "FAILED" ? (connection.lastHistoryMessage || "History sync failed. Check the EA log and connection.") : historyState === "COMPLETE" ? `${connection.historySyncedCount ?? 0} historical positions synced.` : historyState === "IN_PROGRESS" ? (connection.lastHistoryMessage || "Historical positions are being received.") : "No historical batch received yet." };
+  const message = state === "CONNECTED" ? "Live terminal contact and snapshot are current." : state === "DEGRADED" ? `MT5 contacted Gold Journal, but the live snapshot ${summaryAge == null ? "has not been saved yet" : `has not updated for ${summaryAge}s`}${latestError ? `. ${latestError}` : "."}` : state === "STALE" ? `The last MT5 contact was ${contactAge}s ago. The connection record remains active and will recover when EA communication resumes.` : state === "OFFLINE" ? `The last MT5 contact was ${contactAge}s ago. The connection record remains active; check the terminal, WebRequest permission, and internet connection.` : "Waiting for the first MT5 terminal contact.";
+  return { state, label: state === "CONNECTED" ? "MT5 connected" : state === "DEGRADED" ? "MT5 sync degraded" : state === "STALE" ? "MT5 sync stale" : state === "OFFLINE" ? "MT5 offline" : "Waiting for MT5", lastContactAgeSeconds: contactAge, lastSummaryAgeSeconds: summaryAge, lastOpenSyncAgeSeconds: openAge, lastErrorCode: connection.lastErrorCode ?? null, consecutiveFailures: connection.consecutiveFailures ?? 0, historyState, message: historyState === "FAILED" ? (connection.lastHistoryMessage || message) : message };
 }
 
 export async function getMt5Integrity(userId: number, accountId: number) {
@@ -23,7 +29,8 @@ export async function getMt5Integrity(userId: number, accountId: number) {
   const unjournaledClosedPositions = closed.filter(row => !journaledTickets.has(row.ticket.toString())).length;
   const health = classifyMt5SyncHealth(connection ?? null);
   const findings = [
-    ...(health.state === "STALE" ? [{ code: "MT5_STALE", severity: "warning" as const, message: "MT5 has not contacted Gold Journal for over one minute." }] : []),
+    ...(health.state === "DEGRADED" ? [{ code: "MT5_DEGRADED", severity: "warning" as const, message: health.message }] : []),
+    ...(health.state === "STALE" || health.state === "OFFLINE" ? [{ code: health.state === "OFFLINE" ? "MT5_OFFLINE" : "MT5_STALE", severity: "warning" as const, message: health.message }] : []),
     ...(health.historyState === "FAILED" ? [{ code: "MT5_HISTORY_FAILED", severity: "error" as const, message: health.message }] : []),
     ...(unjournaledClosedPositions ? [{ code: "MT5_UNJOURNALED_CLOSES", severity: "warning" as const, message: `${unjournaledClosedPositions} closed MT5 position${unjournaledClosedPositions === 1 ? " is" : "s are"} waiting to reach Trade Log.` }] : []),
   ];

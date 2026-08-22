@@ -1,6 +1,6 @@
 #property strict
-#property version   "2.3"
-#property description "Gold Journal authoritative MT5 bridge: summary, broker risk-symbol specifications, open positions, close events, and replay-safe history batches."
+#property version   "2.4"
+#property description "Gold Journal authoritative MT5 bridge: reliable summary, broker risk-symbol specifications, open positions, close events, and replay-safe history batches."
 
 input string Endpoint = "https://YOUR-SITE.netlify.app/api/mt5";
 input string ApiKey = "PASTE_ONCE_FROM_GOLD_JOURNAL";
@@ -11,14 +11,21 @@ input int HistoryDays = 3650;
 input bool SendHistoryOnInit = true;
 input string RiskSymbol = "";
 
-const string EA_VERSION = "2.3.0";
+const string EA_VERSION = "2.4.0";
 const string PAYLOAD_VERSION = "2";
 const int REQUEST_TIMEOUT_MS = 15000;
 const int HISTORY_BATCH_SIZE = 50;
 const int FULL_HISTORY_RETRY_SECONDS = 24 * 60 * 60;
+const int MAX_RETRY_BACKOFF_SECONDS = 60;
 
 datetime g_last_history_sync = 0;
 datetime g_last_history_attempt = 0;
+datetime g_next_retry_at = 0;
+datetime g_last_summary_success = 0;
+datetime g_last_open_success = 0;
+datetime g_last_history_success = 0;
+int g_consecutive_failures = 0;
+bool g_permanent_rejection = false;
 
 string JsonEscape(string value) {
    StringReplace(value, "\\", "\\\\");
@@ -36,8 +43,25 @@ string Direction(ENUM_POSITION_TYPE type) { return type == POSITION_TYPE_BUY ? "
 string DealDirection(long type) { return type == DEAL_TYPE_BUY ? "BUY" : "SELL"; }
 string OppositeDirection(long type) { return type == DEAL_TYPE_BUY ? "SELL" : "BUY"; }
 
+bool IsTransientStatus(int status) { return status == -1 || status == 408 || status == 429 || status == 502 || status == 503 || status == 504; }
+int RetryDelaySeconds() {
+   int exponent = MathMin(g_consecutive_failures - 1, 4);
+   int base_delay = MathMin(MAX_RETRY_BACKOFF_SECONDS, SyncSeconds * (1 << exponent));
+   return MathMin(MAX_RETRY_BACKOFF_SECONDS, base_delay + (MathRand() % MathMax(1, SyncSeconds)));
+}
+void MarkEventSuccess(string expectedEvent) {
+   datetime now = TimeCurrent();
+   if(expectedEvent == "summary") g_last_summary_success = now;
+   else if(expectedEvent == "open_batch") g_last_open_success = now;
+   else if(expectedEvent == "history_batch") g_last_history_success = now;
+   if(g_consecutive_failures > 0) PrintFormat("[MT5 LIVE] %s recovered after %d transient failure(s)", expectedEvent, g_consecutive_failures);
+   g_consecutive_failures = 0;
+   g_next_retry_at = 0;
+}
 bool SendJson(string payload, string expectedEvent) {
    if(StringLen(payload) == 0) return false;
+   if(g_permanent_rejection) return false;
+   if(g_next_retry_at > TimeCurrent()) return false;
    char data[];
    int data_size = StringToCharArray(payload, data, 0, WHOLE_ARRAY, CP_UTF8);
    if(data_size > 0 && data[data_size - 1] == 0) ArrayResize(data, data_size - 1);
@@ -47,13 +71,25 @@ bool SendJson(string payload, string expectedEvent) {
    int status = WebRequest("POST", Endpoint, headers, REQUEST_TIMEOUT_MS, data, response, response_headers);
    string response_text = CharArrayToString(response, 0, WHOLE_ARRAY, CP_UTF8);
    if(status < 200 || status >= 300) {
-      PrintFormat("Gold Journal %s sync failed: HTTP %d — %s", expectedEvent, status, response_text);
+      if(IsTransientStatus(status)) {
+         g_consecutive_failures++;
+         int delay = RetryDelaySeconds();
+         g_next_retry_at = TimeCurrent() + delay;
+         PrintFormat("[MT5 LIVE] %s failed HTTP=%d retry=%d in %ds", expectedEvent, status, g_consecutive_failures, delay);
+      } else {
+         g_permanent_rejection = true;
+         PrintFormat("[MT5 LIVE] %s rejected HTTP=%d; fix the EA key, endpoint, or payload, then restart the EA", expectedEvent, status);
+      }
       return false;
    }
    if(StringFind(response_text, "\"ok\":true") < 0) {
-      PrintFormat("Gold Journal %s sync returned an unexpected response: %s", expectedEvent, response_text);
+      g_consecutive_failures++;
+      int delay = RetryDelaySeconds();
+      g_next_retry_at = TimeCurrent() + delay;
+      PrintFormat("[MT5 LIVE] %s returned an invalid response retry=%d in %ds", expectedEvent, g_consecutive_failures, delay);
       return false;
    }
+   MarkEventSuccess(expectedEvent);
    return true;
 }
 

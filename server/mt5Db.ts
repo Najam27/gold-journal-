@@ -4,7 +4,7 @@ import { getOwnedAccount } from "./goldDb";
 import { classifyMt5SyncHealth } from "./mt5Reliability";
 import { getDb } from "./db";
 import { mt5ApiKeyFingerprint } from "./mt5Security";
-import { syncMt5HistoryBatchAtomic, syncMt5PositionAtomic } from "./atomicOperations";
+import { recordMt5EventFailureAtomic, syncMt5HistoryBatchAtomic, syncMt5OpenBatchAtomic, syncMt5PositionAtomic } from "./atomicOperations";
 
 async function requireDb() { const db = await getDb(); if (!db) throw new Error("Supabase database is unavailable. Please retry shortly."); return db; }
 
@@ -75,7 +75,7 @@ export async function getMt5Workspace(userId: number, accountId: number) {
   const journalRows = visibleTickets.length ? await db.select({ mt5Ticket: trades.mt5Ticket }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId), or(...visibleTickets.map(ticket => eq(trades.mt5Ticket, ticket))))) : [];
   const journaledTickets = new Set(journalRows.flatMap(row => row.mt5Ticket == null ? [] : [row.mt5Ticket.toString()]));
   return {
-    connections: connections.map(connection => ({ id: connection.id, accountName: account.name, label: connection.label, active: connection.active, brokerUtcOffsetMinutes: (connection as typeof connection & { brokerUtcOffsetMinutes?: number }).brokerUtcOffsetMinutes ?? 180, lastPing: connection.lastPing, mt5Login: connection.mt5Login?.toString() ?? null, brokerServer: connection.brokerServer, currency: connection.currency, balance: connection.balance, equity: connection.equity, margin: connection.margin, freeMargin: connection.freeMargin, floatingPnl: connection.floatingPnl, riskSymbol: connection.riskSymbol, riskTickSize: connection.riskTickSize, riskTickValueLoss: connection.riskTickValueLoss, riskContractSize: connection.riskContractSize, riskVolumeMin: connection.riskVolumeMin, riskVolumeMax: connection.riskVolumeMax, riskVolumeStep: connection.riskVolumeStep, riskSymbolUpdatedAt: connection.riskSymbolUpdatedAt, syncHealth: classifyMt5SyncHealth(connection), lastHistorySync: connection.lastHistorySync, historySyncedCount: connection.historySyncedCount, lastHistoryAttempt: connection.lastHistoryAttempt, lastHistoryStatus: connection.lastHistoryStatus, lastHistoryMessage: connection.lastHistoryMessage, lastHistoryBatchSize: connection.lastHistoryBatchSize, createdAt: connection.createdAt })),
+    connections: connections.map(connection => ({ id: connection.id, accountName: account.name, label: connection.label, active: connection.active, brokerUtcOffsetMinutes: (connection as typeof connection & { brokerUtcOffsetMinutes?: number }).brokerUtcOffsetMinutes ?? 180, lastPing: connection.lastPing, lastContactAt: connection.lastContactAt, lastSummaryAt: connection.lastSummaryAt, lastSummarySuccessAt: connection.lastSummarySuccessAt, lastSummaryErrorAt: connection.lastSummaryErrorAt, lastOpenSyncAt: connection.lastOpenSyncAt, lastOpenSyncSuccessAt: connection.lastOpenSyncSuccessAt, lastOpenSyncErrorAt: connection.lastOpenSyncErrorAt, lastErrorAt: connection.lastErrorAt, lastErrorCode: connection.lastErrorCode, lastErrorMessage: connection.lastErrorMessage, consecutiveFailures: connection.consecutiveFailures, mt5Login: connection.mt5Login?.toString() ?? null, brokerServer: connection.brokerServer, currency: connection.currency, balance: connection.balance, equity: connection.equity, margin: connection.margin, freeMargin: connection.freeMargin, floatingPnl: connection.floatingPnl, riskSymbol: connection.riskSymbol, riskTickSize: connection.riskTickSize, riskTickValueLoss: connection.riskTickValueLoss, riskContractSize: connection.riskContractSize, riskVolumeMin: connection.riskVolumeMin, riskVolumeMax: connection.riskVolumeMax, riskVolumeStep: connection.riskVolumeStep, riskSymbolUpdatedAt: connection.riskSymbolUpdatedAt, syncHealth: classifyMt5SyncHealth(connection), lastHistorySync: connection.lastHistorySync, historySyncedCount: connection.historySyncedCount, lastHistoryAttempt: connection.lastHistoryAttempt, lastHistoryStatus: connection.lastHistoryStatus, lastHistoryMessage: connection.lastHistoryMessage, lastHistoryBatchSize: connection.lastHistoryBatchSize, createdAt: connection.createdAt })),
     openPositions: openPositions.map(position => safePosition(position, journaledTickets)),
     closedPositions: closedPositions.map(position => safePosition(position, journaledTickets)),
   };
@@ -109,14 +109,31 @@ export async function getActiveMt5Connection(apiKey: string) {
 
 export async function touchMt5Connection(connectionId: number) {
   const db = await requireDb();
-  await db.update(mt5Connections).set({ lastPing: new Date() }).where(eq(mt5Connections.id, connectionId));
+  const now = new Date();
+  await db.update(mt5Connections).set({ lastPing: now, lastContactAt: now }).where(eq(mt5Connections.id, connectionId));
+}
+
+export type Mt5EventOperation = "summary" | "open_batch" | "history_batch";
+
+export async function recordMt5EventSuccess(connectionId: number, operation: Mt5EventOperation) {
+  const db = await requireDb(); const now = new Date();
+  await db.update(mt5Connections).set({
+    lastPing: now, lastContactAt: now, lastErrorAt: null, lastErrorCode: null, lastErrorMessage: null, consecutiveFailures: 0,
+    ...(operation === "open_batch" ? { lastOpenSyncAt: now, lastOpenSyncSuccessAt: now } : {}),
+  }).where(eq(mt5Connections.id, connectionId));
+}
+
+export async function recordMt5EventFailure(connectionId: number, operation: Mt5EventOperation, code: string, message: string) {
+  const safeMessage = message.replace(/[\r\n]+/g, " ").slice(0, 255);
+  await recordMt5EventFailureAtomic(connectionId, operation, code.slice(0, 64), safeMessage);
 }
 
 type AccountSummary = { mt5Login: bigint; brokerServer: string; currency: string; balance: number; equity: number; margin: number; freeMargin: number; floatingPnl: number; riskSymbol?: string; riskTickSize?: number; riskTickValueLoss?: number; riskContractSize?: number; riskVolumeMin?: number; riskVolumeMax?: number; riskVolumeStep?: number };
 
 export async function updateMt5AccountSummary(connectionId: number, value: AccountSummary) {
   const db = await requireDb();
-  await db.update(mt5Connections).set({ mt5Login: value.mt5Login, brokerServer: value.brokerServer, currency: value.currency, balance: value.balance.toFixed(2), equity: value.equity.toFixed(2), margin: value.margin.toFixed(2), freeMargin: value.freeMargin.toFixed(2), floatingPnl: value.floatingPnl.toFixed(2), ...(value.riskSymbol ? { riskSymbol: value.riskSymbol, riskTickSize: value.riskTickSize!.toFixed(8), riskTickValueLoss: value.riskTickValueLoss!.toFixed(8), riskContractSize: value.riskContractSize!.toFixed(8), riskVolumeMin: value.riskVolumeMin!.toFixed(8), riskVolumeMax: value.riskVolumeMax!.toFixed(8), riskVolumeStep: value.riskVolumeStep!.toFixed(8), riskSymbolUpdatedAt: new Date() } : {}), lastPing: new Date() }).where(eq(mt5Connections.id, connectionId));
+  const now = new Date();
+  await db.update(mt5Connections).set({ mt5Login: value.mt5Login, brokerServer: value.brokerServer, currency: value.currency, balance: value.balance.toFixed(2), equity: value.equity.toFixed(2), margin: value.margin.toFixed(2), freeMargin: value.freeMargin.toFixed(2), floatingPnl: value.floatingPnl.toFixed(2), ...(value.riskSymbol ? { riskSymbol: value.riskSymbol, riskTickSize: value.riskTickSize!.toFixed(8), riskTickValueLoss: value.riskTickValueLoss!.toFixed(8), riskContractSize: value.riskContractSize!.toFixed(8), riskVolumeMin: value.riskVolumeMin!.toFixed(8), riskVolumeMax: value.riskVolumeMax!.toFixed(8), riskVolumeStep: value.riskVolumeStep!.toFixed(8), riskSymbolUpdatedAt: now } : {}), lastPing: now, lastContactAt: now, lastSummaryAt: now, lastSummarySuccessAt: now, lastErrorAt: null, lastErrorCode: null, lastErrorMessage: null, consecutiveFailures: 0 }).where(eq(mt5Connections.id, connectionId));
 }
 
 export async function completeMt5HistorySync(connectionId: number, accountId: number) {
@@ -132,7 +149,8 @@ export async function recordMt5HistoryAttempt(connectionId: number, batchSize: n
 
 export async function recordMt5HistoryAccepted(connectionId: number, batchSize: number, complete: boolean) {
   const db = await requireDb();
-  await db.update(mt5Connections).set({ lastHistoryAttempt: new Date(), lastHistoryStatus: complete ? "COMPLETING" : "ACCEPTED", lastHistoryMessage: complete ? `Accepted final batch of ${batchSize} historical position${batchSize === 1 ? "" : "s"}.` : `Accepted ${batchSize} historical position${batchSize === 1 ? "" : "s"}.`, lastHistoryBatchSize: batchSize }).where(eq(mt5Connections.id, connectionId));
+  const now = new Date();
+  await db.update(mt5Connections).set({ lastPing: now, lastContactAt: now, lastHistoryAttempt: now, lastHistoryStatus: complete ? "COMPLETING" : "ACCEPTED", lastHistoryMessage: complete ? `Accepted final batch of ${batchSize} historical position${batchSize === 1 ? "" : "s"}.` : `Accepted ${batchSize} historical position${batchSize === 1 ? "" : "s"}.`, lastHistoryBatchSize: batchSize, lastErrorAt: null, lastErrorCode: null, lastErrorMessage: null, consecutiveFailures: 0 }).where(eq(mt5Connections.id, connectionId));
 }
 
 export async function recordMt5HistoryFailure(connectionId: number, message: string) {
@@ -217,10 +235,13 @@ export async function syncStoredMt5PositionsToTradeLog(userId: number, accountId
 }
 
 export async function upsertMt5OpenPosition(userId: number, accountId: number, value: LiveBase & { floatingPnl: number }) {
+  return upsertMt5OpenPositionBatch(userId, accountId, [value]);
+}
+
+export async function upsertMt5OpenPositionBatch(userId: number, accountId: number, values: Array<LiveBase & { floatingPnl: number }>) {
   const db = await requireDb();
   const resetAt = await getJournalDataResetAt(db, accountId);
-  if (!isMt5PositionAfterJournalReset(resetAt, { status: "OPEN", openTime: value.openTime })) return;
-  await syncMt5PositionAtomic(userId, accountId, {
+  const payloads = values.filter(value => isMt5PositionAfterJournalReset(resetAt, { status: "OPEN", openTime: value.openTime })).map(value => ({
     ticket: value.ticket.toString(), symbol: value.symbol, direction: value.direction,
     lots: value.lots.toFixed(2), openPrice: value.openPrice.toFixed(6),
     closePrice: null, slPrice: value.slPrice?.toFixed(6) ?? null, tpPrice: value.tpPrice?.toFixed(6) ?? null,
@@ -228,7 +249,9 @@ export async function upsertMt5OpenPosition(userId: number, accountId: number, v
     floatingPnl: value.floatingPnl.toFixed(2), realizedPnl: null, result: "OPEN",
     openTime: value.openTime.toISOString(), closeTime: null, status: "OPEN",
     session: pktSession(value.openTime), tradeTime: value.openTime.toISOString(), pnl: value.floatingPnl.toFixed(2),
-  });
+  }));
+  if (!payloads.length) return 0;
+  return syncMt5OpenBatchAtomic(userId, accountId, payloads);
 }
 
 export async function upsertMt5ClosedPosition(userId: number, accountId: number, value: LiveBase & { closePrice: number; realizedPnl: number; result: "WIN" | "LOSS" | "BREAK_EVEN"; closeTime: Date }) {

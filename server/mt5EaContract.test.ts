@@ -40,6 +40,8 @@ describe("Gold Journal EA history contract", () => {
     expect(eaSource).toContain("const int FULL_HISTORY_RETRY_SECONDS = 24 * 60 * 60;");
     expect(eaSource).toContain("input int HistoryDays = 3650;");
     expect(eaSource).toContain("g_last_history_sync >= FULL_HISTORY_RETRY_SECONDS");
-    expect(eaSource).toContain("sync failed: HTTP %d — %s");
+    expect(eaSource).toContain("const int MAX_RETRY_BACKOFF_SECONDS = 60;");
+    expect(eaSource).toContain("bool IsTransientStatus(int status)");
+    expect(eaSource).toContain("rejected HTTP=%d; fix the EA key, endpoint, or payload, then restart the EA");
   });
 });

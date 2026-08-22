@@ -53,6 +53,31 @@ export async function syncMt5PositionAtomic(userId: number, accountId: number, p
   return data === true;
 }
 
+export async function syncMt5OpenBatchAtomic(userId: number, accountId: number, positions: Array<Record<string, unknown>>) {
+  const { data, error } = await getSupabaseAdmin().rpc("gj_sync_mt5_open_batch", {
+    target_user_id: userId,
+    target_account_id: accountId,
+    position_payloads: positions,
+  });
+  if (error) throwRpcError("sync MT5 open batch", error);
+  const synchronized = Number(data ?? 0);
+  if (!Number.isInteger(synchronized) || synchronized < 0 || synchronized > positions.length) {
+    throw new Error("Supabase atomic MT5 open batch returned an invalid count.");
+  }
+  return synchronized;
+}
+
+export async function recordMt5EventFailureAtomic(connectionId: number, operation: "summary" | "open_batch" | "history_batch", code: string, message: string) {
+  const { data, error } = await getSupabaseAdmin().rpc("gj_record_mt5_event_failure", {
+    target_connection_id: connectionId,
+    target_operation: operation,
+    target_error_code: code,
+    target_error_message: message,
+  });
+  if (error) throwRpcError("record MT5 event failure", error);
+  return data === true;
+}
+
 export async function syncMt5HistoryBatchAtomic(userId: number, accountId: number, positions: Array<Record<string, unknown>>) {
   const { data, error } = await getSupabaseAdmin().rpc("gj_sync_mt5_history_batch", {
     target_user_id: userId,

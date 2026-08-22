@@ -111,6 +111,15 @@
   color: var(--gj-control-text);
 }
 
+.gj-shell select:focus-visible,
+.mt5-add-form select:focus-visible,
+.mt5-offset-field:focus-visible,
+.option-create select:focus-visible,
+.option-page-create select:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
 /* Hover, current, and selected states are restrained instead of graphite- or neon-only. */
 .account-list button:hover,
 .manager-account-list button:hover,

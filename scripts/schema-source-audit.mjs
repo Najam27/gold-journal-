@@ -22,6 +22,7 @@ const expectedMigrations = [
   "0013_offline_replay_and_mt5_symbol_specs.sql",
   "0014_user_ai_provider_vault.sql",
   "0015_async_ai_jobs.sql",
+  "0016_mt5_live_reliability.sql",
 ];
 const expectedNames = [
   "gj_accounts_id_user_unique",
@@ -75,6 +76,7 @@ const report = {
   offlineReplayAndRiskMigrationHardened: (() => { const migration = read("supabase/migrations/0013_offline_replay_and_mt5_symbol_specs.sql"); return ["clientMutationId", "gj_trades_owner_account_client_mutation_unique", "gj_cash_owner_account_client_mutation_unique", "riskTickSize", "riskTickValueLoss", "riskVolumeStep", "gj_mt5_risk_tick_size_valid", "gj_mt5_risk_tick_value_valid", "gj_mt5_risk_volume_valid"].every(token => migration.includes(token)); })(),
   aiProviderVaultMigrationHardened: (() => { const migration = read("supabase/migrations/0014_user_ai_provider_vault.sql"); return schema.includes("aiProviderSettings") && ["gj_ai_provider_settings", "keyCiphertext", "keyIv", "keyAuthTag", "enable row level security", "revoke all on table public.gj_ai_provider_settings from public, anon, authenticated", "grant select, insert, update, delete on table public.gj_ai_provider_settings to service_role"].every(token => migration.includes(token)); })(),
   asyncAiJobsMigrationHardened: (() => { const migration = read("supabase/migrations/0015_async_ai_jobs.sql"); return schema.includes("aiJobs") && ["gj_ai_jobs", "dispatchHash", "gj_ai_jobs_account_owner_fk", "gj_ai_jobs_kind_valid", "gj_ai_jobs_status_valid", "enable row level security", "revoke all on table public.gj_ai_jobs from public, anon, authenticated", "grant select, insert, update, delete on table public.gj_ai_jobs to service_role"].every(token => migration.includes(token)); })(),
+  mt5LiveReliabilityMigrationHardened: (() => { const migration = read("supabase/migrations/0016_mt5_live_reliability.sql"); return ["lastContactAt", "lastSummarySuccessAt", "lastOpenSyncSuccessAt", "consecutiveFailures", "gj_record_mt5_event_failure", "gj_sync_mt5_open_batch", "security definer", "set search_path = public", "grant execute on function public.gj_sync_mt5_open_batch"].every(token => migration.includes(token)); })(),
 };
 console.log(JSON.stringify(report, null, 2));
-if (!report.migrationOrderValid || !report.staleDrizzleArtifactsRemoved || !report.expectedNamesInDrizzleSchema || !report.expectedNamesInSupabaseMigrations || !report.tradeSummaryHotfixQualified || !report.productionIntegrityMigrationHardened || !report.aiHistoryMigrationHardened || !report.mt5HistoryBatchMigrationHardened || !report.offlineReplayAndRiskMigrationHardened || !report.aiProviderVaultMigrationHardened || !report.asyncAiJobsMigrationHardened || missingMigrations.length) process.exitCode = 1;
+if (!report.migrationOrderValid || !report.staleDrizzleArtifactsRemoved || !report.expectedNamesInDrizzleSchema || !report.expectedNamesInSupabaseMigrations || !report.tradeSummaryHotfixQualified || !report.productionIntegrityMigrationHardened || !report.aiHistoryMigrationHardened || !report.mt5HistoryBatchMigrationHardened || !report.offlineReplayAndRiskMigrationHardened || !report.aiProviderVaultMigrationHardened || !report.asyncAiJobsMigrationHardened || !report.mt5LiveReliabilityMigrationHardened || missingMigrations.length) process.exitCode = 1;

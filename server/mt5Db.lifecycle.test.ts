@@ -9,15 +9,18 @@ const store = vi.hoisted(() => ({
 }));
 
 vi.mock("./db", () => ({ getDb: async () => store.db }));
-vi.mock("./atomicOperations", () => ({ syncMt5PositionAtomic: async (_userId: number, accountId: number, position: any) => {
-  store.atomicCalls += 1;
-  const positionKey = key(accountId, BigInt(position.ticket));
-  const existing = store.positions.get(positionKey);
-  if (existing?.status === "CLOSED") return false;
-  store.positions.set(positionKey, { ...(existing ?? {}), status: position.status, realizedPnl: position.realizedPnl, openTime: new Date(position.openTime), closeTime: position.closeTime ? new Date(position.closeTime) : null });
-  store.journal.set(positionKey, { ...(store.journal.get(positionKey) ?? { notes: "" }), result: position.result, pnl: position.pnl });
-  return true;
-} }));
+vi.mock("./atomicOperations", () => {
+  const apply = async (_userId: number, accountId: number, position: any) => {
+    store.atomicCalls += 1;
+    const positionKey = key(accountId, BigInt(position.ticket));
+    const existing = store.positions.get(positionKey);
+    if (existing?.status === "CLOSED") return false;
+    store.positions.set(positionKey, { ...(existing ?? {}), status: position.status, realizedPnl: position.realizedPnl, openTime: new Date(position.openTime), closeTime: position.closeTime ? new Date(position.closeTime) : null });
+    store.journal.set(positionKey, { ...(store.journal.get(positionKey) ?? { notes: "" }), result: position.result, pnl: position.pnl });
+    return true;
+  };
+  return { syncMt5PositionAtomic: apply, syncMt5OpenBatchAtomic: async (userId: number, accountId: number, positions: any[]) => { let accepted = 0; for (const position of positions) if (await apply(userId, accountId, position)) accepted += 1; return accepted; } };
+});
 
 import { isMt5PositionAfterJournalReset, upsertMt5ClosedPosition, upsertMt5OpenPosition } from "./mt5Db";
 
