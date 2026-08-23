@@ -262,7 +262,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
         confirmed: true,
       });
       setNewApiKey(rotated.apiKey);
-      toast.success("New MT5 key issued. Paste it into EA v2.5, then restart the EA.");
+      toast.success("New MT5 key issued. Paste it into EA v2.6, then restart the EA.");
       refresh();
     } catch (error: any) {
       toast.error(error.message || "Could not issue a new MT5 key.");
@@ -330,9 +330,9 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
             </h3>
             <p>
               {recoveredMt5History
-                ? "Your existing journaled MT5 trades are safe. Create a replacement connection below, copy its new key into EA v2.5, then restart the EA once to restore live balance, equity, and margin updates."
+                ? "Your existing journaled MT5 trades are safe. Create a replacement connection below, copy its new key into EA v2.6, then restart the EA once to restore live balance, equity, and margin updates."
                 : activeConnection?.syncHealth?.message ||
-                  "Attach EA v2.5 to any chart. Balance, equity, free margin, and floating P&L appear after its next summary event."}
+                  "Attach EA v2.6 to any chart. Its Experts tab first confirms that it attached, then balance, equity, free margin, and floating P&L appear after its next summary event."}
             </p>
           </div>
         ) : (
@@ -437,7 +437,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
                     <div className="mt5-first-contact-recovery">
                       <strong>First-contact recovery</strong>
                       <p>
-                        Download EA v2.5, paste this connection&apos;s current API key and exact server URL, then remove and reattach the EA. EA v2.5 uses only those two values. If the original one-time key is unavailable, issue a replacement below; history remains unchanged.
+                        Download EA v2.6, paste this connection&apos;s current API key and exact server URL, then remove and reattach the EA. EA v2.6 uses only those two values and writes a safe startup line in the MT5 Experts tab. If the original one-time key is unavailable, issue a replacement below; history remains unchanged.
                       </p>
                       <Button
                         variant="outline"
@@ -577,7 +577,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
           onClick={() => setGuideOpen(!guideOpen)}
         >
           <div>
-            <span className="eyebrow">SETUP GUIDE · EA v2.5</span>
+            <span className="eyebrow">SETUP GUIDE · EA v2.6</span>
             <h3>How to connect MT5 and backfill history</h3>
           </div>
           <ChevronDown size={18} />
@@ -588,7 +588,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
               <div>
                 <strong>Replace the earlier EA build</strong>
                 <p>
-                  Download EA v2.5. It sends the first compatibility heartbeat, balance, equity, floating P&amp;L,
+                  Download EA v2.6. It writes a startup confirmation in the MT5 Experts tab, then sends the first compatibility heartbeat, balance, equity, floating P&amp;L,
                   and live positions approximately every 3 seconds, plus history
                   and close events using an explicit broker UTC offset whenever
                   available. Transient server errors now retry with bounded
@@ -600,7 +600,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
                 href={EA_DOWNLOAD}
                 download="GoldJournal_EA.mq5"
               >
-                <Download size={15} /> Download EA v2.5
+                <Download size={15} /> Download EA v2.6
               </a>
             </li>
             <li>
@@ -716,7 +716,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
             <h3>No open positions in MT5</h3>
             <p>
               Positions will appear in both MT5 Live and Trade Log after an
-              active connection receives data from EA v2.5.
+              active connection receives data from EA v2.6.
             </p>
           </div>
         )}

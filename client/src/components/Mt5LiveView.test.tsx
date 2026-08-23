@@ -178,7 +178,7 @@ describe("Mt5LiveView", () => {
     });
   });
 
-  it("shows masked credentials, account metrics, historical positions, EA v2.5, and automatic Trade Log synchronization", () => {
+  it("shows masked credentials, account metrics, historical positions, EA v2.6, and automatic Trade Log synchronization", () => {
     const onJournalNow = vi.fn();
     render(
       <Mt5LiveView
@@ -200,7 +200,7 @@ describe("Mt5LiveView", () => {
     expect(screen.getByText("$10,042.50")).toBeTruthy();
     expect(screen.getByText(/42 closed positions synced/i)).toBeTruthy();
     expect(screen.getByText(/Live refresh every 2\.5s/i)).toBeTruthy();
-    expect(screen.getByText(/SETUP GUIDE · EA v2\.5/i)).toBeTruthy();
+    expect(screen.getByText(/SETUP GUIDE · EA v2\.6/i)).toBeTruthy();
     const ea = screen.getByRole("link", { name: /Download EA/i });
     expect(ea.getAttribute("href")).toBe("/GoldJournal_EA.mq5");
     expect(

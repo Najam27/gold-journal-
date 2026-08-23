@@ -1,8 +1,8 @@
 #property strict
-#property version   "2.5"
-#property description "Gold Journal authoritative MT5 bridge: reliable summary, broker risk-symbol specifications, open positions, close events, and replay-safe history batches."
+#property version   "2.6"
+#property description "Gold Journal authoritative MT5 bridge: visible startup diagnostics, reliable summary, broker risk-symbol specifications, open positions, close events, and replay-safe history batches."
 
-input string Endpoint = "https://YOUR-SITE.netlify.app/api/mt5";
+input string Endpoint = "https://topgjournal.netlify.app/api/mt5";
 input string ApiKey = "PASTE_ONCE_FROM_GOLD_JOURNAL";
 input int BrokerUtcOffsetMinutes = 180;
 input int SyncSeconds = 3;
@@ -10,7 +10,7 @@ input int HistoryDays = 3650;
 input bool SendHistoryOnInit = true;
 input string RiskSymbol = "";
 
-const string EA_VERSION = "2.5.0";
+const string EA_VERSION = "2.6.0";
 const string PAYLOAD_VERSION = "2";
 const int REQUEST_TIMEOUT_MS = 15000;
 const int HISTORY_BATCH_SIZE = 50;
@@ -35,6 +35,8 @@ string JsonEscape(string value) {
 }
 
 string Number(double value, int digits = 2) { return DoubleToString(value, digits); }
+bool HasConfiguredEndpoint() { return StringFind(Endpoint, "https://") == 0 && StringFind(Endpoint, "YOUR-SITE.netlify.app") < 0; }
+bool HasConfiguredApiKey() { return StringLen(ApiKey) >= 24 && StringFind(ApiKey, "PASTE_ONCE_FROM_GOLD_JOURNAL") < 0; }
 // MT5 datetime values are broker-server clock values. Send an offset-free string so
 // the API can apply BrokerUtcOffsetMinutes before deriving fixed PKT session/date.
 string BrokerTimestamp(datetime value) { return "\"" + TimeToString(value, TIME_DATE | TIME_SECONDS) + "\""; }
@@ -87,7 +89,8 @@ bool SendJson(string payload, string expectedEvent) {
          PrintFormat("[MT5 LIVE] %s failed HTTP=%d retry=%d in %ds", expectedEvent, status, g_consecutive_failures, delay);
       } else {
          g_permanent_rejection = true;
-         PrintFormat("[MT5 LIVE] %s rejected HTTP=%d; fix the EA key, endpoint, or payload, then restart the EA", expectedEvent, status);
+         if(status == 401) PrintFormat("[MT5 LIVE] %s rejected HTTP=401; this API key is invalid or retired. In Gold Journal MT5 Live, issue a replacement key, paste it into EA Inputs, then restart the EA", expectedEvent);
+         else PrintFormat("[MT5 LIVE] %s rejected HTTP=%d; fix the EA key, endpoint, or payload, then restart the EA", expectedEvent, status);
       }
       return false;
    }
@@ -300,16 +303,25 @@ void Sync() {
 
 int OnInit() {
    ResetLastError();
+   if(!HasConfiguredEndpoint()) {
+      Print("[MT5 LIVE] startup blocked: Endpoint must be the exact HTTPS API URL from Gold Journal MT5 Live.");
+      return INIT_PARAMETERS_INCORRECT;
+   }
+   if(!HasConfiguredApiKey()) {
+      Print("[MT5 LIVE] startup blocked: paste the current API key from Gold Journal MT5 Live into EA Inputs. Do not share that key.");
+      return INIT_PARAMETERS_INCORRECT;
+   }
    if(!EventSetTimer(MathMax(3, SyncSeconds))) {
       PrintFormat("[MT5 LIVE] timer could not start; MT5 error=%d", GetLastError());
       return INIT_FAILED;
    }
+   PrintFormat("[MT5 LIVE] EA v%s attached. Endpoint=%s; sync interval=%ds; history=%s.", EA_VERSION, Endpoint, MathMax(3, SyncSeconds), SendHistoryOnInit ? "enabled" : "disabled");
+   if(!TerminalInfoInteger(TERMINAL_CONNECTED)) Print("[MT5 LIVE] broker connection is offline; summary, positions, and history will retry after MT5 reconnects.");
    SendCompatibility();
    Sync();
    return INIT_SUCCEEDED;
 }
-
-void OnDeinit(const int reason) { EventKillTimer(); }
+void OnDeinit(const int reason) { EventKillTimer(); PrintFormat("[MT5 LIVE] EA stopped; deinitialization reason=%d", reason); }
 void OnTimer() { Sync(); }
 
 void OnTradeTransaction(const MqlTradeTransaction &transaction, const MqlTradeRequest &request, const MqlTradeResult &result) {
