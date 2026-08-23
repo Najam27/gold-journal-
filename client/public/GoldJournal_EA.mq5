@@ -1,5 +1,5 @@
 #property strict
-#property version   "2.10"
+#property version   "2.11"
 #property description "Gold Journal read-only journal bridge: never places or manages trades; sends account, position, and history facts to Gold Journal."
 
 input string Endpoint = "__GOLD_JOURNAL_MT5_ENDPOINT__";
@@ -10,7 +10,7 @@ input int HistoryDays = 3650;
 input bool SendHistoryOnInit = true;
 input string RiskSymbol = "";
 
-const string EA_VERSION = "2.10.0";
+const string EA_VERSION = "2.11.0";
 const string PAYLOAD_VERSION = "2";
 const int REQUEST_TIMEOUT_MS = 15000;
 const int HISTORY_BATCH_SIZE = 50;
