@@ -188,21 +188,31 @@ describe("Gold Journal protected server workflows", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  it("rotates only an owned selected MT5 connection key without deleting the connection or its journal history", async () => {
+  it("replaces a missing-orphaned MT5 connection row by account id without deleting journal history", async () => {
     const where = vi.fn().mockResolvedValue(undefined);
     const set = vi.fn(() => ({ where }));
     const update = vi.fn(() => ({ set }));
     mocks.getOwnedAccount.mockResolvedValue({ id: 12, userId: 7, name: "Primary account" });
-    mocks.getDb.mockResolvedValue({ select: () => limitedRows([{ id: 44, userId: 7, accountId: 12 }]), update });
+    mocks.getDb.mockResolvedValue({ select: () => limitedRows([{ id: 44, userId: 999 }]), update });
     const caller = goldRouter.createCaller({ user } as any);
 
-    const result = await caller.mt5.rotateConnectionKey({ accountId: 12, connectionId: 44, confirmed: true });
+    const result = await caller.mt5.replaceConnection({ accountId: 12, label: "Primary account Live", brokerUtcOffsetMinutes: 180 });
 
-    expect(result.apiKey).toMatch(/^[A-Za-z0-9_-]{40,}$/);
-    expect(mocks.getOwnedAccount).toHaveBeenCalledWith(7, 12);
-    expect(update).toHaveBeenCalledTimes(1);
-    expect(set).toHaveBeenCalledWith(expect.objectContaining({ active: true, apiKey: expect.any(String), lastContactAt: null, lastSummarySuccessAt: null }));
-    expect(where).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ id: 44, replaced: true });
+    expect(result.apiKey).toHaveLength(43);
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 7,
+      accountId: 12,
+      label: "Primary account Live",
+      active: true,
+      brokerUtcOffsetMinutes: 180,
+      lastPing: null,
+      lastContactAt: null,
+      balance: null,
+      equity: null,
+    }));
+    expect(set.mock.calls[0][0].apiKey).not.toBe(result.apiKey);
+    expect(where).toHaveBeenCalled();
   });
 
   it("rejects a goal mutation when the goal belongs to another user", async () => {

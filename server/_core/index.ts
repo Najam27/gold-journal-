@@ -40,8 +40,15 @@ async function startServer() {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     res.setHeader("X-Frame-Options", "SAMEORIGIN");
-    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-    if (process.env.NODE_ENV === "production") res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    res.setHeader(
+      "Permissions-Policy",
+      "camera=(), microphone=(), geolocation=()"
+    );
+    if (process.env.NODE_ENV === "production")
+      res.setHeader(
+        "Strict-Transport-Security",
+        "max-age=31536000; includeSubDomains"
+      );
     next();
   });
   app.use(httpCompression);
@@ -53,29 +60,49 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "1mb", extended: true }));
   registerMt5Compatibility(app);
   registerMt5Ingest(app);
-  app.use(async (error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    if ((error as { type?: string })?.type === "entity.too.large") {
-      res.status(413).json({ ok: false, code: "PAYLOAD_TOO_LARGE" });
-      return;
-    }
-    if (req.path === "/api/mt5" && error instanceof SyntaxError && "body" in error) {
-      const detail = "Malformed JSON request body.";
-      console.warn("[MT5] malformed JSON payload");
-      const raw = typeof (error as { body?: unknown }).body === "string" ? (error as { body: string }).body : "";
-      const apiKey = raw.match(/"api_key"\s*:\s*"([^"\\]{24,96})"/)?.[1];
-      if (apiKey) {
-        try {
-          const connection = await getActiveMt5Connection(apiKey);
-          if (connection) await recordMt5HistoryFailure(connection.id, `Malformed JSON — ${detail}`);
-        } catch {
-          // Preserve an actionable parser response even if diagnostics cannot persist.
-        }
+  app.use(
+    async (
+      error: unknown,
+      req: express.Request,
+      res: express.Response,
+      next: express.NextFunction
+    ) => {
+      if ((error as { type?: string })?.type === "entity.too.large") {
+        res.status(413).json({ ok: false, code: "PAYLOAD_TOO_LARGE" });
+        return;
       }
-      res.status(400).json({ ok: false, code: "INVALID_JSON", details: [detail] });
-      return;
+      if (
+        (req.path === "/api/mt5" || req.path.startsWith("/api/mt5/")) &&
+        error instanceof SyntaxError &&
+        "body" in error
+      ) {
+        const detail = "Malformed JSON request body.";
+        console.warn("[MT5] malformed JSON payload");
+        const raw =
+          typeof (error as { body?: unknown }).body === "string"
+            ? (error as { body: string }).body
+            : "";
+        const apiKey = raw.match(/"api_key"\s*:\s*"([^"\\]{24,96})"/)?.[1];
+        if (apiKey) {
+          try {
+            const connection = await getActiveMt5Connection(apiKey);
+            if (connection)
+              await recordMt5HistoryFailure(
+                connection.id,
+                `Malformed JSON — ${detail}`
+              );
+          } catch {
+            // Preserve an actionable parser response even if diagnostics cannot persist.
+          }
+        }
+        res
+          .status(400)
+          .json({ ok: false, code: "INVALID_JSON", details: [detail] });
+        return;
+      }
+      next(error);
     }
-    next(error);
-  });
+  );
   // tRPC API
   app.use(
     "/api/trpc",
