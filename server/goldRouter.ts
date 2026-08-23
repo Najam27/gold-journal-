@@ -85,9 +85,11 @@ async function ownGoal(userId: number, goalId: number) {
 async function ownMt5Connection(userId: number, accountId: number, connectionId: number) {
   await getOwnedAccount(userId, accountId);
   const db = await dbOrThrow();
-  const found = await db.select().from(mt5Connections).where(and(eq(mt5Connections.id, connectionId), eq(mt5Connections.userId, userId), eq(mt5Connections.accountId, accountId))).limit(1);
+  const found = await db.select().from(mt5Connections).where(and(eq(mt5Connections.id, connectionId), eq(mt5Connections.accountId, accountId))).limit(1);
   if (!found[0]) throw new Error("That MT5 connection is unavailable.");
-  return found[0];
+  if (found[0].userId === userId) return found[0];
+  await db.update(mt5Connections).set({ userId }).where(eq(mt5Connections.id, found[0].id));
+  return { ...found[0], userId };
 }
 
 async function issueMt5ConnectionKey(input: { userId: number; accountId: number; label: string; brokerUtcOffsetMinutes: number; replace: boolean }) {
@@ -228,7 +230,7 @@ export const goldRouter = router({
     history: protectedProcedure.input(accountIdInput.extend({ page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(50).default(20) })).query(({ ctx, input }) => getMt5History(ctx.user.id, input.accountId, input.page, input.pageSize)),
     syncTradeLog: protectedProcedure.input(accountIdInput).mutation(async ({ ctx, input }) => {
       await getOwnedAccount(ctx.user.id, input.accountId);
-      const connection = await dbOrThrow().then(db => db.select({ id: mt5Connections.id }).from(mt5Connections).where(and(eq(mt5Connections.userId, ctx.user.id), eq(mt5Connections.accountId, input.accountId), eq(mt5Connections.active, true))).limit(1));
+      const connection = await dbOrThrow().then(db => db.select({ id: mt5Connections.id }).from(mt5Connections).where(and(eq(mt5Connections.accountId, input.accountId), eq(mt5Connections.active, true))).limit(1));
       if (!connection[0]) throw new Error("No active MT5 connection is available for this journal account.");
       const synchronized = await syncStoredMt5PositionsToTradeLog(ctx.user.id, input.accountId);
       return { synchronized };

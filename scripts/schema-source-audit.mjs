@@ -24,6 +24,7 @@ const expectedMigrations = [
   "0015_async_ai_jobs.sql",
   "0016_mt5_live_reliability.sql",
   "0017_mt5_connection_retirement.sql",
+  "0018_mt5_connection_owner_repair.sql",
 ];
 const expectedNames = [
   "gj_accounts_id_user_unique",
@@ -79,6 +80,7 @@ const report = {
   asyncAiJobsMigrationHardened: (() => { const migration = read("supabase/migrations/0015_async_ai_jobs.sql"); return schema.includes("aiJobs") && ["gj_ai_jobs", "dispatchHash", "gj_ai_jobs_account_owner_fk", "gj_ai_jobs_kind_valid", "gj_ai_jobs_status_valid", "enable row level security", "revoke all on table public.gj_ai_jobs from public, anon, authenticated", "grant select, insert, update, delete on table public.gj_ai_jobs to service_role"].every(token => migration.includes(token)); })(),
   mt5LiveReliabilityMigrationHardened: (() => { const migration = read("supabase/migrations/0016_mt5_live_reliability.sql"); return ["lastContactAt", "lastSummarySuccessAt", "lastOpenSyncSuccessAt", "consecutiveFailures", "gj_record_mt5_event_failure", "gj_sync_mt5_open_batch", "security definer", "set search_path = public", "grant execute on function public.gj_sync_mt5_open_batch"].every(token => migration.includes(token)); })(),
   mt5ConnectionRetirementMigrationHardened: (() => { const migration = read("supabase/migrations/0017_mt5_connection_retirement.sql"); return schema.includes("retiredAt") && schema.includes("retiredReason") && ["retiredAt", "retiredReason", "gj_mt5_retired_state_valid", "gj_mt5_connection_active_retired_idx"].every(token => migration.includes(token)); })(),
+  mt5ConnectionOwnerRepairMigrationHardened: (() => { const migration = read("supabase/migrations/0018_mt5_connection_owner_repair.sql"); return ["update public.gj_mt5_connections", "connection.\"accountId\" = account.\"id\"", "connection.\"userId\" is distinct from account.\"userId\"", "gj_mt5_connection_account_owner_fk"].every(token => migration.includes(token)); })(),
 };
 console.log(JSON.stringify(report, null, 2));
-if (!report.migrationOrderValid || !report.staleDrizzleArtifactsRemoved || !report.expectedNamesInDrizzleSchema || !report.expectedNamesInSupabaseMigrations || !report.tradeSummaryHotfixQualified || !report.productionIntegrityMigrationHardened || !report.aiHistoryMigrationHardened || !report.mt5OpenLifecycleMigrationHardened || !report.offlineReplayAndRiskMigrationHardened || !report.aiProviderVaultMigrationHardened || !report.asyncAiJobsMigrationHardened || !report.mt5LiveReliabilityMigrationHardened || !report.mt5ConnectionRetirementMigrationHardened || missingMigrations.length) process.exitCode = 1;
+if (!report.migrationOrderValid || !report.staleDrizzleArtifactsRemoved || !report.expectedNamesInDrizzleSchema || !report.expectedNamesInSupabaseMigrations || !report.tradeSummaryHotfixQualified || !report.productionIntegrityMigrationHardened || !report.aiHistoryMigrationHardened || !report.mt5OpenLifecycleMigrationHardened || !report.offlineReplayAndRiskMigrationHardened || !report.aiProviderVaultMigrationHardened || !report.asyncAiJobsMigrationHardened || !report.mt5LiveReliabilityMigrationHardened || !report.mt5ConnectionRetirementMigrationHardened || !report.mt5ConnectionOwnerRepairMigrationHardened || missingMigrations.length) process.exitCode = 1;

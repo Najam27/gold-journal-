@@ -8,6 +8,14 @@ import { recordMt5EventFailureAtomic, syncMt5HistoryBatchAtomic, syncMt5OpenBatc
 
 async function requireDb() { const db = await getDb(); if (!db) throw new Error("Supabase database is unavailable. Please retry shortly."); return db; }
 
+async function canonicalizeMt5ConnectionOwner(database: any, connection: typeof mt5Connections.$inferSelect) {
+  const owner = await database.select({ userId: accounts.userId }).from(accounts).where(eq(accounts.id, connection.accountId)).limit(1);
+  if (!owner[0]) throw new Error("MT5 connection refers to an unavailable journal account.");
+  if (owner[0].userId === connection.userId) return connection;
+  await database.update(mt5Connections).set({ userId: owner[0].userId }).where(eq(mt5Connections.id, connection.id));
+  return { ...connection, userId: owner[0].userId };
+}
+
 function safePosition(position: typeof mt5LivePositions.$inferSelect, journaledTickets: Set<string>) {
   return {
     ticket: position.ticket.toString(),
@@ -67,15 +75,16 @@ export async function getMt5Workspace(userId: number, accountId: number) {
   const account = await getOwnedAccount(userId, accountId);
   const db = await requireDb();
   const [connections, openPositions, closedPositions] = await Promise.all([
-    db.select().from(mt5Connections).where(and(eq(mt5Connections.userId, userId), eq(mt5Connections.accountId, accountId))).orderBy(desc(mt5Connections.createdAt)).limit(20),
+    db.select().from(mt5Connections).where(eq(mt5Connections.accountId, account.id)).orderBy(desc(mt5Connections.createdAt)).limit(20),
     db.select().from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, accountId), eq(mt5LivePositions.status, "OPEN"))).orderBy(desc(mt5LivePositions.updatedAt)).limit(500),
     db.select().from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, accountId), eq(mt5LivePositions.status, "CLOSED"))).orderBy(desc(mt5LivePositions.closeTime)).limit(10),
   ]);
+  const canonicalConnections = await Promise.all(connections.map(connection => canonicalizeMt5ConnectionOwner(db, connection)));
   const visibleTickets = [...openPositions, ...closedPositions].map(position => position.ticket);
   const journalRows = visibleTickets.length ? await db.select({ mt5Ticket: trades.mt5Ticket }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId), or(...visibleTickets.map(ticket => eq(trades.mt5Ticket, ticket))))) : [];
   const journaledTickets = new Set(journalRows.flatMap(row => row.mt5Ticket == null ? [] : [row.mt5Ticket.toString()]));
   return {
-    connections: connections.map(connection => ({ id: connection.id, accountName: account.name, label: connection.label, active: connection.active, retiredAt: connection.retiredAt, retiredReason: connection.retiredReason, brokerUtcOffsetMinutes: (connection as typeof connection & { brokerUtcOffsetMinutes?: number }).brokerUtcOffsetMinutes ?? 180, lastPing: connection.lastPing, lastContactAt: connection.lastContactAt, lastSummaryAt: connection.lastSummaryAt, lastSummarySuccessAt: connection.lastSummarySuccessAt, lastSummaryErrorAt: connection.lastSummaryErrorAt, lastOpenSyncAt: connection.lastOpenSyncAt, lastOpenSyncSuccessAt: connection.lastOpenSyncSuccessAt, lastOpenSyncErrorAt: connection.lastOpenSyncErrorAt, lastErrorAt: connection.lastErrorAt, lastErrorCode: connection.lastErrorCode, lastErrorMessage: connection.lastErrorMessage, consecutiveFailures: connection.consecutiveFailures, mt5Login: connection.mt5Login?.toString() ?? null, brokerServer: connection.brokerServer, currency: connection.currency, balance: connection.balance, equity: connection.equity, margin: connection.margin, freeMargin: connection.freeMargin, floatingPnl: connection.floatingPnl, riskSymbol: connection.riskSymbol, riskTickSize: connection.riskTickSize, riskTickValueLoss: connection.riskTickValueLoss, riskContractSize: connection.riskContractSize, riskVolumeMin: connection.riskVolumeMin, riskVolumeMax: connection.riskVolumeMax, riskVolumeStep: connection.riskVolumeStep, riskSymbolUpdatedAt: connection.riskSymbolUpdatedAt, syncHealth: classifyMt5SyncHealth(connection), lastHistorySync: connection.lastHistorySync, historySyncedCount: connection.historySyncedCount, lastHistoryAttempt: connection.lastHistoryAttempt, lastHistoryStatus: connection.lastHistoryStatus, lastHistoryMessage: connection.lastHistoryMessage, lastHistoryBatchSize: connection.lastHistoryBatchSize, createdAt: connection.createdAt })),
+    connections: canonicalConnections.map(connection => ({ id: connection.id, accountName: account.name, label: connection.label, active: connection.active, retiredAt: connection.retiredAt, retiredReason: connection.retiredReason, brokerUtcOffsetMinutes: (connection as typeof connection & { brokerUtcOffsetMinutes?: number }).brokerUtcOffsetMinutes ?? 180, lastPing: connection.lastPing, lastContactAt: connection.lastContactAt, lastSummaryAt: connection.lastSummaryAt, lastSummarySuccessAt: connection.lastSummarySuccessAt, lastSummaryErrorAt: connection.lastSummaryErrorAt, lastOpenSyncAt: connection.lastOpenSyncAt, lastOpenSyncSuccessAt: connection.lastOpenSyncSuccessAt, lastOpenSyncErrorAt: connection.lastOpenSyncErrorAt, lastErrorAt: connection.lastErrorAt, lastErrorCode: connection.lastErrorCode, lastErrorMessage: connection.lastErrorMessage, consecutiveFailures: connection.consecutiveFailures, mt5Login: connection.mt5Login?.toString() ?? null, brokerServer: connection.brokerServer, currency: connection.currency, balance: connection.balance, equity: connection.equity, margin: connection.margin, freeMargin: connection.freeMargin, floatingPnl: connection.floatingPnl, riskSymbol: connection.riskSymbol, riskTickSize: connection.riskTickSize, riskTickValueLoss: connection.riskTickValueLoss, riskContractSize: connection.riskContractSize, riskVolumeMin: connection.riskVolumeMin, riskVolumeMax: connection.riskVolumeMax, riskVolumeStep: connection.riskVolumeStep, riskSymbolUpdatedAt: connection.riskSymbolUpdatedAt, syncHealth: classifyMt5SyncHealth(connection), lastHistorySync: connection.lastHistorySync, historySyncedCount: connection.historySyncedCount, lastHistoryAttempt: connection.lastHistoryAttempt, lastHistoryStatus: connection.lastHistoryStatus, lastHistoryMessage: connection.lastHistoryMessage, lastHistoryBatchSize: connection.lastHistoryBatchSize, createdAt: connection.createdAt })),
     openPositions: openPositions.map(position => safePosition(position, journaledTickets)),
     closedPositions: closedPositions.map(position => safePosition(position, journaledTickets)),
   };
@@ -100,11 +109,11 @@ export async function getActiveMt5Connection(apiKey: string) {
   const db = await requireDb();
   const fingerprint = mt5ApiKeyFingerprint(apiKey);
   const hashed = await db.select().from(mt5Connections).where(and(eq(mt5Connections.apiKey, fingerprint), eq(mt5Connections.active, true))).limit(1);
-  if (hashed[0]) return hashed[0];
+  if (hashed[0]) return canonicalizeMt5ConnectionOwner(db, hashed[0]);
   const legacy = await db.select().from(mt5Connections).where(and(eq(mt5Connections.apiKey, apiKey), eq(mt5Connections.active, true))).limit(1);
   if (!legacy[0]) return null;
   await db.update(mt5Connections).set({ apiKey: fingerprint }).where(eq(mt5Connections.id, legacy[0].id));
-  return { ...legacy[0], apiKey: fingerprint };
+  return canonicalizeMt5ConnectionOwner(db, { ...legacy[0], apiKey: fingerprint });
 }
 
 export async function touchMt5Connection(connectionId: number) {
