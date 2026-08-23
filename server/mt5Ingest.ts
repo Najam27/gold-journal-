@@ -102,7 +102,10 @@ export async function processMt5Payload(body: unknown) {
   if (!(await consumeRateLimit("mt5-ingest", mt5ApiKeyFingerprint(payload.api_key), 5, 1_000))) return { status: 429, body: { ok: false, code: "RATE_LIMITED" } };
   const connection = await getActiveMt5Connection(payload.api_key);
   if (!connection) return { status: 401, body: { ok: false, code: "UNAUTHORIZED" } };
-  if (payload.connection_id && payload.connection_id !== String(connection.id)) return { status: 401, body: { ok: false, code: "CONNECTION_MISMATCH" } };
+  // The opaque API key is the sole credential and account-routing authority. Older EA builds
+  // may retain a stale optional connection_id after a user recreates or rotates a connection;
+  // rejecting an otherwise valid key would prevent the first live heartbeat without improving
+  // authorization, because the key already resolves the exact server-owned connection.
   await touchMt5Connection(connection.id);
   if (payload.event === "compat") return { status: 200, body: { ok: true, event: "compat", ...versionBody(payload) } };
   const connectionOffset = (connection as typeof connection & { brokerUtcOffsetMinutes?: number }).brokerUtcOffsetMinutes ?? 180;

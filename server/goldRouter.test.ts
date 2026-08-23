@@ -178,7 +178,7 @@ describe("Gold Journal protected server workflows", () => {
     expect(mocks.getDb).not.toHaveBeenCalled();
   });
 
-    it("rejects a connection mutation when the connection is unavailable to the explicitly selected account", async () => {
+  it("rejects a connection mutation when the connection is unavailable to the explicitly selected account", async () => {
     const update = vi.fn();
     mocks.getOwnedAccount.mockResolvedValue({ id: 25, userId: 7, name: "Second account" });
     mocks.getDb.mockResolvedValue({ select: () => limitedRows([]), update });
@@ -186,6 +186,23 @@ describe("Gold Journal protected server workflows", () => {
     await expect(caller.mt5.setConnectionActive({ accountId: 25, connectionId: 44, active: false })).rejects.toThrow("unavailable");
     expect(mocks.getOwnedAccount).toHaveBeenCalledWith(7, 25);
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it("rotates only an owned selected MT5 connection key without deleting the connection or its journal history", async () => {
+    const where = vi.fn().mockResolvedValue(undefined);
+    const set = vi.fn(() => ({ where }));
+    const update = vi.fn(() => ({ set }));
+    mocks.getOwnedAccount.mockResolvedValue({ id: 12, userId: 7, name: "Primary account" });
+    mocks.getDb.mockResolvedValue({ select: () => limitedRows([{ id: 44, userId: 7, accountId: 12 }]), update });
+    const caller = goldRouter.createCaller({ user } as any);
+
+    const result = await caller.mt5.rotateConnectionKey({ accountId: 12, connectionId: 44, confirmed: true });
+
+    expect(result.apiKey).toMatch(/^[A-Za-z0-9_-]{40,}$/);
+    expect(mocks.getOwnedAccount).toHaveBeenCalledWith(7, 12);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ active: true, apiKey: expect.any(String), lastContactAt: null, lastSummarySuccessAt: null }));
+    expect(where).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a goal mutation when the goal belongs to another user", async () => {

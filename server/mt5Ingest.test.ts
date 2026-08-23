@@ -62,6 +62,12 @@ describe("MT5 EA ingest", () => {
     expect(mocks.open).not.toHaveBeenCalled();
   });
 
+  it("accepts an authenticated legacy payload with a stale optional connection ID because the API key alone defines the owned connection", async () => {
+    await expect(processMt5Payload({ event: "ping", api_key: key("legacy-id"), connection_id: "retired-connection-id", ea_version: "2.4.0", payload_version: "2" })).resolves.toMatchObject({ status: 200, body: { ok: true, event: "ping" } });
+    expect(mocks.getActive).toHaveBeenCalledWith(key("legacy-id"));
+    expect(mocks.touch).toHaveBeenCalledWith(44);
+  });
+
   it("stores a close event as a closed position with realized P&L and a normalized result", async () => {
     const { floating_pnl, open_time, ...base } = openPayload(key("close"));
     await expect(processMt5Payload({ ...base, event: "close", close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00", open_time })).resolves.toMatchObject({ status: 200, body: { ok: true, event: "close", compatible: false } });

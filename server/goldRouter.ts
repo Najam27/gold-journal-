@@ -201,6 +201,18 @@ export const goldRouter = router({
       await db.update(mt5Connections).set({ brokerUtcOffsetMinutes: input.brokerUtcOffsetMinutes }).where(and(eq(mt5Connections.id, connection.id), eq(mt5Connections.userId, ctx.user.id), eq(mt5Connections.accountId, input.accountId)));
       return { success: true };
     }),
+    rotateConnectionKey: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), connectionId: z.number().int().positive(), confirmed: z.literal(true) })).mutation(async ({ ctx, input }) => {
+      const connection = await ownMt5Connection(ctx.user.id, input.accountId, input.connectionId);
+      const db = await dbOrThrow();
+      const apiKey = randomBytes(32).toString("base64url");
+      await db.update(mt5Connections).set({
+        apiKey: mt5ApiKeyFingerprint(apiKey), active: true,
+        lastPing: null, lastContactAt: null, lastSummaryAt: null, lastSummarySuccessAt: null, lastSummaryErrorAt: null,
+        lastOpenSyncAt: null, lastOpenSyncSuccessAt: null, lastOpenSyncErrorAt: null,
+        lastErrorAt: null, lastErrorCode: null, lastErrorMessage: null, consecutiveFailures: 0,
+      }).where(and(eq(mt5Connections.id, connection.id), eq(mt5Connections.userId, ctx.user.id), eq(mt5Connections.accountId, input.accountId)));
+      return { apiKey };
+    }),
     setConnectionActive: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), connectionId: z.number().int().positive(), active: z.boolean() })).mutation(async ({ ctx, input }) => {
       const connection = await ownMt5Connection(ctx.user.id, input.accountId, input.connectionId);
       const db = await dbOrThrow();

@@ -3,7 +3,7 @@ import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ invalidate: vi.fn(), create: vi.fn(), setActive: vi.fn(), updateOffset: vi.fn(), remove: vi.fn(), refetch: vi.fn() }));
+const mocks = vi.hoisted(() => ({ invalidate: vi.fn(), create: vi.fn(), rotate: vi.fn(), setActive: vi.fn(), updateOffset: vi.fn(), remove: vi.fn(), refetch: vi.fn() }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     mt5: {
@@ -26,6 +26,7 @@ vi.mock("@/lib/trpc", () => ({
       },
       integrity: { useQuery: () => ({ data: { health: { label: "Live MT5 sync" }, findings: [] }, isFetching: false }) },
       createConnection: { useMutation: () => ({ mutateAsync: mocks.create, isPending: false }) },
+      rotateConnectionKey: { useMutation: () => ({ mutateAsync: mocks.rotate, isPending: false }) },
       updateConnectionOffset: { useMutation: () => ({ mutateAsync: mocks.updateOffset }) },
       setConnectionActive: { useMutation: () => ({ mutateAsync: mocks.setActive }) },
       deleteConnection: { useMutation: () => ({ mutateAsync: mocks.remove }) },
@@ -40,7 +41,7 @@ vi.mock("@/components/ui/dialog", () => ({ Dialog: ({ children }: any) => <>{chi
 import { Mt5LiveView } from "./Mt5LiveView";
 
 describe("Mt5LiveView", () => {
-  it("shows masked credentials, account metrics, historical positions, EA v2.1, and automatic Trade Log synchronization", () => {
+  it("shows masked credentials, account metrics, historical positions, EA v2.5, and automatic Trade Log synchronization", () => {
     const onJournalNow = vi.fn();
     render(<Mt5LiveView account={{ id: 12, name: "GFT 10K" }} accounts={[{ id: 12, name: "GFT 10K" }, { id: 13, name: "FundingPips" }]} onJournalNow={onJournalNow} />);
     expect(screen.getByText("GFT Live")).toBeTruthy();
@@ -51,7 +52,7 @@ describe("Mt5LiveView", () => {
     expect(screen.getByText("$10,042.50")).toBeTruthy();
     expect(screen.getByText(/42 closed positions synced/i)).toBeTruthy();
     expect(screen.getByText(/Live refresh every 2\.5s/i)).toBeTruthy();
-    expect(screen.getByText(/SETUP GUIDE · EA v2\.4/i)).toBeTruthy();
+    expect(screen.getByText(/SETUP GUIDE · EA v2\.5/i)).toBeTruthy();
     const ea = screen.getByRole("link", { name: /Download EA/i });
     expect(ea.getAttribute("href")).toBe("/GoldJournal_EA.mq5");
     expect(screen.getByRole("columnheader", { name: "Trade Log" })).toBeTruthy();

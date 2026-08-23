@@ -1,17 +1,16 @@
 #property strict
-#property version   "2.4"
+#property version   "2.5"
 #property description "Gold Journal authoritative MT5 bridge: reliable summary, broker risk-symbol specifications, open positions, close events, and replay-safe history batches."
 
 input string Endpoint = "https://YOUR-SITE.netlify.app/api/mt5";
 input string ApiKey = "PASTE_ONCE_FROM_GOLD_JOURNAL";
-input string ConnectionId = "";
 input int BrokerUtcOffsetMinutes = 180;
 input int SyncSeconds = 3;
 input int HistoryDays = 3650;
 input bool SendHistoryOnInit = true;
 input string RiskSymbol = "";
 
-const string EA_VERSION = "2.4.0";
+const string EA_VERSION = "2.5.0";
 const string PAYLOAD_VERSION = "2";
 const int REQUEST_TIMEOUT_MS = 15000;
 const int HISTORY_BATCH_SIZE = 50;
@@ -62,16 +61,26 @@ bool SendJson(string payload, string expectedEvent) {
    if(StringLen(payload) == 0) return false;
    if(g_permanent_rejection) return false;
    if(g_next_retry_at > TimeCurrent()) return false;
+   if(!TerminalInfoInteger(TERMINAL_CONNECTED)) {
+      PrintFormat("[MT5 LIVE] %s deferred: terminal is not connected to the broker", expectedEvent);
+      return false;
+   }
    char data[];
    int data_size = StringToCharArray(payload, data, 0, WHOLE_ARRAY, CP_UTF8);
    if(data_size > 0 && data[data_size - 1] == 0) ArrayResize(data, data_size - 1);
    char response[];
    string response_headers;
-   string headers = "Content-Type: application/json\r\n";
+   string headers = "Content-Type: application/json\r\nAccept: application/json\r\n";
+   ResetLastError();
    int status = WebRequest("POST", Endpoint, headers, REQUEST_TIMEOUT_MS, data, response, response_headers);
    string response_text = CharArrayToString(response, 0, WHOLE_ARRAY, CP_UTF8);
    if(status < 200 || status >= 300) {
-      if(IsTransientStatus(status)) {
+      if(status == -1) {
+         g_consecutive_failures++;
+         int delay = RetryDelaySeconds();
+         g_next_retry_at = TimeCurrent() + delay;
+         PrintFormat("[MT5 LIVE] %s WebRequest failed; MT5 error=%d. Check Tools > Options > Expert Advisors > Allow WebRequest and the exact HTTPS URL. Retrying in %d seconds", expectedEvent, GetLastError(), delay);
+      } else if(IsTransientStatus(status)) {
          g_consecutive_failures++;
          int delay = RetryDelaySeconds();
          g_next_retry_at = TimeCurrent() + delay;
@@ -115,7 +124,7 @@ string PositionJson(ulong ticket) {
 }
 
 void SendCompatibility() {
-   string payload = "{\"event\":\"compat\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"connection_id\":\"" + JsonEscape(ConnectionId) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\"}";
+   string payload = "{\"event\":\"compat\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\"}";
    SendJson(payload, "compat");
 }
 
@@ -128,7 +137,7 @@ void SendSummary() {
    double volume_min = SymbolInfoDouble(risk_symbol, SYMBOL_VOLUME_MIN);
    double volume_max = SymbolInfoDouble(risk_symbol, SYMBOL_VOLUME_MAX);
    double volume_step = SymbolInfoDouble(risk_symbol, SYMBOL_VOLUME_STEP);
-   string payload = "{\"event\":\"summary\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"connection_id\":\"" + JsonEscape(ConnectionId) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\",\"mt5_login\":\"" + IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN)) + "\",\"broker_server\":\"" + JsonEscape(AccountInfoString(ACCOUNT_SERVER)) + "\",\"currency\":\"" + JsonEscape(AccountInfoString(ACCOUNT_CURRENCY)) + "\",\"balance\":" + Number(AccountInfoDouble(ACCOUNT_BALANCE), 2) + ",\"equity\":" + Number(AccountInfoDouble(ACCOUNT_EQUITY), 2) + ",\"margin\":" + Number(AccountInfoDouble(ACCOUNT_MARGIN), 2) + ",\"free_margin\":" + Number(AccountInfoDouble(ACCOUNT_MARGIN_FREE), 2) + ",\"floating_pnl\":" + Number(AccountInfoDouble(ACCOUNT_PROFIT), 2) + ",\"risk_symbol\":\"" + JsonEscape(risk_symbol) + "\",\"risk_tick_size\":" + Number(tick_size, 8) + ",\"risk_tick_value_loss\":" + Number(tick_value_loss, 8) + ",\"risk_contract_size\":" + Number(contract_size, 8) + ",\"risk_volume_min\":" + Number(volume_min, 8) + ",\"risk_volume_max\":" + Number(volume_max, 8) + ",\"risk_volume_step\":" + Number(volume_step, 8) + "}";
+   string payload = "{\"event\":\"summary\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\",\"mt5_login\":\"" + IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN)) + "\",\"broker_server\":\"" + JsonEscape(AccountInfoString(ACCOUNT_SERVER)) + "\",\"currency\":\"" + JsonEscape(AccountInfoString(ACCOUNT_CURRENCY)) + "\",\"balance\":" + Number(AccountInfoDouble(ACCOUNT_BALANCE), 2) + ",\"equity\":" + Number(AccountInfoDouble(ACCOUNT_EQUITY), 2) + ",\"margin\":" + Number(AccountInfoDouble(ACCOUNT_MARGIN), 2) + ",\"free_margin\":" + Number(AccountInfoDouble(ACCOUNT_MARGIN_FREE), 2) + ",\"floating_pnl\":" + Number(AccountInfoDouble(ACCOUNT_PROFIT), 2) + ",\"risk_symbol\":\"" + JsonEscape(risk_symbol) + "\",\"risk_tick_size\":" + Number(tick_size, 8) + ",\"risk_tick_value_loss\":" + Number(tick_value_loss, 8) + ",\"risk_contract_size\":" + Number(contract_size, 8) + ",\"risk_volume_min\":" + Number(volume_min, 8) + ",\"risk_volume_max\":" + Number(volume_max, 8) + ",\"risk_volume_step\":" + Number(volume_step, 8) + "}";
    SendJson(payload, "summary");
 }
 
@@ -144,7 +153,7 @@ void SendOpenPositions() {
       first = false;
    }
    positions += "]";
-   string payload = "{\"event\":\"open_batch\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"connection_id\":\"" + JsonEscape(ConnectionId) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\",\"broker_utc_offset_minutes\":" + IntegerToString(BrokerUtcOffsetMinutes) + ",\"positions\":" + positions + "}";
+   string payload = "{\"event\":\"open_batch\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\",\"broker_utc_offset_minutes\":" + IntegerToString(BrokerUtcOffsetMinutes) + ",\"positions\":" + positions + "}";
    SendJson(payload, "open_batch");
 }
 
@@ -253,7 +262,7 @@ void SendHistory(bool fullReplay) {
       return;
    }
    if(position_count == 0) {
-      string empty_payload = "{\"event\":\"history_batch\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"connection_id\":\"" + JsonEscape(ConnectionId) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\",\"broker_utc_offset_minutes\":" + IntegerToString(BrokerUtcOffsetMinutes) + ",\"positions\":[],\"complete\":true}";
+      string empty_payload = "{\"event\":\"history_batch\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\",\"broker_utc_offset_minutes\":" + IntegerToString(BrokerUtcOffsetMinutes) + ",\"positions\":[],\"complete\":true}";
       if(SendJson(empty_payload, "history_batch")) g_last_history_sync = now;
       return;
    }
@@ -277,7 +286,7 @@ void SendHistory(bool fullReplay) {
       positions += "]";
       if(added == 0) continue;
       bool complete = cursor >= position_count;
-      string payload = "{\"event\":\"history_batch\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"connection_id\":\"" + JsonEscape(ConnectionId) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\",\"broker_utc_offset_minutes\":" + IntegerToString(BrokerUtcOffsetMinutes) + ",\"positions\":" + positions + ",\"complete\":" + (complete ? "true" : "false") + "}";
+      string payload = "{\"event\":\"history_batch\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\",\"broker_utc_offset_minutes\":" + IntegerToString(BrokerUtcOffsetMinutes) + ",\"positions\":" + positions + ",\"complete\":" + (complete ? "true" : "false") + "}";
       if(!SendJson(payload, "history_batch")) return;
    }
    g_last_history_sync = now;
@@ -290,7 +299,11 @@ void Sync() {
 }
 
 int OnInit() {
-   EventSetTimer(MathMax(3, SyncSeconds));
+   ResetLastError();
+   if(!EventSetTimer(MathMax(3, SyncSeconds))) {
+      PrintFormat("[MT5 LIVE] timer could not start; MT5 error=%d", GetLastError());
+      return INIT_FAILED;
+   }
    SendCompatibility();
    Sync();
    return INIT_SUCCEEDED;
