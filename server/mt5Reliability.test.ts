@@ -64,6 +64,60 @@ describe("MT5 sync health", () => {
     expect(result.message).toContain("snapshot");
     expect(result.message).toContain("DATABASE_RETRYABLE");
   });
+  it("keeps the terminal connected when open-position synchronization is current but the first account snapshot is pending", () => {
+    const now = Date.parse("2026-08-20T12:00:00.000Z");
+    const result = classifyMt5SyncHealth({
+      active: true,
+      lastPing: new Date(now - 3_000),
+      lastContactAt: new Date(now - 3_000),
+      lastSummarySuccessAt: null,
+      lastOpenSyncSuccessAt: new Date(now - 2_000),
+      lastHistoryAttempt: null,
+      lastHistorySync: null,
+      lastHistoryStatus: null,
+      lastHistoryMessage: null,
+      historySyncedCount: 0,
+    }, now);
+    expect(result.state).toBe("CONNECTED");
+    expect(result.snapshotState).toBe("PENDING");
+    expect(result.openSyncState).toBe("CURRENT");
+  });
+  it("reports degraded rather than offline when a current open sync follows a summary failure", () => {
+    const now = Date.parse("2026-08-20T12:00:00.000Z");
+    const result = classifyMt5SyncHealth({
+      active: true,
+      lastPing: new Date(now - 3_000),
+      lastContactAt: new Date(now - 3_000),
+      lastSummarySuccessAt: new Date(now - 20_000),
+      lastSummaryErrorAt: new Date(now - 2_000),
+      lastOpenSyncSuccessAt: new Date(now - 2_000),
+      lastHistoryAttempt: null,
+      lastHistorySync: null,
+      lastHistoryStatus: null,
+      lastHistoryMessage: null,
+      historySyncedCount: 0,
+    }, now);
+    expect(result.state).toBe("DEGRADED");
+    expect(result.lastContactAgeSeconds).toBe(3);
+  });
+  it("reports degraded when terminal contact is current but both live streams are stale", () => {
+    const now = Date.parse("2026-08-20T12:00:00.000Z");
+    const result = classifyMt5SyncHealth({
+      active: true,
+      lastPing: new Date(now - 3_000),
+      lastContactAt: new Date(now - 3_000),
+      lastSummarySuccessAt: new Date(now - 20_000),
+      lastOpenSyncSuccessAt: new Date(now - 20_000),
+      lastHistoryAttempt: null,
+      lastHistorySync: null,
+      lastHistoryStatus: null,
+      lastHistoryMessage: null,
+      historySyncedCount: 0,
+    }, now);
+    expect(result.state).toBe("DEGRADED");
+    expect(result.snapshotState).toBe("STALE");
+    expect(result.openSyncState).toBe("STALE");
+  });
   it("distinguishes a missing record from an offline active connection", () => {
     const now = Date.parse("2026-08-20T12:00:00.000Z");
     expect(classifyMt5SyncHealth(null, now).state).toBe("MISSING");

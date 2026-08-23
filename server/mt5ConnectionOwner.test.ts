@@ -39,4 +39,12 @@ describe("MT5 connection owner integrity", () => {
     expect(reliabilitySource).toContain("classifyMt5SyncHealth(canonicalConnection ?? null)");
     expect(reliabilitySource).not.toContain("eq(mt5Connections.userId, userId),\n        eq(mt5Connections.accountId, accountId)");
   });
+
+  it("never authorizes or classifies a retired connection as active, while retaining the row for recovery", () => {
+    expect(dbSource).toContain("eq(mt5Connections.active, true), eq(mt5Connections.retiredAt, null)");
+    const reliabilitySource = readFileSync(new URL("./mt5Reliability.ts", import.meta.url), "utf8");
+    expect(reliabilitySource).toContain("eq(mt5Connections.active, true),\n        eq(mt5Connections.retiredAt, null)");
+    expect(routerSource).toContain('set({ active: false, retiredAt: new Date(), retiredReason: "USER_RETIRED" })');
+    expect(routerSource).not.toMatch(/delete\(mt5Connections\)/);
+  });
 });

@@ -194,15 +194,18 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
   }, [account?.id]);
   const connections = workspace.data?.connections ?? [];
   const dataSourceReference = workspace.data?.dataSourceReference;
+  const workspaceLoading = Boolean(workspace.isLoading || (!workspace.data && !workspace.error));
+  const workspaceConfirmedEmpty = !workspaceLoading && !workspace.isError && connections.length === 0;
+  const historyLoaded = Boolean(history.data);
   const openPositions = workspace.data?.openPositions ?? [];
   const activeConnection = connections.find((connection: any) => connection.active && !connection.retiredAt);
   const positions = history.data?.positions ?? [];
   const historyTotal = history.data?.total;
   const recoveredMt5History =
-    !activeConnection &&
+    workspaceConfirmedEmpty && historyLoaded &&
     ((history.data?.total ?? 0) > 0 ||
       (workspace.data?.closedPositions?.length ?? 0) > 0);
-  const availableAccounts = connections.length ? [] : [account].filter(Boolean);
+  const availableAccounts = workspaceConfirmedEmpty ? [account].filter(Boolean) : [];
   const serverUrl =
     typeof window === "undefined"
       ? "/api/mt5"
@@ -321,14 +324,24 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
             <RefreshCcw size={14} /> Refresh
           </Button>
         </div>
-        {activeConnection?.balance == null ? (
+        {workspaceLoading ? (
+          <div className="mt5-empty compact">
+            <Landmark size={24} />
+            <h3>Loading MT5 connection state</h3>
+            <p>Gold Journal is loading this account&apos;s private MT5 workspace. No reconnection action is required while this request is in progress.</p>
+          </div>
+        ) : activeConnection?.balance == null ? (
           <div className="mt5-empty compact">
             <Landmark size={24} />
             <h3>
               {recoveredMt5History
                 ? "MT5 history is present, but its connection is missing"
-                : activeConnection?.syncHealth?.state === "DEGRADED"
-                  ? "MT5 connected, but the live snapshot is not updating"
+                : activeConnection?.syncHealth?.state === "CONNECTED"
+                  ? activeConnection?.syncHealth?.snapshotState === "PENDING"
+                    ? "MT5 connected — account snapshot pending"
+                    : "MT5 connected — account snapshot is stale"
+                  : activeConnection?.syncHealth?.state === "DEGRADED"
+                    ? "MT5 connected, but the live snapshot is degraded"
                   : "Waiting for MT5 account metrics"}
             </h3>
             <p>
@@ -395,7 +408,13 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
             {workspace.isFetching ? "Refreshing…" : "Live refresh every 2.5s"}
           </span>
         </div>
-        {connections.length ? (
+        {workspaceLoading ? (
+          <div className="mt5-empty">
+            <Link2 size={28} />
+            <h3>Loading MT5 connection state</h3>
+            <p>The current account workspace is still loading. Gold Journal will not offer reconnection or replacement actions until it receives a confirmed response.</p>
+          </div>
+        ) : connections.length ? (
           <div className="mt5-connection-grid">
             {connections.map((connection: any) => {
               const state = connectionState(connection);

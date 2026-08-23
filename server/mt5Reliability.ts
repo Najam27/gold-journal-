@@ -43,11 +43,19 @@ export function classifyMt5SyncHealth(
   const contactAge = ageOf(connection.lastContactAt ?? connection.lastPing);
   const summaryAge = ageOf(connection.lastSummarySuccessAt);
   const openAge = ageOf(connection.lastOpenSyncSuccessAt);
+  const summaryFresh = summaryAge != null && summaryAge <= 15;
+  const openFresh = openAge != null && openAge <= 15;
   const summaryFailedAfterSuccess = Boolean(
     connection.lastSummaryErrorAt &&
       (!connection.lastSummarySuccessAt ||
         connection.lastSummaryErrorAt.getTime() >
           connection.lastSummarySuccessAt.getTime())
+  );
+  const openFailedAfterSuccess = Boolean(
+    connection.lastOpenSyncErrorAt &&
+      (!connection.lastOpenSyncSuccessAt ||
+        connection.lastOpenSyncErrorAt.getTime() >
+          connection.lastOpenSyncSuccessAt.getTime())
   );
   const latestError = connection.lastErrorCode
     ? `${connection.lastErrorCode}${connection.lastErrorMessage ? `: ${connection.lastErrorMessage}` : ""}`
@@ -59,9 +67,25 @@ export function classifyMt5SyncHealth(
         ? "OFFLINE"
         : contactAge > 60
           ? "STALE"
-          : summaryAge == null || summaryAge > 15 || summaryFailedAfterSuccess
+          : !summaryFresh && !openFresh
+            ? "DEGRADED"
+            : summaryFailedAfterSuccess || openFailedAfterSuccess
             ? "DEGRADED"
             : "CONNECTED";
+  const snapshotState = summaryFailedAfterSuccess
+    ? "FAILED"
+    : summaryAge == null
+      ? "PENDING"
+      : summaryFresh
+        ? "CURRENT"
+        : "STALE";
+  const openSyncState = openFailedAfterSuccess
+    ? "FAILED"
+    : openAge == null
+      ? "PENDING"
+      : openFresh
+        ? "CURRENT"
+        : "STALE";
   const historyState =
     connection.lastHistoryStatus === "FAILED"
       ? "FAILED"
@@ -74,9 +98,11 @@ export function classifyMt5SyncHealth(
     "Waiting for the first MT5 terminal contact. In MT5, confirm the read-only EA is attached, the exact server origin is allowed under Tools > Options > Expert Advisors > WebRequest, and the one-time API key was pasted into this connection. Auto Trading may remain off.";
   const message =
     state === "CONNECTED"
-      ? "Live terminal contact and snapshot are current."
+      ? snapshotState === "CURRENT"
+        ? "Live terminal contact and account snapshot are current."
+        : "Live terminal contact is current; open-position synchronization is current while the account snapshot is pending."
       : state === "DEGRADED"
-        ? `MT5 contacted Gold Journal, but the live snapshot ${summaryAge == null ? "has not been saved yet" : `has not updated for ${summaryAge}s`}${latestError ? `. ${latestError}` : "."}`
+        ? `MT5 contacted Gold Journal, but ${snapshotState === "FAILED" ? "the account snapshot failed" : snapshotState === "PENDING" ? "the account snapshot has not been saved yet" : snapshotState === "STALE" ? `the account snapshot has not updated for ${summaryAge}s` : openSyncState === "FAILED" ? "open-position synchronization failed" : openSyncState === "PENDING" ? "open-position synchronization has not been saved yet" : `open-position synchronization has not updated for ${openAge}s`}${latestError ? `. ${latestError}` : "."}`
         : state === "STALE"
           ? `The last MT5 contact was ${contactAge}s ago. The connection record remains active and will recover when EA communication resumes.`
           : state === "OFFLINE"
@@ -97,6 +123,8 @@ export function classifyMt5SyncHealth(
     lastContactAgeSeconds: contactAge,
     lastSummaryAgeSeconds: summaryAge,
     lastOpenSyncAgeSeconds: openAge,
+    snapshotState,
+    openSyncState,
     lastErrorCode: connection.lastErrorCode ?? null,
     consecutiveFailures: connection.consecutiveFailures ?? 0,
     historyState,
@@ -118,7 +146,8 @@ export async function getMt5Integrity(userId: number, accountId: number) {
     .where(
       and(
         eq(mt5Connections.accountId, accountId),
-        eq(mt5Connections.active, true)
+        eq(mt5Connections.active, true),
+        eq(mt5Connections.retiredAt, null)
       )
     )
     .limit(1);

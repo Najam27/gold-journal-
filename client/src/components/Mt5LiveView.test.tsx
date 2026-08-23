@@ -14,13 +14,14 @@ const mocks = vi.hoisted(() => ({
   refetch: vi.fn(),
   workspaceData: undefined as any,
   historyData: undefined as any,
+  workspaceLoading: false,
 }));
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     mt5: {
       workspace: {
         useQuery: () => ({
-          data: mocks.workspaceData ?? {
+          data: mocks.workspaceLoading ? undefined : mocks.workspaceData ?? {
             connections: [
               {
                 id: 1,
@@ -81,7 +82,8 @@ vi.mock("@/lib/trpc", () => ({
               },
             ],
           },
-          isFetching: false,
+          isFetching: mocks.workspaceLoading,
+          isLoading: mocks.workspaceLoading,
           refetch: mocks.refetch,
         }),
       },
@@ -172,6 +174,7 @@ describe("Mt5LiveView", () => {
     });
     mocks.workspaceData = undefined;
     mocks.historyData = undefined;
+    mocks.workspaceLoading = false;
     mocks.replace.mockResolvedValue({
       id: 44,
       apiKey: "mt5_live_replacement_key_1234567890",
@@ -322,6 +325,19 @@ describe("Mt5LiveView", () => {
     expect(screen.getAllByText(/WebRequest/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/API key/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Allow the server origin/i).length).toBeGreaterThan(0);
+  });
+
+  it("does not show missing-connection recovery or create controls while the workspace request is loading", () => {
+    mocks.workspaceLoading = true;
+    mocks.historyData = { positions: [], total: 1, page: 1, pageSize: 20, pageCount: 1 };
+
+    const { container } = render(<Mt5LiveView account={{ id: 12, name: "GFT 10K" }} accounts={[{ id: 12, name: "GFT 10K" }]} onJournalNow={vi.fn()} />);
+
+    expect(screen.getAllByText("Loading MT5 connection state")).toHaveLength(2);
+    expect(container.textContent).not.toContain("Reconnect GFT 10K");
+    expect(container.textContent).not.toContain("Add connection for GFT 10K");
+    expect(mocks.replace).not.toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it("offers a non-destructive new key for an existing connection that has never contacted MT5 Live", async () => {

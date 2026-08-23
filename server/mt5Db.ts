@@ -122,9 +122,9 @@ export async function getMt5History(userId: number, accountId: number, page: num
 export async function getActiveMt5Connection(apiKey: string) {
   const db = await requireDb();
   const fingerprint = mt5ApiKeyFingerprint(apiKey);
-  const hashed = await db.select().from(mt5Connections).where(and(eq(mt5Connections.apiKey, fingerprint), eq(mt5Connections.active, true))).limit(1);
+  const hashed = await db.select().from(mt5Connections).where(and(eq(mt5Connections.apiKey, fingerprint), eq(mt5Connections.active, true), eq(mt5Connections.retiredAt, null))).limit(1);
   if (hashed[0]) return canonicalizeMt5ConnectionOwner(db, hashed[0]);
-  const legacy = await db.select().from(mt5Connections).where(and(eq(mt5Connections.apiKey, apiKey), eq(mt5Connections.active, true))).limit(1);
+  const legacy = await db.select().from(mt5Connections).where(and(eq(mt5Connections.apiKey, apiKey), eq(mt5Connections.active, true), eq(mt5Connections.retiredAt, null))).limit(1);
   if (!legacy[0]) return null;
   await db.update(mt5Connections).set({ apiKey: fingerprint }).where(eq(mt5Connections.id, legacy[0].id));
   return canonicalizeMt5ConnectionOwner(db, { ...legacy[0], apiKey: fingerprint });
