@@ -552,7 +552,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
             </h3>
             <p>
               {recoveredMt5History
-                ? "Trade history was received for this account, but the private connection record is unavailable. Generate a replacement key now; your current journaled trades stay unchanged."
+                ? "Trade history was received for this account, but the private connection record is unavailable. If Experts shows API authentication and sync success while this panel remains empty, that EA key belongs to a different Gold Journal account. Generate this account’s replacement key now; current journaled trades stay unchanged."
                 : "Create one for this selected Gold Journal account, then copy its key into the Expert Advisor."}
             </p>
             <Button

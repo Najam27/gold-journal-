@@ -269,6 +269,7 @@ describe("Mt5LiveView", () => {
         screen.getByText("mt5_live_replacement_key_1234567890")
       ).toBeTruthy()
     );
+    expect(screen.getByText(/that EA key belongs to a different Gold Journal account/i)).toBeTruthy();
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
