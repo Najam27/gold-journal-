@@ -2,6 +2,7 @@ import express from "express";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { registerMt5Compatibility, registerMt5Ingest } from "./mt5Ingest";
 import { mt5JsonBody } from "./mt5Http";
+import { registerMt5EaDownload } from "./mt5EaDownload";
 
 const mocks = vi.hoisted(() => ({
   getActive: vi.fn(),
@@ -24,6 +25,7 @@ async function withServer<T>(run: (baseUrl: string) => Promise<T>) {
   const app = express();
   app.use(mt5JsonBody);
   registerMt5Compatibility(app);
+  registerMt5EaDownload(app);
   registerMt5Ingest(app);
   app.use(
     (
@@ -88,6 +90,23 @@ describe("MT5 HTTP route safety", () => {
       service: "gold-journal-mt5",
       supportedPayloadVersion: "2",
     });
+  });
+
+  it("generates an EA with the exact forwarded custom-domain endpoint instead of a fixed deployment URL", async () => {
+    const response = await withServer(baseUrl =>
+      fetch(`${baseUrl}/api/mt5/ea`, {
+        headers: {
+          host: "internal-function.invalid",
+          "x-forwarded-host": "journal.example.com",
+          "x-forwarded-proto": "https",
+        },
+      })
+    );
+    expect(response.status).toBe(200);
+    const source = await response.text();
+    expect(source).toContain('input string Endpoint = "https://journal.example.com/api/mt5";');
+    expect(source).not.toContain("topgjournal.netlify.app");
+    expect(response.headers.get("content-disposition")).toContain("GoldJournal_EA.mq5");
   });
 
   it("accepts a valid MQL5 JSON body with a trailing NUL terminator", async () => {

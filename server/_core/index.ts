@@ -11,6 +11,7 @@ import { serveStatic, setupVite } from "./vite";
 import { validateRuntimeConfiguration } from "./env";
 import { httpCompression } from "../httpCompression";
 import { mt5JsonBody } from "../mt5Http";
+import { registerMt5EaDownload } from "../mt5EaDownload";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -59,6 +60,7 @@ async function startServer() {
   app.use(express.json({ limit: "1mb" }));
   app.use(express.urlencoded({ limit: "1mb", extended: true }));
   registerMt5Compatibility(app);
+  registerMt5EaDownload(app);
   registerMt5Ingest(app);
   app.use(
     async (

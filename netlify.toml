@@ -5,7 +5,7 @@
 
 [functions]
   node_bundler = "esbuild"
-  included_files = ["server/**", "drizzle/**", "shared/**"]
+  included_files = ["server/**", "drizzle/**", "shared/**", "client/public/GoldJournal_EA.mq5"]
 
 [[redirects]]
   from = "/api/*"

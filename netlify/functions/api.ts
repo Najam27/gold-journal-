@@ -14,6 +14,7 @@ import {
 import { validateRuntimeConfiguration } from "../../server/_core/env";
 import { httpCompression } from "../../server/httpCompression";
 import { mt5JsonBody } from "../../server/mt5Http";
+import { registerMt5EaDownload } from "../../server/mt5EaDownload";
 
 validateRuntimeConfiguration();
 
@@ -40,6 +41,7 @@ app.use("/api/trpc", express.json({ limit: "10mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ limit: "1mb", extended: true }));
 registerMt5Compatibility(app, "/api/mt5/compat");
+registerMt5EaDownload(app, "/api/mt5/ea");
 registerMt5Ingest(app, ["/api/mt5", "/mt5"]);
 app.use(
   async (

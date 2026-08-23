@@ -26,7 +26,7 @@ import { Input } from "@/components/ui/input";
 import { formatMoney, formatRr, toNumber } from "@/lib/gold";
 import { toast } from "sonner";
 
-const EA_DOWNLOAD = "/GoldJournal_EA.mq5";
+const EA_DOWNLOAD = "/api/mt5/ea";
 const brokerOffsetOptions = Array.from(
   { length: 105 },
   (_, index) => -12 * 60 + index * 15
@@ -206,6 +206,8 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
     typeof window === "undefined"
       ? "/api/mt5"
       : `${window.location.origin}/api/mt5`;
+  const webRequestOrigin =
+    typeof window === "undefined" ? "" : window.location.origin;
   const defaultConnectionLabel = `${account?.name || "MT5"} Live`;
   const refresh = () => {
     void utils.mt5.workspace.invalidate();
@@ -262,7 +264,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
         confirmed: true,
       });
       setNewApiKey(rotated.apiKey);
-      toast.success("New MT5 key issued. Paste it into EA v2.6, then restart the EA.");
+      toast.success("New MT5 key issued. Paste it into the current EA download, then restart the EA.");
       refresh();
     } catch (error: any) {
       toast.error(error.message || "Could not issue a new MT5 key.");
@@ -330,9 +332,9 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
             </h3>
             <p>
               {recoveredMt5History
-                ? "Your existing journaled MT5 trades are safe. Create a replacement connection below, copy its new key into EA v2.6, then restart the EA once to restore live balance, equity, and margin updates."
+                ? "Your existing journaled MT5 trades are safe. Create a replacement connection below, download a fresh EA for this deployed site, copy its new key into the EA, then restart the EA once to restore live balance, equity, and margin updates."
                 : activeConnection?.syncHealth?.message ||
-                  "Attach EA v2.6 to any chart. Its Experts tab first confirms that it attached, then balance, equity, free margin, and floating P&L appear after its next summary event."}
+                  "Download the EA from this page, then attach it to any chart. Its Experts tab first confirms this deployment endpoint, then balance, equity, free margin, and floating P&L appear after its next summary event."}
             </p>
           </div>
         ) : (
@@ -437,7 +439,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
                     <div className="mt5-first-contact-recovery">
                       <strong>First-contact recovery</strong>
                       <p>
-                        Download EA v2.6, paste this connection&apos;s current API key and exact server URL, then remove and reattach the EA. EA v2.6 uses only those two values and writes a safe startup line in the MT5 Experts tab. If the original one-time key is unavailable, issue a replacement below; history remains unchanged.
+                        Download a fresh EA from this page, paste this connection&apos;s current API key, then remove and reattach the EA. The download is generated for this exact deployed domain and writes a safe startup line in the MT5 Experts tab. If the original one-time key is unavailable, issue a replacement below; history remains unchanged.
                       </p>
                       <Button
                         variant="outline"
@@ -577,7 +579,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
           onClick={() => setGuideOpen(!guideOpen)}
         >
           <div>
-            <span className="eyebrow">SETUP GUIDE · EA v2.6</span>
+            <span className="eyebrow">SETUP GUIDE · DEPLOYMENT-SPECIFIC EA</span>
             <h3>How to connect MT5 and backfill history</h3>
           </div>
           <ChevronDown size={18} />
@@ -588,7 +590,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
               <div>
                 <strong>Replace the earlier EA build</strong>
                 <p>
-                  Download EA v2.6. It writes a startup confirmation in the MT5 Experts tab, then sends the first compatibility heartbeat, balance, equity, floating P&amp;L,
+                  Download a fresh EA from this page. Its endpoint is generated from this deployed site, it writes a startup confirmation in the MT5 Experts tab, then sends the first compatibility heartbeat, balance, equity, floating P&amp;L,
                   and live positions approximately every 3 seconds, plus history
                   and close events using an explicit broker UTC offset whenever
                   available. Transient server errors now retry with bounded
@@ -600,7 +602,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
                 href={EA_DOWNLOAD}
                 download="GoldJournal_EA.mq5"
               >
-                <Download size={15} /> Download EA v2.6
+                <Download size={15} /> Download current EA
               </a>
             </li>
             <li>
@@ -629,16 +631,17 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
             </li>
             <li>
               <div>
-                <strong>Allow the server URL</strong>
+                <strong>Allow the server origin</strong>
                 <p>
                   In MT5: Tools → Options → Expert Advisors. Enable “Allow
-                  WebRequests for listed URL,” add the server URL below, then
+                  WebRequests for listed URL,” add the exact origin below, then
                   click OK.
                 </p>
                 <div className="mt5-inline-copy">
-                  <code>{serverUrl}</code>
-                  <CopyValue value={serverUrl} label="Server URL" />
+                  <code>{webRequestOrigin}</code>
+                  <CopyValue value={webRequestOrigin} label="MT5 WebRequest origin" />
                 </div>
+                <p className="mt5-guide-note">The generated EA endpoint is <code>{serverUrl}</code>.</p>
               </div>
             </li>
             <li>
@@ -716,7 +719,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
             <h3>No open positions in MT5</h3>
             <p>
               Positions will appear in both MT5 Live and Trade Log after an
-              active connection receives data from EA v2.6.
+              active connection receives data from the current EA download.
             </p>
           </div>
         )}

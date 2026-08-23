@@ -5,13 +5,13 @@ const source = readFileSync(new URL("../../public/GoldJournal_EA.mq5", import.me
 
 describe("Gold Journal MT5 EA reliability contract", () => {
   it("keeps the three-second cadence while using bounded retry for transient HTTP failures", () => {
-    expect(source).toContain("#property version   \"2.6\"");
+    expect(source).toContain("#property version   \"2.8\"");
     expect(source).toContain("input int SyncSeconds = 3");
     expect(source).toContain("const int MAX_RETRY_BACKOFF_SECONDS = 60");
     expect(source).toContain("bool IsTransientStatus(int status)");
     expect(source).toContain("status == 502 || status == 503 || status == 504");
     expect(source).toContain("g_next_retry_at = TimeCurrent() + delay");
-    expect(source).toContain("MT5 error=%d. Check Tools > Options > Expert Advisors > Allow WebRequest");
+    expect(source).toContain("operation=%s; http=-1; mt5_error=%d; endpoint=%s");
   });
 
   it("stops permanent rejections, records per-event recovery, and never logs the API key", () => {
@@ -25,9 +25,10 @@ describe("Gold Journal MT5 EA reliability contract", () => {
   });
 
   it("prints safe startup state and gives a specific recovery instruction for invalid or retired keys", () => {
-    expect(source).toContain("[MT5 LIVE] EA v%s attached. Endpoint=%s; sync interval=%ds; history=%s.");
+    expect(source).toContain("[MT5 LIVE] STARTUP; EA_VERSION=%s; endpoint=%s; terminal_connected=%s; api_key_present=true");
     expect(source).toContain("[MT5 LIVE] startup blocked: paste the current API key from Gold Journal MT5 Live into EA Inputs. Do not share that key.");
-    expect(source).toContain("rejected HTTP=401; this API key is invalid or retired. In Gold Journal MT5 Live, issue a replacement key");
-    expect(source).toContain('input string Endpoint = "https://topgjournal.netlify.app/api/mt5";');
+    expect(source).toContain("API key rejected or retired; operation=%s; http=%d. In Gold Journal MT5 Live, issue a replacement key");
+    expect(source).toContain('input string Endpoint = "__GOLD_JOURNAL_MT5_ENDPOINT__";');
+    expect(source).toContain("MT5 endpoint not found; operation=%s; http=%d; endpoint=%s");
   });
 });
