@@ -193,6 +193,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
     setLinkAccountId(account?.id);
   }, [account?.id]);
   const connections = workspace.data?.connections ?? [];
+  const dataSourceReference = workspace.data?.dataSourceReference;
   const openPositions = workspace.data?.openPositions ?? [];
   const activeConnection = connections.find((connection: any) => connection.active && !connection.retiredAt);
   const positions = history.data?.positions ?? [];
@@ -295,6 +296,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
             Log. The browser refreshes every 2.5 seconds; EA live updates run
             approximately every 3 seconds.
           </p>
+          {dataSourceReference && <small className="mt5-data-source-ref">Workspace source {dataSourceReference}</small>}
         </div>
         {availableAccounts.length > 0 && (
           <Button onClick={openAddConnection}>

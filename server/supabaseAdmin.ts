@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { createHash } from "crypto";
 
 const SUPABASE_REQUEST_TIMEOUT_MS = 15_000;
 let cachedConfig = "";
@@ -19,4 +20,11 @@ export function getSupabaseAdmin(): any {
   cachedClient = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: fetchWithTimeout } });
   cachedConfig = config;
   return cachedClient;
+}
+
+/** A non-secret tag for comparing the configured database source across MT5 POST and workspace reads. */
+export function supabaseDataSourceReference() {
+  const url = process.env.SUPABASE_URL?.trim();
+  if (!url) return null;
+  return `gjsup-${createHash("sha256").update(url).digest("hex").slice(0, 12)}`;
 }

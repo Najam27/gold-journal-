@@ -33,6 +33,7 @@ bool g_history_in_progress = false;
 bool g_history_full_replay = true;
 int g_history_cursor = 0;
 string g_connection_reference = "";
+string g_data_source_reference = "";
 
 string JsonEscape(string value) {
    StringReplace(value, "\\", "\\\\");
@@ -66,11 +67,15 @@ string JsonStringValue(string json, string field) {
    int finish = StringFind(json, "\"", start);
    return finish < start ? "" : StringSubstr(json, start, finish - start);
 }
-void MarkEventSuccess(string expectedEvent, string connection_reference) {
+void MarkEventSuccess(string expectedEvent, string connection_reference, string data_source_reference) {
    datetime now = TimeCurrent();
    if(connection_reference != "" && connection_reference != g_connection_reference) {
       g_connection_reference = connection_reference;
       PrintFormat("[MT5 LIVE] authenticated connection reference=%s. Match this with the MT5 Live connection card.", g_connection_reference);
+   }
+   if(data_source_reference != "" && data_source_reference != g_data_source_reference) {
+      g_data_source_reference = data_source_reference;
+      PrintFormat("[MT5 LIVE] authenticated data source reference=%s. Match this with the MT5 Live workspace source.", g_data_source_reference);
    }
    if(expectedEvent == "compat" && !g_compatibility_reported) {
       Print("[MT5 LIVE] API authentication accepted; read-only bridge is connected to Gold Journal.");
@@ -138,7 +143,7 @@ bool SendJson(string payload, string expectedEvent) {
       PrintFormat("[MT5 LIVE] %s returned an invalid response retry=%d in %ds", expectedEvent, g_consecutive_failures, delay);
       return false;
    }
-   MarkEventSuccess(expectedEvent, JsonStringValue(response_text, "connectionReference"));
+   MarkEventSuccess(expectedEvent, JsonStringValue(response_text, "connectionReference"), JsonStringValue(response_text, "dataSourceReference"));
    return true;
 }
 

@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import { completeMt5HistorySync, getActiveMt5Connection, recordMt5EventFailure, recordMt5EventSuccess, recordMt5HistoryAccepted, recordMt5HistoryAttempt, recordMt5HistoryFailure, touchMt5Connection, updateMt5AccountSummary, upsertMt5ClosedPosition, upsertMt5ClosedPositionBatch, upsertMt5OpenPosition, upsertMt5OpenPositionBatch } from "./mt5Db";
 import { mt5ApiKeyFingerprint, mt5ConnectionReference } from "./mt5Security";
+import { supabaseDataSourceReference } from "./supabaseAdmin";
 import { consumeRateLimit, rateLimitTestHooks } from "./rateLimit";
 import { Mt5TimestampError, normalizeMt5TimestampToUtcPlus5 } from "./mt5Timestamp";
 
@@ -40,7 +41,7 @@ function versionBody(payload: z.infer<typeof mt5Payload>) {
 }
 
 function connectionBody(connection: { apiKey: string }) {
-  return { connectionReference: mt5ConnectionReference(connection.apiKey) };
+  return { connectionReference: mt5ConnectionReference(connection.apiKey), dataSourceReference: supabaseDataSourceReference() };
 }
 
 type Mt5FailureCode = "MIGRATION_REQUIRED_0008" | "DATABASE_RETRYABLE" | "INVALID_SYNC_DATA" | "SYNC_PERMISSION_DENIED" | "INVALID_MT5_TIMESTAMP" | "FUTURE_TRADE" | "SYNC_UNAVAILABLE";
