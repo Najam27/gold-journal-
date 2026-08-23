@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const rpc = vi.hoisted(() => vi.fn());
 vi.mock("./supabaseAdmin", () => ({ getSupabaseAdmin: () => ({ rpc }) }));
 
-import { clearAccountJournalDataAtomic, recordGoalAlertsAtomic, removeAccountAtomic, syncMt5PositionAtomic } from "./atomicOperations";
+import { clearAccountJournalDataAtomic, recordGoalAlertsAtomic, removeAccountAtomic, syncMt5PositionAtomic, touchMt5ConnectionAtomic, updateMt5AccountSummaryAtomic } from "./atomicOperations";
 
 describe("atomic Supabase operation wrappers", () => {
   beforeEach(() => rpc.mockReset());
@@ -32,6 +32,40 @@ describe("atomic Supabase operation wrappers", () => {
     const position = { ticket: "42", status: "CLOSED" };
     await expect(syncMt5PositionAtomic(7, 12, position)).resolves.toBe(true);
     expect(rpc).toHaveBeenCalledWith("gj_sync_mt5_position", { target_user_id: 7, target_account_id: 12, position_payload: position });
+  });
+
+  it("requires an explicit successful-row response for the authenticated MT5 contact write", async () => {
+    rpc.mockResolvedValue({ data: true, error: null });
+    await expect(touchMt5ConnectionAtomic(44)).resolves.toBeUndefined();
+    expect(rpc).toHaveBeenCalledWith("gj_touch_mt5_connection", { target_connection_id: 44 });
+    rpc.mockResolvedValue({ data: false, error: null });
+    await expect(touchMt5ConnectionAtomic(44)).rejects.toThrow("did not affect the authenticated connection");
+  });
+
+  it("writes summary facts through the confirmed connection RPC without API-key material", async () => {
+    rpc.mockResolvedValue({ data: true, error: null });
+    await expect(updateMt5AccountSummaryAtomic(44, {
+      mt5Login: 90123456n,
+      brokerServer: "Broker-Live",
+      currency: "USD",
+      balance: 10_000,
+      equity: 10_042.5,
+      margin: 250,
+      freeMargin: 9_792.5,
+      floatingPnl: 42.5,
+      riskSymbol: "XAUUSD",
+      riskTickSize: 0.1,
+      riskTickValueLoss: 10,
+      riskContractSize: 100,
+      riskVolumeMin: 0.01,
+      riskVolumeMax: 50,
+      riskVolumeStep: 0.01,
+    })).resolves.toBeUndefined();
+    expect(rpc).toHaveBeenCalledWith("gj_update_mt5_connection_summary", expect.objectContaining({
+      target_connection_id: 44,
+      summary_payload: expect.objectContaining({ mt5Login: "90123456", balance: 10_000, riskSymbol: "XAUUSD" }),
+    }));
+    expect(JSON.stringify(rpc.mock.calls.at(-1))).not.toContain("api_key");
   });
 
   it("fails closed when the atomic function reports an error", async () => {

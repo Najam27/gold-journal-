@@ -78,6 +78,58 @@ export async function recordMt5EventFailureAtomic(connectionId: number, operatio
   return data === true;
 }
 
+export async function touchMt5ConnectionAtomic(connectionId: number) {
+  const { data, error } = await getSupabaseAdmin().rpc("gj_touch_mt5_connection", {
+    target_connection_id: connectionId,
+  });
+  if (error) throwRpcError("touch MT5 connection", error);
+  if (data !== true) throw new Error("Supabase MT5 contact update did not affect the authenticated connection.");
+}
+
+export async function updateMt5AccountSummaryAtomic(
+  connectionId: number,
+  summary: {
+    mt5Login: bigint;
+    brokerServer: string;
+    currency: string;
+    balance: number;
+    equity: number;
+    margin: number;
+    freeMargin: number;
+    floatingPnl: number;
+    riskSymbol?: string;
+    riskTickSize?: number;
+    riskTickValueLoss?: number;
+    riskContractSize?: number;
+    riskVolumeMin?: number;
+    riskVolumeMax?: number;
+    riskVolumeStep?: number;
+  },
+) {
+  const { data, error } = await getSupabaseAdmin().rpc("gj_update_mt5_connection_summary", {
+    target_connection_id: connectionId,
+    summary_payload: {
+      mt5Login: summary.mt5Login.toString(),
+      brokerServer: summary.brokerServer,
+      currency: summary.currency,
+      balance: summary.balance,
+      equity: summary.equity,
+      margin: summary.margin,
+      freeMargin: summary.freeMargin,
+      floatingPnl: summary.floatingPnl,
+      riskSymbol: summary.riskSymbol ?? null,
+      riskTickSize: summary.riskTickSize ?? null,
+      riskTickValueLoss: summary.riskTickValueLoss ?? null,
+      riskContractSize: summary.riskContractSize ?? null,
+      riskVolumeMin: summary.riskVolumeMin ?? null,
+      riskVolumeMax: summary.riskVolumeMax ?? null,
+      riskVolumeStep: summary.riskVolumeStep ?? null,
+    },
+  });
+  if (error) throwRpcError("update MT5 account summary", error);
+  if (data !== true) throw new Error("Supabase MT5 summary update did not affect the authenticated connection.");
+}
+
 export async function syncMt5HistoryBatchAtomic(userId: number, accountId: number, positions: Array<Record<string, unknown>>) {
   const { data, error } = await getSupabaseAdmin().rpc("gj_sync_mt5_history_batch", {
     target_user_id: userId,

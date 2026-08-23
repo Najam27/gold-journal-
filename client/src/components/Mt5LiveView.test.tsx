@@ -28,9 +28,12 @@ vi.mock("@/lib/trpc", () => ({
                 accountName: "GFT 10K",
                 label: "GFT Live",
                 apiKey: "mt5_secret_connection_key_abcdefghijk",
+                connectionReference: "gjmt5-a1b2c3d4e5f6",
                 active: true,
                 brokerUtcOffsetMinutes: 180,
                 lastPing: new Date(),
+                lastContactAt: new Date(),
+                lastSummarySuccessAt: new Date(),
                 mt5Login: "90123456",
                 brokerServer: "Broker-Live",
                 currency: "USD",
@@ -198,6 +201,8 @@ describe("Mt5LiveView", () => {
     expect(screen.getByText("$12.50")).toBeTruthy();
     expect(screen.getByText("$10,000.00")).toBeTruthy();
     expect(screen.getByText("$10,042.50")).toBeTruthy();
+    expect(screen.getByText(/Connection ref gjmt5-a1b2c3d4e5f6/i)).toBeTruthy();
+    expect(screen.queryByText("Waiting for MT5")).toBeNull();
     expect(screen.getByText(/42 closed positions synced/i)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Add connection/i })).toBeNull();
     expect(screen.getByText(/Live refresh every 2\.5s/i)).toBeTruthy();

@@ -4,7 +4,7 @@ import { getOwnedAccount } from "./goldDb";
 import { classifyMt5SyncHealth } from "./mt5Reliability";
 import { getDb } from "./db";
 import { mt5ApiKeyFingerprint, mt5ConnectionReference } from "./mt5Security";
-import { recordMt5EventFailureAtomic, syncMt5HistoryBatchAtomic, syncMt5OpenBatchAtomic, syncMt5PositionAtomic } from "./atomicOperations";
+import { recordMt5EventFailureAtomic, syncMt5HistoryBatchAtomic, syncMt5OpenBatchAtomic, syncMt5PositionAtomic, touchMt5ConnectionAtomic, updateMt5AccountSummaryAtomic } from "./atomicOperations";
 
 async function requireDb() { const db = await getDb(); if (!db) throw new Error("Supabase database is unavailable. Please retry shortly."); return db; }
 
@@ -14,6 +14,18 @@ async function canonicalizeMt5ConnectionOwner(database: any, connection: typeof 
   if (owner[0].userId === connection.userId) return connection;
   await database.update(mt5Connections).set({ userId: owner[0].userId }).where(eq(mt5Connections.id, connection.id));
   return { ...connection, userId: owner[0].userId };
+}
+
+function isMissingMt5WriteConfirmationProcedure(error: unknown) {
+  const wrapped = error as Error & { supabaseCode?: string };
+  return wrapped?.supabaseCode === "PGRST202" || /gj_(touch_mt5_connection|update_mt5_connection_summary).*could not find|could not find.*gj_(touch_mt5_connection|update_mt5_connection_summary)/i.test(wrapped?.message ?? "");
+}
+
+async function requireConfirmedMt5ConnectionUpdate(database: any, connectionId: number, values: Record<string, unknown>) {
+  const updated = await database.update(mt5Connections).set(values).where(eq(mt5Connections.id, connectionId)).returning({ id: mt5Connections.id });
+  if (updated.length !== 1 || Number(updated[0]?.id) !== connectionId) {
+    throw new Error("Supabase MT5 connection update did not affect the authenticated connection.");
+  }
 }
 
 function safePosition(position: typeof mt5LivePositions.$inferSelect, journaledTickets: Set<string>) {
@@ -117,19 +129,25 @@ export async function getActiveMt5Connection(apiKey: string) {
 }
 
 export async function touchMt5Connection(connectionId: number) {
-  const db = await requireDb();
-  const now = new Date();
-  await db.update(mt5Connections).set({ lastPing: now, lastContactAt: now }).where(eq(mt5Connections.id, connectionId));
+  try {
+    await touchMt5ConnectionAtomic(connectionId);
+  } catch (error) {
+    if (!isMissingMt5WriteConfirmationProcedure(error)) throw error;
+    const db = await requireDb();
+    const now = new Date();
+    await requireConfirmedMt5ConnectionUpdate(db, connectionId, { lastPing: now, lastContactAt: now });
+  }
 }
 
 export type Mt5EventOperation = "summary" | "open_batch" | "history_batch";
 
 export async function recordMt5EventSuccess(connectionId: number, operation: Mt5EventOperation) {
+  await touchMt5Connection(connectionId);
   const db = await requireDb(); const now = new Date();
-  await db.update(mt5Connections).set({
-    lastPing: now, lastContactAt: now, lastErrorAt: null, lastErrorCode: null, lastErrorMessage: null, consecutiveFailures: 0,
+  await requireConfirmedMt5ConnectionUpdate(db, connectionId, {
+    lastErrorAt: null, lastErrorCode: null, lastErrorMessage: null, consecutiveFailures: 0,
     ...(operation === "open_batch" ? { lastOpenSyncAt: now, lastOpenSyncSuccessAt: now } : {}),
-  }).where(eq(mt5Connections.id, connectionId));
+  });
 }
 
 export async function recordMt5EventFailure(connectionId: number, operation: Mt5EventOperation, code: string, message: string) {
@@ -140,9 +158,32 @@ export async function recordMt5EventFailure(connectionId: number, operation: Mt5
 type AccountSummary = { mt5Login: bigint; brokerServer: string; currency: string; balance: number; equity: number; margin: number; freeMargin: number; floatingPnl: number; riskSymbol?: string; riskTickSize?: number; riskTickValueLoss?: number; riskContractSize?: number; riskVolumeMin?: number; riskVolumeMax?: number; riskVolumeStep?: number };
 
 export async function updateMt5AccountSummary(connectionId: number, value: AccountSummary) {
-  const db = await requireDb();
-  const now = new Date();
-  await db.update(mt5Connections).set({ mt5Login: value.mt5Login, brokerServer: value.brokerServer, currency: value.currency, balance: value.balance.toFixed(2), equity: value.equity.toFixed(2), margin: value.margin.toFixed(2), freeMargin: value.freeMargin.toFixed(2), floatingPnl: value.floatingPnl.toFixed(2), ...(value.riskSymbol ? { riskSymbol: value.riskSymbol, riskTickSize: value.riskTickSize!.toFixed(8), riskTickValueLoss: value.riskTickValueLoss!.toFixed(8), riskContractSize: value.riskContractSize!.toFixed(8), riskVolumeMin: value.riskVolumeMin!.toFixed(8), riskVolumeMax: value.riskVolumeMax!.toFixed(8), riskVolumeStep: value.riskVolumeStep!.toFixed(8), riskSymbolUpdatedAt: now } : {}), lastPing: now, lastContactAt: now, lastSummaryAt: now, lastSummarySuccessAt: now, lastErrorAt: null, lastErrorCode: null, lastErrorMessage: null, consecutiveFailures: 0 }).where(eq(mt5Connections.id, connectionId));
+  try {
+    await updateMt5AccountSummaryAtomic(connectionId, value);
+  } catch (error) {
+    if (!isMissingMt5WriteConfirmationProcedure(error)) throw error;
+    const db = await requireDb();
+    const now = new Date();
+    await requireConfirmedMt5ConnectionUpdate(db, connectionId, {
+      mt5Login: value.mt5Login,
+      brokerServer: value.brokerServer,
+      currency: value.currency,
+      balance: value.balance.toFixed(2),
+      equity: value.equity.toFixed(2),
+      margin: value.margin.toFixed(2),
+      freeMargin: value.freeMargin.toFixed(2),
+      floatingPnl: value.floatingPnl.toFixed(2),
+      ...(value.riskSymbol ? { riskSymbol: value.riskSymbol, riskTickSize: value.riskTickSize!.toFixed(8), riskTickValueLoss: value.riskTickValueLoss!.toFixed(8), riskContractSize: value.riskContractSize!.toFixed(8), riskVolumeMin: value.riskVolumeMin!.toFixed(8), riskVolumeMax: value.riskVolumeMax!.toFixed(8), riskVolumeStep: value.riskVolumeStep!.toFixed(8), riskSymbolUpdatedAt: now } : {}),
+      lastPing: now,
+      lastContactAt: now,
+      lastSummaryAt: now,
+      lastSummarySuccessAt: now,
+      lastErrorAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      consecutiveFailures: 0,
+    });
+  }
 }
 
 export async function completeMt5HistorySync(connectionId: number, accountId: number) {
@@ -157,9 +198,10 @@ export async function recordMt5HistoryAttempt(connectionId: number, batchSize: n
 }
 
 export async function recordMt5HistoryAccepted(connectionId: number, batchSize: number, complete: boolean) {
+  await touchMt5Connection(connectionId);
   const db = await requireDb();
   const now = new Date();
-  await db.update(mt5Connections).set({ lastPing: now, lastContactAt: now, lastHistoryAttempt: now, lastHistoryStatus: complete ? "COMPLETING" : "ACCEPTED", lastHistoryMessage: complete ? `Accepted final batch of ${batchSize} historical position${batchSize === 1 ? "" : "s"}.` : `Accepted ${batchSize} historical position${batchSize === 1 ? "" : "s"}.`, lastHistoryBatchSize: batchSize, lastErrorAt: null, lastErrorCode: null, lastErrorMessage: null, consecutiveFailures: 0 }).where(eq(mt5Connections.id, connectionId));
+  await requireConfirmedMt5ConnectionUpdate(db, connectionId, { lastHistoryAttempt: now, lastHistoryStatus: complete ? "COMPLETING" : "ACCEPTED", lastHistoryMessage: complete ? `Accepted final batch of ${batchSize} historical position${batchSize === 1 ? "" : "s"}.` : `Accepted ${batchSize} historical position${batchSize === 1 ? "" : "s"}.`, lastHistoryBatchSize: batchSize, lastErrorAt: null, lastErrorCode: null, lastErrorMessage: null, consecutiveFailures: 0 });
 }
 
 export async function recordMt5HistoryFailure(connectionId: number, message: string) {
