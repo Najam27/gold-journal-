@@ -1,5 +1,5 @@
 #property strict
-#property version   "2.9"
+#property version   "2.10"
 #property description "Gold Journal read-only journal bridge: never places or manages trades; sends account, position, and history facts to Gold Journal."
 
 input string Endpoint = "__GOLD_JOURNAL_MT5_ENDPOINT__";
@@ -10,7 +10,7 @@ input int HistoryDays = 3650;
 input bool SendHistoryOnInit = true;
 input string RiskSymbol = "";
 
-const string EA_VERSION = "2.9.0";
+const string EA_VERSION = "2.10.0";
 const string PAYLOAD_VERSION = "2";
 const int REQUEST_TIMEOUT_MS = 15000;
 const int HISTORY_BATCH_SIZE = 50;
@@ -29,6 +29,9 @@ bool g_compatibility_reported = false;
 bool g_summary_reported = false;
 bool g_open_batch_reported = false;
 bool g_history_reported = false;
+bool g_history_in_progress = false;
+bool g_history_full_replay = true;
+int g_history_cursor = 0;
 
 string JsonEscape(string value) {
    StringReplace(value, "\\", "\\\\");
@@ -274,7 +277,13 @@ string ClosedPositionJson(ulong position_id) {
 void SendHistory(bool fullReplay) {
    datetime now = TimeCurrent();
    g_last_history_attempt = now;
-   datetime from = now - (fullReplay ? HistoryDays * 86400 : MathMax(3600, SyncSeconds * 4));
+   if(!g_history_in_progress) {
+      g_history_cursor = 0;
+      g_history_in_progress = true;
+      g_history_full_replay = fullReplay;
+   }
+   if(!fullReplay && g_history_full_replay) return;
+   datetime from = now - (g_history_full_replay ? HistoryDays * 86400 : MathMax(3600, SyncSeconds * 4));
    if(!HistorySelect(from, now)) {
       PrintFormat("Gold Journal HistorySelect failed: %d", GetLastError());
       return;
@@ -287,39 +296,53 @@ void SendHistory(bool fullReplay) {
    }
    if(position_count == 0) {
       string empty_payload = "{\"event\":\"history_batch\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\",\"broker_utc_offset_minutes\":" + IntegerToString(BrokerUtcOffsetMinutes) + ",\"positions\":[],\"complete\":true}";
-      if(SendJson(empty_payload, "history_batch")) g_last_history_sync = now;
+      if(SendJson(empty_payload, "history_batch")) {
+         g_last_history_sync = now;
+         g_history_in_progress = false;
+         g_history_full_replay = true;
+         g_history_cursor = 0;
+         Print("[MT5 LIVE] history sync completed; no closed positions found in the selected period.");
+      }
       return;
    }
-   int cursor = 0;
-   while(cursor < position_count) {
-      string positions = "[";
-      int added = 0;
-      bool first = true;
-      while(cursor < position_count && added < HISTORY_BATCH_SIZE) {
-         ulong position_id = position_ids[cursor++];
-         string item = ClosedPositionJson(position_id);
-         if(item == "") {
-            PrintFormat("Gold Journal could not reconstruct history for position %I64u", position_id);
-            return;
-         }
-         if(!first) positions += ",";
-         positions += item;
-         first = false;
-         added++;
+   int cursor = MathMin(g_history_cursor, position_count);
+   string positions = "[";
+   int added = 0;
+   int skipped = 0;
+   bool first = true;
+   while(cursor < position_count && added < HISTORY_BATCH_SIZE) {
+      ulong position_id = position_ids[cursor++];
+      string item = ClosedPositionJson(position_id);
+      if(item == "") {
+         skipped++;
+         PrintFormat("[MT5 LIVE] skipped unreconstructable historical position %I64u; continuing batch.", position_id);
+         continue;
       }
-      positions += "]";
-      if(added == 0) continue;
-      bool complete = cursor >= position_count;
-      string payload = "{\"event\":\"history_batch\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\",\"broker_utc_offset_minutes\":" + IntegerToString(BrokerUtcOffsetMinutes) + ",\"positions\":" + positions + ",\"complete\":" + (complete ? "true" : "false") + "}";
-      if(!SendJson(payload, "history_batch")) return;
+      if(!first) positions += ",";
+      positions += item;
+      first = false;
+      added++;
    }
-   g_last_history_sync = now;
+   positions += "]";
+   bool complete = cursor >= position_count;
+   string payload = "{\"event\":\"history_batch\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\",\"broker_utc_offset_minutes\":" + IntegerToString(BrokerUtcOffsetMinutes) + ",\"positions\":" + positions + ",\"complete\":" + (complete ? "true" : "false") + "}";
+   if(!SendJson(payload, "history_batch")) return;
+   if(complete) {
+      g_last_history_sync = now;
+      g_history_in_progress = false;
+      g_history_full_replay = true;
+      g_history_cursor = 0;
+      PrintFormat("[MT5 LIVE] history sync completed; processed=%d; skipped=%d.", position_count, skipped);
+   } else {
+      g_history_cursor = cursor;
+      PrintFormat("[MT5 LIVE] history batch accepted; sent=%d; skipped=%d; remaining=%d; continuing on next timer.", added, skipped, position_count - cursor);
+   }
 }
 
 void Sync() {
    SendSummary();
    SendOpenPositions();
-   if(SendHistoryOnInit && (g_last_history_attempt == 0 || TimeCurrent() - g_last_history_attempt >= 300) && (g_last_history_sync == 0 || TimeCurrent() - g_last_history_sync >= FULL_HISTORY_RETRY_SECONDS)) SendHistory(true);
+   if(SendHistoryOnInit && (g_history_in_progress || (g_last_history_attempt == 0 || TimeCurrent() - g_last_history_attempt >= 300) && (g_last_history_sync == 0 || TimeCurrent() - g_last_history_sync >= FULL_HISTORY_RETRY_SECONDS))) SendHistory(true);
 }
 
 int OnInit() {

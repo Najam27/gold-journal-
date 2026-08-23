@@ -5,7 +5,7 @@ const source = readFileSync(new URL("../../public/GoldJournal_EA.mq5", import.me
 
 describe("Gold Journal MT5 EA reliability contract", () => {
   it("keeps the three-second cadence while using bounded retry for transient HTTP failures", () => {
-    expect(source).toContain("#property version   \"2.9\"");
+    expect(source).toContain("#property version   \"2.10\"");
     expect(source).toContain("input int SyncSeconds = 3");
     expect(source).toContain("const int MAX_RETRY_BACKOFF_SECONDS = 60");
     expect(source).toContain("bool IsTransientStatus(int status)");
@@ -30,5 +30,17 @@ describe("Gold Journal MT5 EA reliability contract", () => {
     expect(source).toContain("API key rejected or retired; operation=%s; http=%d. In Gold Journal MT5 Live, issue a replacement key");
     expect(source).toContain('input string Endpoint = "__GOLD_JOURNAL_MT5_ENDPOINT__";');
     expect(source).toContain("MT5 endpoint not found; operation=%s; http=%d; endpoint=%s");
+  });
+
+  it("sends only one bounded history batch per timer cycle and resumes a full backfill after transient failure", () => {
+    expect(source).toContain("bool g_history_in_progress = false");
+    expect(source).toContain("bool g_history_full_replay = true");
+    expect(source).toContain("int g_history_cursor = 0");
+    expect(source).toContain("while(cursor < position_count && added < HISTORY_BATCH_SIZE)");
+    expect(source).toContain("if(!SendJson(payload, \"history_batch\")) return;");
+    expect(source).toContain("g_history_cursor = cursor");
+    expect(source).toContain("g_history_in_progress = false");
+    expect(source).toContain("g_history_in_progress || (g_last_history_attempt == 0");
+    expect(source).toContain("skipped unreconstructable historical position");
   });
 });

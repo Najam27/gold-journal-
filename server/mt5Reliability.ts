@@ -117,12 +117,19 @@ export async function getMt5Integrity(userId: number, accountId: number) {
     .from(mt5Connections)
     .where(
       and(
-        eq(mt5Connections.userId, userId),
         eq(mt5Connections.accountId, accountId),
         eq(mt5Connections.active, true)
       )
     )
     .limit(1);
+  let canonicalConnection = connection;
+  if (connection && connection.userId !== userId) {
+    await db
+      .update(mt5Connections)
+      .set({ userId })
+      .where(eq(mt5Connections.id, connection.id));
+    canonicalConnection = { ...connection, userId };
+  }
   const closed = await db
     .select({ ticket: mt5LivePositions.ticket })
     .from(mt5LivePositions)
@@ -152,7 +159,7 @@ export async function getMt5Integrity(userId: number, accountId: number) {
   const unjournaledClosedPositions = closed.filter(
     row => !journaledTickets.has(row.ticket.toString())
   ).length;
-  const health = classifyMt5SyncHealth(connection ?? null);
+  const health = classifyMt5SyncHealth(canonicalConnection ?? null);
   const findings = [
     ...(health.state === "DEGRADED"
       ? [

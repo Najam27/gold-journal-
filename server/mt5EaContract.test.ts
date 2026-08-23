@@ -17,10 +17,11 @@ describe("Gold Journal EA history contract", () => {
     expect(eaSource).toContain("OrderCalcProfit(order_type, symbol, lots, open_price, sl, risk)");
   });
 
-  it("does not silently discard an unreconstructable position", () => {
-    expect(eaSource).toContain("Gold Journal could not reconstruct history for position");
+  it("logs and skips an unreconstructable position without aborting the remaining bounded history backfill", () => {
+    expect(eaSource).toContain("[MT5 LIVE] skipped unreconstructable historical position");
     expect(eaSource).toContain("if(item == \"\") {");
-    expect(eaSource).toContain("return;\n         }");
+    expect(eaSource).toContain("skipped++;");
+    expect(eaSource).toContain("continuing batch.");
   });
 
   it("aggregates by position ID, batches bounded records, and handles empty history", () => {

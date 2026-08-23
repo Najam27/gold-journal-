@@ -30,4 +30,13 @@ describe("MT5 connection owner integrity", () => {
     expect(migration).not.toMatch(/gj_(trades|mt5_live_positions)/i);
     expect(migration).not.toContain('"apiKey"');
   });
+
+  it("uses the same account-scoped owner normalization for integrity health as workspace and API-key ingress", () => {
+    const reliabilitySource = readFileSync(new URL("./mt5Reliability.ts", import.meta.url), "utf8");
+    expect(reliabilitySource).toContain("eq(mt5Connections.accountId, accountId)");
+    expect(reliabilitySource).toContain("connection && connection.userId !== userId");
+    expect(reliabilitySource).toContain("set({ userId })");
+    expect(reliabilitySource).toContain("classifyMt5SyncHealth(canonicalConnection ?? null)");
+    expect(reliabilitySource).not.toContain("eq(mt5Connections.userId, userId),\n        eq(mt5Connections.accountId, accountId)");
+  });
 });
