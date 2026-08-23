@@ -24,7 +24,9 @@ function CustomSelect({ category, value, onChange, options, placeholder, multi =
   const customs = (optionQuery.data ?? []).filter((item: any) => item.category === category && item.active).map((item: any) => item.value);
   const behaviorChoices = category === "Mistake" ? ["FOMO", "Revenge", "Overtrading", "Oversize", "Early entry", "Late entry", "Over-risked", "Moved SL", "Closed early"] : [];
   const choices = Array.from(new Set([...options, ...behaviorChoices, ...customs]));
-  const selectedTags = (value || "").split(/[|,;/]+/).map(tag => tag.trim()).filter(tag => tag && tag.toLowerCase() !== "none");
+  // A slash is meaningful inside supported levels such as SBR/TJL1 and RBS/TJL1.
+  // Only actual list separators may split multi-select values.
+  const selectedTags = (value || "").split(/[|,;]+/).map(tag => tag.trim()).filter(tag => tag && tag.toLowerCase() !== "none");
   const add = async () => {
     const next = draft.trim();
     if (!next) return;

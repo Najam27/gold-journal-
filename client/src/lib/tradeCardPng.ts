@@ -96,6 +96,16 @@ export function downloadTradeCardPng(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = filename; link.style.display = "none"; document.body.append(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
+export async function copyTradeCardPng(blob: Blob) {
+  if (typeof navigator === "undefined" || !navigator.clipboard?.write || typeof ClipboardItem === "undefined") return false;
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function shareTradeCardPng(blob: Blob, filename: string) {
   if (typeof navigator === "undefined" || typeof File === "undefined" || !navigator.share) return false;
   const file = new File([blob], filename, { type: "image/png" }); const payload = { files: [file], title: "Gold Journal Trade Card", text: "Private Gold Journal trade card" };

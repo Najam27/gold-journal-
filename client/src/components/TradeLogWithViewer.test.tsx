@@ -1,17 +1,18 @@
 // @vitest-environment jsdom
 import React from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const imageMocks = vi.hoisted(() => ({ create: vi.fn(), download: vi.fn(), share: vi.fn() }));
+const imageMocks = vi.hoisted(() => ({ create: vi.fn(), copy: vi.fn(), download: vi.fn(), share: vi.fn() }));
 vi.mock("@/components/ui/button", () => ({ Button: ({ children, ...props }: any) => <button {...props}>{children}</button> }));
 vi.mock("@/components/ui/input", () => ({ Input: (props: any) => <input {...props} /> }));
 vi.mock("@/components/ui/dialog", () => ({ Dialog: ({ children }: any) => <>{children}</>, DialogContent: ({ children }: any) => <div>{children}</div>, DialogDescription: ({ children }: any) => <p>{children}</p>, DialogHeader: ({ children }: any) => <header>{children}</header>, DialogTitle: ({ children }: any) => <h2>{children}</h2> }));
-vi.mock("@/lib/tradeCardPng", () => ({ createTradeCardPng: imageMocks.create, downloadTradeCardPng: imageMocks.download, shareTradeCardPng: imageMocks.share }));
+vi.mock("@/lib/tradeCardPng", () => ({ createTradeCardPng: imageMocks.create, copyTradeCardPng: imageMocks.copy, downloadTradeCardPng: imageMocks.download, shareTradeCardPng: imageMocks.share }));
 
 import { TradeLogWithViewer } from "./TradeLogWithViewer";
 
 afterEach(() => cleanup());
+beforeEach(() => Object.values(imageMocks).forEach(mock => mock.mockReset()));
 
 describe("TradeLogWithViewer", () => {
   it("opens a card with trading detail and screenshot evidence without exposing internal metadata", () => {
@@ -50,15 +51,28 @@ describe("TradeLogWithViewer", () => {
     expect(screen.getByText("Current MT5 balance")).toBeTruthy();
   });
 
-  it("offers per-trade PNG download and falls back to download when browser sharing is unavailable", async () => {
+  it("offers per-trade PNG download and falls back to download when image copy and browser sharing are unavailable", async () => {
     const trade = { id: 24, tradeDate: new Date("2026-08-13T09:06:21Z"), session: "London", direction: "BUY", result: "WIN", risk: "20", reward: "40", pnl: "35" };
     imageMocks.create.mockResolvedValue({ blob: new Blob(["png"], { type: "image/png" }), filename: "trade.png" });
+    imageMocks.copy.mockResolvedValue(false);
     imageMocks.share.mockResolvedValue(false);
     render(<TradeLogWithViewer stats={{ balance: 5000, winRate: 100, wins: 1, losses: 0, pnl: 35, total: 1 }} trades={[trade]} allTrades={[trade]} pagination={{ page: 1, pageSize: 12, total: 1, pageCount: 1 }} listLoading={false} account={{ name: "Primary" }} dangerGoals={[]} search="" resultFilter="ALL" setSearch={vi.fn()} setResultFilter={vi.fn()} onPage={vi.fn()} onNew={vi.fn()} onDuplicate={vi.fn()} onEdit={vi.fn()} onDelete={vi.fn()} onCash={vi.fn()} onCsv={vi.fn()} onExcel={vi.fn()} onPdf={vi.fn()} onClear={vi.fn()} />);
     fireEvent.click(screen.getByLabelText(/Download trade card PNG from/i));
     await vi.waitFor(() => expect(imageMocks.download).toHaveBeenCalledWith(expect.any(Blob), "trade.png"));
     fireEvent.click(screen.getByLabelText(/Share trade card from/i));
+    await vi.waitFor(() => expect(imageMocks.copy).toHaveBeenCalled());
     await vi.waitFor(() => expect(imageMocks.share).toHaveBeenCalled());
     expect(imageMocks.download).toHaveBeenCalledTimes(2);
+  });
+
+  it("copies the generated PNG before opening a native share fallback", async () => {
+    const trade = { id: 25, tradeDate: new Date("2026-08-13T09:06:21Z"), session: "London", direction: "BUY", result: "WIN", risk: "20", reward: "40", pnl: "35" };
+    imageMocks.create.mockResolvedValue({ blob: new Blob(["png"], { type: "image/png" }), filename: "trade.png" });
+    imageMocks.copy.mockResolvedValue(true);
+    render(<TradeLogWithViewer stats={{ balance: 5000, winRate: 100, wins: 1, losses: 0, pnl: 35, total: 1 }} trades={[trade]} allTrades={[trade]} pagination={{ page: 1, pageSize: 12, total: 1, pageCount: 1 }} listLoading={false} account={{ name: "Primary" }} dangerGoals={[]} search="" resultFilter="ALL" setSearch={vi.fn()} setResultFilter={vi.fn()} onPage={vi.fn()} onNew={vi.fn()} onDuplicate={vi.fn()} onEdit={vi.fn()} onDelete={vi.fn()} onCash={vi.fn()} onCsv={vi.fn()} onExcel={vi.fn()} onPdf={vi.fn()} onClear={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText(/Share trade card from/i));
+    await vi.waitFor(() => expect(imageMocks.copy).toHaveBeenCalled());
+    expect(imageMocks.share).not.toHaveBeenCalled();
+    expect(imageMocks.download).not.toHaveBeenCalled();
   });
 });

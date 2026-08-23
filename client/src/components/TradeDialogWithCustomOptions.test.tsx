@@ -63,6 +63,16 @@ describe("TradeDialogWithCustomOptions", () => {
     expect(setForm).toHaveBeenCalledWith(expect.objectContaining({ level: "RBS/TJL1" }));
   });
 
+  it("keeps slash-containing level labels selected after the form receives their saved value", () => {
+    const form = { tradeDate: "2026-08-12", session: "London", direction: "BUY", result: "WIN", level: "SBR/TJL1", timeframe: "", setupQuality: "", executionType: "", marketCondition: "", confirmationType: "", mistake: "", patienceScore: "", risk: "", reward: "", pnl: "", notes: "", emotionBefore: "", emotionDuring: "", emotionAfter: "" };
+    const setForm = vi.fn();
+    render(<TradeDialogWithCustomOptions open setOpen={vi.fn()} form={form} setForm={setForm} editing={{ id: 1 }} onSave={vi.fn()} pending={false} screenshot={undefined} setScreenshot={vi.fn()} progress={0} />);
+    const selected = screen.getByRole("button", { name: "SBR/TJL1" });
+    expect(selected.className).toContain("selected");
+    fireEvent.click(selected);
+    expect(setForm).toHaveBeenCalledWith(expect.objectContaining({ level: "" }));
+  });
+
   it("does not select a chip on hover; only an explicit click changes the form", () => {
     const form = { tradeDate: "2026-08-12", session: "London", direction: "BUY", result: "WIN", level: "", timeframe: "", setupQuality: "", executionType: "", marketCondition: "", confirmationType: "", mistake: "", patienceScore: "", risk: "", reward: "", pnl: "", notes: "", emotionBefore: "", emotionDuring: "", emotionAfter: "" };
     const setForm = vi.fn();
