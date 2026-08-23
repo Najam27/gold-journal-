@@ -332,4 +332,20 @@ describe("Mt5LiveView", () => {
     await waitFor(() => expect(screen.getByText("mt5_live_rotated_key_1234567890")).toBeTruthy());
     expect(mocks.remove).not.toHaveBeenCalled();
   });
+
+  it("retains a retired connection record and offers a replacement key instead of hiding it as missing", async () => {
+    mocks.workspaceData = {
+      connections: [{ id: 1, accountName: "GFT 10K", label: "GFT Live", active: false, retiredAt: new Date("2026-08-23T00:00:00Z"), retiredReason: "USER_RETIRED", brokerUtcOffsetMinutes: 180, lastPing: null, lastContactAt: null }],
+      openPositions: [],
+      closedPositions: [],
+    };
+    mocks.historyData = { positions: [], total: 0, page: 1, pageSize: 20, pageCount: 1 };
+
+    render(<Mt5LiveView account={{ id: 12, name: "GFT 10K" }} accounts={[{ id: 12, name: "GFT 10K" }]} onJournalNow={vi.fn()} />);
+    expect(screen.getByText("MT5 connection retired")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Issue replacement key/i }));
+
+    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith({ accountId: 12, label: "GFT 10K Live", brokerUtcOffsetMinutes: 180 }));
+    expect(mocks.remove).not.toHaveBeenCalled();
+  });
 });

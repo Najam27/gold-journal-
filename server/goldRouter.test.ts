@@ -215,6 +215,31 @@ describe("Gold Journal protected server workflows", () => {
     expect(where).toHaveBeenCalled();
   });
 
+  it("retires an owned MT5 connection instead of deleting the account-scoped record", async () => {
+    const where = vi.fn().mockResolvedValue(undefined);
+    const set = vi.fn(() => ({ where }));
+    const update = vi.fn(() => ({ set }));
+    const remove = vi.fn();
+    mocks.getOwnedAccount.mockResolvedValue({ id: 12, userId: 7, name: "Primary account" });
+    mocks.getDb.mockResolvedValue({ select: () => limitedRows([{ id: 44, userId: 7, accountId: 12, retiredAt: null }]), update, delete: remove });
+    const caller = goldRouter.createCaller({ user } as any);
+
+    await expect(caller.mt5.deleteConnection({ accountId: 12, connectionId: 44, confirmed: true })).resolves.toEqual({ success: true, retired: true });
+
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ active: false, retiredReason: "USER_RETIRED", retiredAt: expect.any(Date) }));
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("requires a replacement key before a retired MT5 connection can become active again", async () => {
+    const update = vi.fn();
+    mocks.getOwnedAccount.mockResolvedValue({ id: 12, userId: 7, name: "Primary account" });
+    mocks.getDb.mockResolvedValue({ select: () => limitedRows([{ id: 44, userId: 7, accountId: 12, retiredAt: new Date("2026-08-23T00:00:00Z") }]), update });
+    const caller = goldRouter.createCaller({ user } as any);
+
+    await expect(caller.mt5.setConnectionActive({ accountId: 12, connectionId: 44, active: true })).rejects.toThrow("Issue a replacement key");
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it("rejects a goal mutation when the goal belongs to another user", async () => {
     mocks.getDb.mockResolvedValue({ select: () => limitedRows([]) });
     const caller = goldRouter.createCaller({ user } as any);

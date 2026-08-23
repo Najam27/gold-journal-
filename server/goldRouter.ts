@@ -116,6 +116,8 @@ async function issueMt5ConnectionKey(input: { userId: number; accountId: number;
     lastErrorCode: null,
     lastErrorMessage: null,
     consecutiveFailures: 0,
+    retiredAt: null,
+    retiredReason: null,
     mt5Login: null,
     brokerServer: null,
     currency: null,
@@ -257,6 +259,7 @@ export const goldRouter = router({
     }),
     setConnectionActive: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), connectionId: z.number().int().positive(), active: z.boolean() })).mutation(async ({ ctx, input }) => {
       const connection = await ownMt5Connection(ctx.user.id, input.accountId, input.connectionId);
+      if (input.active && connection.retiredAt) throw new Error("This connection was retired. Issue a replacement key before reactivating MT5 Live.");
       const db = await dbOrThrow();
       await db.update(mt5Connections).set({ active: input.active }).where(and(eq(mt5Connections.id, connection.id), eq(mt5Connections.userId, ctx.user.id)));
       return { success: true };
@@ -264,8 +267,8 @@ export const goldRouter = router({
     deleteConnection: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), connectionId: z.number().int().positive(), confirmed: z.literal(true) })).mutation(async ({ ctx, input }) => {
       const connection = await ownMt5Connection(ctx.user.id, input.accountId, input.connectionId);
       const db = await dbOrThrow();
-      await db.delete(mt5Connections).where(and(eq(mt5Connections.id, connection.id), eq(mt5Connections.userId, ctx.user.id)));
-      return { success: true };
+      await db.update(mt5Connections).set({ active: false, retiredAt: new Date(), retiredReason: "USER_RETIRED" }).where(and(eq(mt5Connections.id, connection.id), eq(mt5Connections.userId, ctx.user.id), eq(mt5Connections.accountId, input.accountId)));
+      return { success: true, retired: true };
     }),
   }),
   trades: router({

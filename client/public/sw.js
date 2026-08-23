@@ -1,4 +1,4 @@
-const CACHE_NAME = "gold-journal-static-v22";
+const CACHE_NAME = "gold-journal-static-v23";
 const PRECACHE = ["/manifest.json", "/gold-journal-mark.svg"];
 
 self.addEventListener("install", event => {

@@ -51,9 +51,23 @@ const masked = (key: string) =>
 const moneyOrDash = (value: string | number | null | undefined) =>
   value == null ? "—" : formatMoney(value);
 function connectionState(connection: {
+  active?: boolean;
+  retiredAt?: string | Date | null;
   lastPing?: string | Date | null;
   syncHealth?: { state?: string; label?: string; message?: string };
 }) {
+  if (connection.retiredAt)
+    return {
+      label: "MT5 connection retired",
+      tone: "offline",
+      message: "This record was retained for account history. Issue a replacement key to resume live MT5 synchronization.",
+    };
+  if (connection.active === false)
+    return {
+      label: "MT5 connection paused",
+      tone: "neutral",
+      message: "Live terminal requests are paused until this connection is switched back on.",
+    };
   const health = connection.syncHealth;
   if (health?.state)
     return {
@@ -180,7 +194,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
   }, [account?.id]);
   const connections = workspace.data?.connections ?? [];
   const openPositions = workspace.data?.openPositions ?? [];
-  const activeConnection = connections[0];
+  const activeConnection = connections.find((connection: any) => connection.active && !connection.retiredAt);
   const positions = history.data?.positions ?? [];
   const historyTotal = history.data?.total;
   const recoveredMt5History =
@@ -396,6 +410,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
                       <input
                         type="checkbox"
                         checked={connection.active}
+                        disabled={Boolean(connection.retiredAt)}
                         onChange={event =>
                           void setActive
                             .mutateAsync({
@@ -431,6 +446,22 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
                         onClick={() => void rotateCurrentConnectionKey(connection)}
                       >
                         <RefreshCcw size={14} /> {rotateConnectionKey.isPending ? "Issuing…" : "Issue new API key"}
+                      </Button>
+                    </div>
+                  )}
+                  {connection.retiredAt && (
+                    <div className="mt5-first-contact-recovery">
+                      <strong>Retired connection recovery</strong>
+                      <p>
+                        This connection record and its MT5 history remain safely attached to this account. Issue a new key to reactivate the same account-scoped record; no trades are deleted.
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={replaceConnection.isPending}
+                        onClick={() => void reconnectConnection()}
+                      >
+                        <RefreshCcw size={14} /> {replaceConnection.isPending ? "Generating…" : "Issue replacement key"}
                       </Button>
                     </div>
                   )}
@@ -481,7 +512,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
                       onClick={() => {
                         if (
                           !window.confirm(
-                            `Delete ${connection.label}? Historical MT5 records remain with this account.`
+                            `Retire ${connection.label}? Its current API key will stop working, but the account-scoped connection record, MT5 history, and Trade Log records will remain. You can issue a replacement key later.`
                           )
                         )
                           return;
@@ -492,17 +523,17 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
                             confirmed: true,
                           })
                           .then(() => {
-                            toast.success("MT5 connection deleted.");
+                            toast.success("MT5 connection retired. Its history and record remain available for recovery.");
                             refresh();
                           })
                           .catch((error: any) =>
                             toast.error(
-                              error.message || "Could not delete connection."
+                              error.message || "Could not retire connection."
                             )
                           );
                       }}
                     >
-                      <Trash2 size={14} /> Delete
+                      <Trash2 size={14} /> Retire
                     </button>
                   </footer>
                 </article>
