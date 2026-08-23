@@ -93,8 +93,9 @@ describe("MT5 sync health", () => {
       historySyncedCount: 0,
     });
     expect(result.state).toBe("WAITING");
-    expect(result.message).toContain("Server URL");
+    expect(result.message).toContain("server origin");
     expect(result.message).toContain("WebRequest");
     expect(result.message).toContain("API key");
+    expect(result.message).toContain("Auto Trading may remain off");
   });
 });

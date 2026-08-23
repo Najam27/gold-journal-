@@ -87,7 +87,7 @@ function connectionState(connection: {
       label: "Waiting for MT5",
       tone: "neutral",
       message:
-        "Waiting for the first terminal contact. Confirm the EA is attached, Algo Trading is enabled, the Server URL is allowed in MT5 WebRequest settings, and the one-time API key matches this connection.",
+        "Waiting for the first terminal contact. Confirm the read-only EA is attached, the exact origin is allowed in MT5 WebRequest settings, and the one-time API key matches this connection. Auto Trading may remain off.",
     };
   const elapsed = Date.now() - new Date(connection.lastPing).getTime();
   return elapsed <= 10_000
@@ -579,7 +579,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
           onClick={() => setGuideOpen(!guideOpen)}
         >
           <div>
-            <span className="eyebrow">SETUP GUIDE · DEPLOYMENT-SPECIFIC EA</span>
+            <span className="eyebrow">SETUP GUIDE · READ-ONLY JOURNAL BRIDGE</span>
             <h3>How to connect MT5 and backfill history</h3>
           </div>
           <ChevronDown size={18} />
@@ -590,7 +590,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
               <div>
                 <strong>Replace the earlier EA build</strong>
                 <p>
-                  Download a fresh EA from this page. Its endpoint is generated from this deployed site, it writes a startup confirmation in the MT5 Experts tab, then sends the first compatibility heartbeat, balance, equity, floating P&amp;L,
+                  Gold Journal EA is read-only: it never opens, closes, modifies, or cancels trades. Download a fresh EA from this page. Its endpoint is generated from this deployed site, it writes a startup confirmation in the MT5 Experts tab, then sends the first compatibility heartbeat, balance, equity, floating P&amp;L,
                   and live positions approximately every 3 seconds, plus history
                   and close events using an explicit broker UTC offset whenever
                   available. Transient server errors now retry with bounded
@@ -614,7 +614,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
                     C:\Users\[YourName]\AppData\Roaming\MetaQuotes\Terminal\[ID]\MQL5\Experts\
                   </code>
                   . In MT5, open Navigator → Expert Advisors, right-click, then
-                  Refresh. Configure only the server URL and matching API key; do not add a Connection ID.
+                  Refresh. Configure only the generated endpoint and matching API key; do not add a Connection ID. Auto Trading/Algo Trading may remain off because this EA does not execute trades.
                 </p>
               </div>
             </li>
@@ -635,7 +635,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
                 <p>
                   In MT5: Tools → Options → Expert Advisors. Enable “Allow
                   WebRequests for listed URL,” add the exact origin below, then
-                  click OK.
+                  click OK. This WebRequest permission is required; trading permission is not.
                 </p>
                 <div className="mt5-inline-copy">
                   <code>{webRequestOrigin}</code>
@@ -648,11 +648,11 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
               <div>
                 <strong>Restart the EA once</strong>
                 <p>
-                  Remove Gold Journal EA from the chart, then drag it back on
-                  and paste the matching API key and server URL. This restarts
-                  the historical scan. Keep MT5 open until the MT5 Live status
-                  shows synced positions; those trades then appear automatically
-                  in Trade Log.
+                  Attach the EA to any chart and paste the matching API key. In
+                  Experts, first confirm READ-ONLY MODE and API authentication,
+                  then wait for summary, open-position, and history-sync lines.
+                  Keep MT5 open until MT5 Live shows the snapshot and synced
+                  positions; those trades then appear automatically in Trade Log.
                 </p>
               </div>
             </li>
@@ -848,7 +848,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
               ? "Loading MT5 history…"
               : history.isError
                 ? "MT5 history could not be loaded. Use Retry history above after checking the connection and Supabase migration status."
-                : "Historical MT5 closes appear here as EA v2.4 backfills them, then they are added automatically to Trade Log."}
+                : "Historical MT5 closes appear after the current deployment-specific EA backfills them, then they are added automatically to Trade Log."}
           </p>
         )}
       </section>

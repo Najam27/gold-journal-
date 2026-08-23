@@ -71,7 +71,7 @@ export function classifyMt5SyncHealth(
           ? "IN_PROGRESS"
           : "NOT_STARTED";
   const waitingMessage =
-    "Waiting for the first MT5 terminal contact. In MT5, confirm the EA is attached, Algo Trading is enabled, the exact Server URL is allowed under Tools > Options > Expert Advisors > WebRequest, and the one-time API key was pasted into this connection.";
+    "Waiting for the first MT5 terminal contact. In MT5, confirm the read-only EA is attached, the exact server origin is allowed under Tools > Options > Expert Advisors > WebRequest, and the one-time API key was pasted into this connection. Auto Trading may remain off.";
   const message =
     state === "CONNECTED"
       ? "Live terminal contact and snapshot are current."

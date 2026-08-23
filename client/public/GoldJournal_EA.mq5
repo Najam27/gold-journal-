@@ -1,6 +1,6 @@
 #property strict
-#property version   "2.8"
-#property description "Gold Journal authoritative MT5 bridge: visible startup diagnostics, reliable summary, broker risk-symbol specifications, open positions, close events, and replay-safe history batches."
+#property version   "2.9"
+#property description "Gold Journal read-only journal bridge: never places or manages trades; sends account, position, and history facts to Gold Journal."
 
 input string Endpoint = "__GOLD_JOURNAL_MT5_ENDPOINT__";
 input string ApiKey = "PASTE_ONCE_FROM_GOLD_JOURNAL";
@@ -10,7 +10,7 @@ input int HistoryDays = 3650;
 input bool SendHistoryOnInit = true;
 input string RiskSymbol = "";
 
-const string EA_VERSION = "2.8.0";
+const string EA_VERSION = "2.9.0";
 const string PAYLOAD_VERSION = "2";
 const int REQUEST_TIMEOUT_MS = 15000;
 const int HISTORY_BATCH_SIZE = 50;
@@ -25,6 +25,10 @@ datetime g_last_open_success = 0;
 datetime g_last_history_success = 0;
 int g_consecutive_failures = 0;
 bool g_permanent_rejection = false;
+bool g_compatibility_reported = false;
+bool g_summary_reported = false;
+bool g_open_batch_reported = false;
+bool g_history_reported = false;
 
 string JsonEscape(string value) {
    StringReplace(value, "\\", "\\\\");
@@ -52,6 +56,22 @@ int RetryDelaySeconds() {
 }
 void MarkEventSuccess(string expectedEvent) {
    datetime now = TimeCurrent();
+   if(expectedEvent == "compat" && !g_compatibility_reported) {
+      Print("[MT5 LIVE] API authentication accepted; read-only bridge is connected to Gold Journal.");
+      g_compatibility_reported = true;
+   }
+   if(expectedEvent == "summary" && !g_summary_reported) {
+      Print("[MT5 LIVE] summary sync successful; MT5 Live snapshot will refresh.");
+      g_summary_reported = true;
+   }
+   if(expectedEvent == "open_batch" && !g_open_batch_reported) {
+      Print("[MT5 LIVE] open-position sync successful; active Trade Log records will refresh.");
+      g_open_batch_reported = true;
+   }
+   if(expectedEvent == "history_batch" && !g_history_reported) {
+      Print("[MT5 LIVE] history sync accepted; closed Trade Log records will refresh after all batches complete.");
+      g_history_reported = true;
+   }
    if(expectedEvent == "summary") g_last_summary_success = now;
    else if(expectedEvent == "open_batch") g_last_open_success = now;
    else if(expectedEvent == "history_batch") g_last_history_success = now;
@@ -317,6 +337,7 @@ int OnInit() {
       return INIT_FAILED;
    }
    PrintFormat("[MT5 LIVE] STARTUP; EA_VERSION=%s; endpoint=%s; terminal_connected=%s; api_key_present=true; sync_interval=%ds; history=%s.", EA_VERSION, Endpoint, TerminalInfoInteger(TERMINAL_CONNECTED) ? "true" : "false", MathMax(3, SyncSeconds), SendHistoryOnInit ? "enabled" : "disabled");
+   Print("[MT5 LIVE] READ-ONLY MODE; this EA never opens, closes, modifies, or cancels MT5 orders and positions. Auto Trading is not required for Gold Journal synchronization.");
    if(!TerminalInfoInteger(TERMINAL_CONNECTED)) Print("[MT5 LIVE] broker connection is offline; summary, positions, and history will retry after MT5 reconnects.");
    SendCompatibility();
    Sync();
@@ -325,6 +346,8 @@ int OnInit() {
 void OnDeinit(const int reason) { EventKillTimer(); PrintFormat("[MT5 LIVE] EA stopped; deinitialization reason=%d", reason); }
 void OnTimer() { Sync(); }
 
+// MQL5 requires request/result notification parameters for this passive terminal event.
+// They are never read and this EA never calls a trade-execution API.
 void OnTradeTransaction(const MqlTradeTransaction &transaction, const MqlTradeRequest &request, const MqlTradeResult &result) {
    if(transaction.deal == 0) return;
    long entry = HistoryDealGetInteger(transaction.deal, DEAL_ENTRY);

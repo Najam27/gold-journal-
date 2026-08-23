@@ -200,7 +200,7 @@ describe("Mt5LiveView", () => {
     expect(screen.getByText("$10,042.50")).toBeTruthy();
     expect(screen.getByText(/42 closed positions synced/i)).toBeTruthy();
     expect(screen.getByText(/Live refresh every 2\.5s/i)).toBeTruthy();
-    expect(screen.getByText(/SETUP GUIDE · DEPLOYMENT-SPECIFIC EA/i)).toBeTruthy();
+    expect(screen.getByText(/SETUP GUIDE · READ-ONLY JOURNAL BRIDGE/i)).toBeTruthy();
     const ea = screen.getByRole("link", { name: /Download current EA/i });
     expect(ea.getAttribute("href")).toBe("/api/mt5/ea");
     expect(
@@ -287,7 +287,7 @@ describe("Mt5LiveView", () => {
             state: "WAITING",
             label: "Waiting for MT5",
             message:
-              "Waiting for the first MT5 terminal contact. In MT5, confirm the EA is attached, Algo Trading is enabled, the exact Server URL is allowed under Tools > Options > Expert Advisors > WebRequest, and the one-time API key was pasted into this connection.",
+              "Waiting for the first MT5 terminal contact. Confirm the read-only EA is attached, the exact origin is allowed in MT5 WebRequest settings, and the one-time API key matches this connection. Auto Trading may remain off.",
           },
         },
       ],
