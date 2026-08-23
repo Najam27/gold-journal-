@@ -5,7 +5,6 @@ import { resolve } from "node:path";
 const EA_ENDPOINT_TOKEN = "__GOLD_JOURNAL_MT5_ENDPOINT__";
 function loadEaSource() {
   const candidates = [
-    new URL("../client/public/GoldJournal_EA.mq5", import.meta.url),
     resolve(process.cwd(), "client/public/GoldJournal_EA.mq5"),
     resolve(process.env.LAMBDA_TASK_ROOT || "", "client/public/GoldJournal_EA.mq5"),
   ];
@@ -19,7 +18,6 @@ function loadEaSource() {
   }
   throw new Error("MT5 EA template is unavailable in this deployment.");
 }
-const EA_SOURCE = loadEaSource();
 
 function firstForwardedValue(value: string | string[] | undefined) {
   const source = Array.isArray(value) ? value[0] : value;
@@ -42,21 +40,26 @@ export function mt5EndpointForRequest(request: Request) {
 
 export function renderMt5EaForRequest(request: Request) {
   const endpoint = mt5EndpointForRequest(request);
-  return endpoint ? EA_SOURCE.replace(EA_ENDPOINT_TOKEN, endpoint) : null;
+  return endpoint ? loadEaSource().replace(EA_ENDPOINT_TOKEN, endpoint) : null;
 }
 
 export function registerMt5EaDownload(app: Express, path = "/api/mt5/ea") {
   app.get(path, (request, response) => {
-    const source = renderMt5EaForRequest(request);
-    if (!source) {
-      response.status(400).json({ ok: false, code: "MT5_ENDPOINT_UNAVAILABLE" });
+    try {
+      const source = renderMt5EaForRequest(request);
+      if (!source) {
+        response.status(400).json({ ok: false, code: "MT5_ENDPOINT_UNAVAILABLE" });
+        return;
+      }
+      response
+        .status(200)
+        .setHeader("Content-Type", "text/plain; charset=utf-8")
+        .setHeader("Content-Disposition", 'attachment; filename="GoldJournal_EA.mq5"')
+        .setHeader("Cache-Control", "no-store")
+        .send(source);
+    } catch {
+      response.status(503).json({ ok: false, code: "MT5_EA_TEMPLATE_UNAVAILABLE" });
       return;
     }
-    response
-      .status(200)
-      .setHeader("Content-Type", "text/plain; charset=utf-8")
-      .setHeader("Content-Disposition", 'attachment; filename="GoldJournal_EA.mq5"')
-      .setHeader("Cache-Control", "no-store")
-      .send(source);
   });
 }
