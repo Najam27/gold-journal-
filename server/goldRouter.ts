@@ -7,7 +7,7 @@ import { accounts, cashMovements, dailyPlans, goals, mt5Connections, mt5LivePosi
 import { ensureAccount, getJournal, getOwnedAccount, ownsTrade } from "./goldDb";
 import { getDb } from "./db";
 import { getMt5History, getMt5Workspace, syncStoredMt5PositionsToTradeLog } from "./mt5Db";
-import { mt5ApiKeyFingerprint } from "./mt5Security";
+import { mt5ApiKeyFingerprint, mt5ConnectionReference } from "./mt5Security";
 import { getMt5Integrity } from "./mt5Reliability";
 import { calculateAccountMt5Risk } from "./mt5Risk";
 import { deleteUserAiCredential, getUserAiProviderStatus, saveUserAiCredential, testUserAiCredential } from "./userAiProviderVault";
@@ -132,11 +132,11 @@ async function issueMt5ConnectionKey(input: { userId: number; accountId: number;
 
   if (existing[0]) {
     await db.update(mt5Connections).set(values).where(eq(mt5Connections.id, existing[0].id));
-    return { id: existing[0].id, apiKey, replaced: true };
+    return { id: existing[0].id, connectionReference: mt5ConnectionReference(values.apiKey), apiKey, replaced: true };
   }
 
   const inserted = await db.insert(mt5Connections).values(values).returning({ id: mt5Connections.id });
-  return { id: inserted[0].id, apiKey, replaced: false };
+  return { id: inserted[0].id, connectionReference: mt5ConnectionReference(values.apiKey), apiKey, replaced: false };
 }
 
 async function clearAccountJournalData(userId: number, accountId: number) {
@@ -257,7 +257,7 @@ export const goldRouter = router({
         lastOpenSyncAt: null, lastOpenSyncSuccessAt: null, lastOpenSyncErrorAt: null,
         lastErrorAt: null, lastErrorCode: null, lastErrorMessage: null, consecutiveFailures: 0,
       }).where(and(eq(mt5Connections.id, connection.id), eq(mt5Connections.userId, ctx.user.id), eq(mt5Connections.accountId, input.accountId)));
-      return { apiKey };
+      return { apiKey, connectionReference: mt5ConnectionReference(mt5ApiKeyFingerprint(apiKey)) };
     }),
     setConnectionActive: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), connectionId: z.number().int().positive(), active: z.boolean() })).mutation(async ({ ctx, input }) => {
       const connection = await ownMt5Connection(ctx.user.id, input.accountId, input.connectionId);

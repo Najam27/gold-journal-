@@ -17,7 +17,8 @@ describe("Gold Journal MT5 EA reliability contract", () => {
   it("stops permanent rejections, records per-event recovery, and never logs the API key", () => {
     expect(source).toContain("bool g_permanent_rejection = false");
     expect(source).toContain("if(g_permanent_rejection) return false");
-    expect(source).toContain("MarkEventSuccess(expectedEvent)");
+    expect(source).toContain("MarkEventSuccess(expectedEvent, JsonStringValue(response_text, \"connectionReference\"))");
+    expect(source).toContain("authenticated connection reference=%s");
     expect(source).toContain("[MT5 LIVE] %s recovered");
     expect(source).not.toContain("input string ConnectionId");
     expect(source).not.toContain("\\\"connection_id\\\"");

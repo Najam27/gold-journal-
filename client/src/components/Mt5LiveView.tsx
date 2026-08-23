@@ -406,6 +406,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
                       </span>
                       <h4>{connection.label}</h4>
                       <small>{connection.accountName}</small>
+                      {connection.connectionReference && <small>Connection ref {connection.connectionReference}</small>}
                     </div>
                     <label className="mt5-switch">
                       <input
@@ -438,7 +439,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
                     <div className="mt5-first-contact-recovery">
                       <strong>First-contact recovery</strong>
                       <p>
-                        Download a fresh EA from this page, paste this connection&apos;s current API key, then remove and reattach the EA. The download is generated for this exact deployed domain and writes a safe startup line in the MT5 Experts tab. If the original one-time key is unavailable, issue a replacement below; history remains unchanged.
+                        Download a fresh EA from this page, paste this connection&apos;s current API key, then remove and reattach the EA. The Experts tab prints an authenticated connection reference; it must match the reference shown on this card. If it differs, the EA key belongs to another account connection. If the original one-time key is unavailable, issue a replacement below; history remains unchanged.
                       </p>
                       <Button
                         variant="outline"

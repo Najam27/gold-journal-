@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import { completeMt5HistorySync, getActiveMt5Connection, recordMt5EventFailure, recordMt5EventSuccess, recordMt5HistoryAccepted, recordMt5HistoryAttempt, recordMt5HistoryFailure, touchMt5Connection, updateMt5AccountSummary, upsertMt5ClosedPosition, upsertMt5ClosedPositionBatch, upsertMt5OpenPosition, upsertMt5OpenPositionBatch } from "./mt5Db";
-import { mt5ApiKeyFingerprint } from "./mt5Security";
+import { mt5ApiKeyFingerprint, mt5ConnectionReference } from "./mt5Security";
 import { consumeRateLimit, rateLimitTestHooks } from "./rateLimit";
 import { Mt5TimestampError, normalizeMt5TimestampToUtcPlus5 } from "./mt5Timestamp";
 
@@ -37,6 +37,10 @@ export const mt5RateLimitTestHooks = { reset: rateLimitTestHooks.reset, size: ()
 
 function versionBody(payload: z.infer<typeof mt5Payload>) {
   return { eaVersion: payload.ea_version, payloadVersion: payload.payload_version, minimumEaVersion: MT5_EA_MIN_VERSION, supportedPayloadVersion: MT5_PAYLOAD_VERSION, compatible: payload.ea_version !== "legacy" && payload.payload_version === MT5_PAYLOAD_VERSION };
+}
+
+function connectionBody(connection: { apiKey: string }) {
+  return { connectionReference: mt5ConnectionReference(connection.apiKey) };
 }
 
 type Mt5FailureCode = "MIGRATION_REQUIRED_0008" | "DATABASE_RETRYABLE" | "INVALID_SYNC_DATA" | "SYNC_PERMISSION_DENIED" | "INVALID_MT5_TIMESTAMP" | "FUTURE_TRADE" | "SYNC_UNAVAILABLE";
@@ -107,16 +111,16 @@ export async function processMt5Payload(body: unknown) {
   // rejecting an otherwise valid key would prevent the first live heartbeat without improving
   // authorization, because the key already resolves the exact server-owned connection.
   await touchMt5Connection(connection.id);
-  if (payload.event === "compat") return { status: 200, body: { ok: true, event: "compat", ...versionBody(payload) } };
+  if (payload.event === "compat") return { status: 200, body: { ok: true, event: "compat", ...connectionBody(connection), ...versionBody(payload) } };
   const connectionOffset = (connection as typeof connection & { brokerUtcOffsetMinutes?: number }).brokerUtcOffsetMinutes ?? 180;
   const normalize = (value: z.infer<typeof timestamp>, offset = connectionOffset) => normalizeMt5TimestampToUtcPlus5(value, offset);
-  if (payload.event === "ping") return { status: 200, body: { ok: true, event: "ping", ...versionBody(payload) } };
+  if (payload.event === "ping") return { status: 200, body: { ok: true, event: "ping", ...connectionBody(connection), ...versionBody(payload) } };
   if (payload.event === "summary") {
     try {
       const hasRiskSpec = Boolean(payload.risk_symbol && payload.risk_tick_size && payload.risk_tick_value_loss && payload.risk_contract_size && payload.risk_volume_min && payload.risk_volume_max && payload.risk_volume_step && payload.risk_volume_max >= payload.risk_volume_min);
       await updateMt5AccountSummary(connection.id, { mt5Login: payload.mt5_login, brokerServer: payload.broker_server, currency: payload.currency, balance: payload.balance, equity: payload.equity, margin: payload.margin, freeMargin: payload.free_margin, floatingPnl: payload.floating_pnl, ...(hasRiskSpec ? { riskSymbol: payload.risk_symbol!, riskTickSize: payload.risk_tick_size!, riskTickValueLoss: payload.risk_tick_value_loss!, riskContractSize: payload.risk_contract_size!, riskVolumeMin: payload.risk_volume_min!, riskVolumeMax: payload.risk_volume_max!, riskVolumeStep: payload.risk_volume_step! } : {}) });
       mt5Log(connection, "summary", startedAt, "success");
-      return { status: 200, body: { ok: true, event: "summary", ...versionBody(payload) } };
+      return { status: 200, body: { ok: true, event: "summary", ...connectionBody(connection), ...versionBody(payload) } };
     } catch (error) {
       const code = classifySyncFailure(error); const diagnostic = await persistFailureDiagnostic(connection, payload, code, error, startedAt);
       if (code === "INVALID_SYNC_DATA" || code === "SYNC_PERMISSION_DENIED") return { status: 422, body: { ok: false, code, diagnostic } };
@@ -132,13 +136,13 @@ export async function processMt5Payload(body: unknown) {
       await recordMt5HistoryAccepted(connection.id, payload.positions.length, payload.complete);
       if (payload.complete) await completeMt5HistorySync(connection.id, connection.accountId);
       mt5Log(connection, "history_batch", startedAt, "success", { batchSize: payload.positions.length, acceptedCount: payload.positions.length, complete: payload.complete });
-      return { status: 200, body: { ok: true, event: "history_batch", synced: payload.positions.length, complete: payload.complete, ...versionBody(payload) } };
+      return { status: 200, body: { ok: true, event: "history_batch", synced: payload.positions.length, complete: payload.complete, ...connectionBody(connection), ...versionBody(payload) } };
     }
     if (payload.event === "open_batch") {
       const synchronized = await upsertMt5OpenPositionBatch(connection.userId, connection.accountId, payload.positions.map(position => ({ ticket: position.ticket, symbol: position.symbol, direction: position.direction, lots: position.lots, openPrice: position.open_price, slPrice: position.sl_price > 0 ? position.sl_price : null, tpPrice: position.tp_price > 0 ? position.tp_price : null, riskUsd: position.risk_usd, rewardUsd: position.reward_usd, rrRatio: position.rr_ratio, floatingPnl: position.floating_pnl, openTime: normalize(position.open_time, payload.broker_utc_offset_minutes) })));
       await recordMt5EventSuccess(connection.id, "open_batch");
       mt5Log(connection, "open_batch", startedAt, "success", { positionCount: payload.positions.length, synchronized });
-      return { status: 200, body: { ok: true, event: "open_batch", synced: synchronized, ...versionBody(payload) } };
+      return { status: 200, body: { ok: true, event: "open_batch", synced: synchronized, ...connectionBody(connection), ...versionBody(payload) } };
     }
     const shared = { ticket: payload.ticket, symbol: payload.symbol, direction: payload.direction, lots: payload.lots, openPrice: payload.open_price, slPrice: payload.sl_price > 0 ? payload.sl_price : null, tpPrice: payload.tp_price > 0 ? payload.tp_price : null, riskUsd: payload.risk_usd, rewardUsd: payload.reward_usd, rrRatio: payload.rr_ratio };
     if (payload.event === "open") {
@@ -146,11 +150,11 @@ export async function processMt5Payload(body: unknown) {
       await upsertMt5OpenPosition(connection.userId, connection.accountId, { ...shared, floatingPnl: openPayload.floating_pnl, openTime: normalize(openPayload.open_time) });
       await recordMt5EventSuccess(connection.id, "open_batch");
       mt5Log(connection, "open_batch", startedAt, "success", { positionCount: 1 });
-      return { status: 200, body: { ok: true, event: "open", ...versionBody(payload) } };
+      return { status: 200, body: { ok: true, event: "open", ...connectionBody(connection), ...versionBody(payload) } };
     }
     await upsertMt5ClosedPosition(connection.userId, connection.accountId, { ...shared, closePrice: payload.close_price, realizedPnl: payload.realized_pnl, result: payload.result, closeTime: normalize(payload.close_time), openTime: normalize(payload.open_time ?? payload.close_time) });
     mt5Log(connection, "history_batch", startedAt, "success", { batchSize: 1, acceptedCount: 1 });
-    return { status: 200, body: { ok: true, event: "close", ...versionBody(payload) } };
+    return { status: 200, body: { ok: true, event: "close", ...connectionBody(connection), ...versionBody(payload) } };
   } catch (error) {
     const code = classifySyncFailure(error);
     if (payload.event === "history_batch") {
