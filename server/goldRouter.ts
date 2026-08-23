@@ -96,7 +96,7 @@ async function issueMt5ConnectionKey(input: { userId: number; accountId: number;
   const account = await getOwnedAccount(input.userId, input.accountId);
   const db = await dbOrThrow();
   const existing = await db.select({ id: mt5Connections.id, userId: mt5Connections.userId }).from(mt5Connections).where(eq(mt5Connections.accountId, account.id)).limit(1);
-  if (existing[0] && !input.replace && existing[0].userId === input.userId) throw new Error("This Gold Journal account already has an MT5 connection. Edit or replace it from MT5 Live.");
+  if (existing[0] && !input.replace) throw new Error("This Gold Journal account already has an MT5 connection. Edit or replace it from MT5 Live.");
 
   const apiKey = randomBytes(32).toString("base64url");
   const values = {

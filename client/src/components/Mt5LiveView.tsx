@@ -296,12 +296,11 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
             approximately every 3 seconds.
           </p>
         </div>
-        <Button
-          onClick={openAddConnection}
-          disabled={!availableAccounts.length}
-        >
-          <Plus size={16} /> Add connection
-        </Button>
+        {availableAccounts.length > 0 && (
+          <Button onClick={openAddConnection}>
+            <Plus size={16} /> Add connection
+          </Button>
+        )}
       </header>
       <section className="mt5-account-panel panel">
         <div className="mt5-section-head">

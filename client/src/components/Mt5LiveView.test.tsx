@@ -199,6 +199,7 @@ describe("Mt5LiveView", () => {
     expect(screen.getByText("$10,000.00")).toBeTruthy();
     expect(screen.getByText("$10,042.50")).toBeTruthy();
     expect(screen.getByText(/42 closed positions synced/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Add connection/i })).toBeNull();
     expect(screen.getByText(/Live refresh every 2\.5s/i)).toBeTruthy();
     expect(screen.getByText(/SETUP GUIDE · READ-ONLY JOURNAL BRIDGE/i)).toBeTruthy();
     const ea = screen.getByRole("link", { name: /Download current EA/i });

@@ -19,6 +19,7 @@ describe("MT5 connection owner integrity", () => {
     expect(routerSource).toContain("where(and(eq(mt5Connections.id, connectionId), eq(mt5Connections.accountId, accountId)))");
     expect(routerSource).toContain("await db.update(mt5Connections).set({ userId }).where(eq(mt5Connections.id, found[0].id))");
     expect(routerSource).toContain("where(and(eq(mt5Connections.accountId, input.accountId), eq(mt5Connections.active, true)))");
+    expect(routerSource).toContain('if (existing[0] && !input.replace) throw new Error("This Gold Journal account already has an MT5 connection. Edit or replace it from MT5 Live.")');
   });
 
   it("repairs only mismatched MT5 connection owner metadata and never deletes account, position, trade, or key data", () => {
