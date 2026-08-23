@@ -82,6 +82,24 @@ describe("MT5 sync health", () => {
     expect(result.snapshotState).toBe("PENDING");
     expect(result.openSyncState).toBe("CURRENT");
   });
+  it("accepts Supabase ISO timestamp strings for a persisted first contact", () => {
+    const now = Date.parse("2026-08-20T12:00:00.000Z");
+    const result = classifyMt5SyncHealth({
+      active: true,
+      lastPing: "2026-08-20T11:59:58.000Z",
+      lastContactAt: "2026-08-20T11:59:58.000Z",
+      lastSummarySuccessAt: null,
+      lastOpenSyncSuccessAt: null,
+      lastHistoryAttempt: null,
+      lastHistorySync: null,
+      lastHistoryStatus: null,
+      lastHistoryMessage: null,
+      historySyncedCount: 0,
+    }, now);
+    expect(result.state).toBe("DEGRADED");
+    expect(result.lastContactAgeSeconds).toBe(2);
+    expect(result.snapshotState).toBe("PENDING");
+  });
   it("reports degraded rather than offline when a current open sync follows a summary failure", () => {
     const now = Date.parse("2026-08-20T12:00:00.000Z");
     const result = classifyMt5SyncHealth({

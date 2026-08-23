@@ -3,22 +3,24 @@ import { getDb } from "./db";
 import { getOwnedAccount } from "./goldDb";
 import { and, eq } from "./supabaseQuery";
 
+type TimestampValue = Date | string | null | undefined;
+
 type SyncConnection = {
   active: boolean;
-  lastPing: Date | null;
-  lastContactAt?: Date | null;
-  lastSummaryAt?: Date | null;
-  lastSummarySuccessAt?: Date | null;
-  lastSummaryErrorAt?: Date | null;
-  lastOpenSyncAt?: Date | null;
-  lastOpenSyncSuccessAt?: Date | null;
-  lastOpenSyncErrorAt?: Date | null;
-  lastErrorAt?: Date | null;
+  lastPing: TimestampValue;
+  lastContactAt?: TimestampValue;
+  lastSummaryAt?: TimestampValue;
+  lastSummarySuccessAt?: TimestampValue;
+  lastSummaryErrorAt?: TimestampValue;
+  lastOpenSyncAt?: TimestampValue;
+  lastOpenSyncSuccessAt?: TimestampValue;
+  lastOpenSyncErrorAt?: TimestampValue;
+  lastErrorAt?: TimestampValue;
   lastErrorCode?: string | null;
   lastErrorMessage?: string | null;
   consecutiveFailures?: number | null;
-  lastHistoryAttempt: Date | null;
-  lastHistorySync: Date | null;
+  lastHistoryAttempt: TimestampValue;
+  lastHistorySync: TimestampValue;
   lastHistoryStatus: string | null;
   lastHistoryMessage: string | null;
   historySyncedCount: number | null;
@@ -38,24 +40,31 @@ export function classifyMt5SyncHealth(
       message:
         "No private MT5 connection record exists for this journal account. Reconnect required.",
     };
-  const ageOf = (value?: Date | null) =>
-    value ? Math.max(0, Math.floor((now - value.getTime()) / 1_000)) : null;
+  const timestampMs = (value: TimestampValue) => {
+    if (!value) return null;
+    const milliseconds = value instanceof Date ? value.getTime() : Date.parse(value);
+    return Number.isFinite(milliseconds) ? milliseconds : null;
+  };
+  const ageOf = (value?: TimestampValue) => {
+    const milliseconds = timestampMs(value);
+    return milliseconds == null ? null : Math.max(0, Math.floor((now - milliseconds) / 1_000));
+  };
   const contactAge = ageOf(connection.lastContactAt ?? connection.lastPing);
   const summaryAge = ageOf(connection.lastSummarySuccessAt);
   const openAge = ageOf(connection.lastOpenSyncSuccessAt);
   const summaryFresh = summaryAge != null && summaryAge <= 15;
   const openFresh = openAge != null && openAge <= 15;
   const summaryFailedAfterSuccess = Boolean(
-    connection.lastSummaryErrorAt &&
-      (!connection.lastSummarySuccessAt ||
-        connection.lastSummaryErrorAt.getTime() >
-          connection.lastSummarySuccessAt.getTime())
+    timestampMs(connection.lastSummaryErrorAt) != null &&
+      (timestampMs(connection.lastSummarySuccessAt) == null ||
+        timestampMs(connection.lastSummaryErrorAt)! >
+          timestampMs(connection.lastSummarySuccessAt)!)
   );
   const openFailedAfterSuccess = Boolean(
-    connection.lastOpenSyncErrorAt &&
-      (!connection.lastOpenSyncSuccessAt ||
-        connection.lastOpenSyncErrorAt.getTime() >
-          connection.lastOpenSyncSuccessAt.getTime())
+    timestampMs(connection.lastOpenSyncErrorAt) != null &&
+      (timestampMs(connection.lastOpenSyncSuccessAt) == null ||
+        timestampMs(connection.lastOpenSyncErrorAt)! >
+          timestampMs(connection.lastOpenSyncSuccessAt)!)
   );
   const latestError = connection.lastErrorCode
     ? `${connection.lastErrorCode}${connection.lastErrorMessage ? `: ${connection.lastErrorMessage}` : ""}`
