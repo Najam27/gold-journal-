@@ -90,6 +90,51 @@ async function ownMt5Connection(userId: number, accountId: number, connectionId:
   return found[0];
 }
 
+async function issueMt5ConnectionKey(input: { userId: number; accountId: number; label: string; brokerUtcOffsetMinutes: number; replace: boolean }) {
+  const account = await getOwnedAccount(input.userId, input.accountId);
+  const db = await dbOrThrow();
+  const existing = await db.select({ id: mt5Connections.id, userId: mt5Connections.userId }).from(mt5Connections).where(eq(mt5Connections.accountId, account.id)).limit(1);
+  if (existing[0] && !input.replace && existing[0].userId === input.userId) throw new Error("This Gold Journal account already has an MT5 connection. Edit or replace it from MT5 Live.");
+
+  const apiKey = randomBytes(32).toString("base64url");
+  const values = {
+    userId: input.userId,
+    accountId: account.id,
+    label: input.label,
+    apiKey: mt5ApiKeyFingerprint(apiKey),
+    brokerUtcOffsetMinutes: input.brokerUtcOffsetMinutes,
+    active: true,
+    lastPing: null,
+    lastContactAt: null,
+    lastSummaryAt: null,
+    lastSummarySuccessAt: null,
+    lastSummaryErrorAt: null,
+    lastOpenSyncAt: null,
+    lastOpenSyncSuccessAt: null,
+    lastOpenSyncErrorAt: null,
+    lastErrorAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    consecutiveFailures: 0,
+    mt5Login: null,
+    brokerServer: null,
+    currency: null,
+    balance: null,
+    equity: null,
+    margin: null,
+    freeMargin: null,
+    floatingPnl: null,
+  };
+
+  if (existing[0]) {
+    await db.update(mt5Connections).set(values).where(eq(mt5Connections.id, existing[0].id));
+    return { id: existing[0].id, apiKey, replaced: true };
+  }
+
+  const inserted = await db.insert(mt5Connections).values(values).returning({ id: mt5Connections.id });
+  return { id: inserted[0].id, apiKey, replaced: false };
+}
+
 async function clearAccountJournalData(userId: number, accountId: number) {
   await getOwnedAccount(userId, accountId);
   await clearAccountJournalDataAtomic(userId, accountId, new Date());
@@ -187,13 +232,10 @@ export const goldRouter = router({
       return { synchronized };
     }),
     createConnection: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), label: z.string().trim().min(1).max(120), brokerUtcOffsetMinutes: z.number().int().min(-12 * 60).max(14 * 60).default(180) })).mutation(async ({ ctx, input }) => {
-      await getOwnedAccount(ctx.user.id, input.accountId);
-      const db = await dbOrThrow();
-      const existing = await db.select({ id: mt5Connections.id }).from(mt5Connections).where(and(eq(mt5Connections.userId, ctx.user.id), eq(mt5Connections.accountId, input.accountId))).limit(1);
-      if (existing[0]) throw new Error("This Gold Journal account already has an MT5 connection. Edit or replace it from MT5 Live.");
-      const apiKey = randomBytes(32).toString("base64url");
-      const inserted = await db.insert(mt5Connections).values({ userId: ctx.user.id, accountId: input.accountId, label: input.label, apiKey: mt5ApiKeyFingerprint(apiKey), brokerUtcOffsetMinutes: input.brokerUtcOffsetMinutes, active: true }).returning({ id: mt5Connections.id });
-      return { id: inserted[0].id, apiKey };
+      return issueMt5ConnectionKey({ userId: ctx.user.id, accountId: input.accountId, label: input.label, brokerUtcOffsetMinutes: input.brokerUtcOffsetMinutes, replace: false });
+    }),
+    replaceConnection: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), label: z.string().trim().min(1).max(120), brokerUtcOffsetMinutes: z.number().int().min(-12 * 60).max(14 * 60).default(180) })).mutation(async ({ ctx, input }) => {
+      return issueMt5ConnectionKey({ userId: ctx.user.id, accountId: input.accountId, label: input.label, brokerUtcOffsetMinutes: input.brokerUtcOffsetMinutes, replace: true });
     }),
     updateConnectionOffset: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), connectionId: z.number().int().positive(), brokerUtcOffsetMinutes: z.number().int().min(-12 * 60).max(14 * 60) })).mutation(async ({ ctx, input }) => {
       const connection = await ownMt5Connection(ctx.user.id, input.accountId, input.connectionId);

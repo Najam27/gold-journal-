@@ -1,18 +1,60 @@
 import DOMPurify from "dompurify";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { executionTypes, formatDate, formatMoney, formatRr, getPktDateInput, getPktSession, isFuturePktDate, levels, results, sessions, toNumber } from "@/lib/gold";
+import {
+  executionTypes,
+  formatDate,
+  formatMoney,
+  formatRr,
+  getPktDateInput,
+  getPktSession,
+  isFuturePktDate,
+  levels,
+  results,
+  sessions,
+  toNumber,
+} from "@/lib/gold";
 import { trpc } from "@/lib/trpc";
 import { getAuthRedirectUrl } from "@/lib/authRedirect";
 import { supabase } from "@/lib/supabase";
-import { getSelectedAccountId, setSelectedAccountId, subscribeSelectedAccount } from "@/lib/accountSelection";
+import {
+  getSelectedAccountId,
+  setSelectedAccountId,
+  subscribeSelectedAccount,
+} from "@/lib/accountSelection";
+import {
+  JOURNAL_VIEW_EVENT,
+  openJournalView,
+  type JournalViewTarget,
+} from "@/lib/journalViewNavigation";
 import { invalidateAccountScopedQueries } from "@/lib/accountScope";
-import { enqueueOfflineMutation, newOfflineMutationId, OFFLINE_CASH_REQUEST_EVENT, OFFLINE_QUEUE_EVENT, queuedMutations, replayOfflineMutations } from "@/lib/offlineMutationQueue";
+import {
+  enqueueOfflineMutation,
+  newOfflineMutationId,
+  OFFLINE_CASH_REQUEST_EVENT,
+  OFFLINE_QUEUE_EVENT,
+  queuedMutations,
+  replayOfflineMutations,
+} from "@/lib/offlineMutationQueue";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PlanExecutionEditor } from "@/components/PlanExecutionEditor";
 import { TradeLogWithViewer } from "@/components/TradeLogWithViewer";
@@ -29,153 +71,2090 @@ import { OptionListManager } from "@/components/OptionListManager";
 import { BulkPdfExporter } from "@/components/BulkPdfExporter";
 import { assessTraderGoal } from "@/lib/traderGoals";
 import { toast } from "sonner";
-import { Activity, BarChart3, Bell, BookOpen, Bot, CalendarDays, Check, ChevronDown, CircleDollarSign, Cloud, Download, FileSpreadsheet, FileText, Goal, ImagePlus, LogOut, Menu, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, RefreshCcw, Settings2, ShieldAlert, Target, Trash2, Wallet, Wifi, WifiOff, X, Zap } from "lucide-react";
+import {
+  Activity,
+  BarChart3,
+  Bell,
+  BookOpen,
+  Bot,
+  CalendarDays,
+  Check,
+  ChevronDown,
+  CircleDollarSign,
+  Cloud,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  Goal,
+  ImagePlus,
+  LogOut,
+  Menu,
+  MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  RefreshCcw,
+  Settings2,
+  ShieldAlert,
+  Target,
+  Trash2,
+  Wallet,
+  Wifi,
+  WifiOff,
+  X,
+  Zap,
+} from "lucide-react";
 
 const logoUrl = "/gold-journal-mark.svg";
-const AnalysisDashboardLazy = React.lazy(async () => ({ default: (await import("@/components/AnalysisDashboard")).AnalysisDashboard }));
-type View = "trades" | "missed" | "analysis" | "goals" | "calendar" | "plan" | "mentor" | "mt5" | "risk" | "options";
-type TradeForm = { tradeDate: string; session: string; direction: "" | "BUY" | "SELL"; result: "" | "WIN" | "LOSS" | "BREAK_EVEN" | "OPEN"; level: string; timeframe: string; setupQuality: string; executionType: string; marketCondition: string; biasAlignment: string; confirmationType: string; slPlacement: string; tpPlacement: string; mistake: string; holdQuality: string; patienceScore: string; risk: string; reward: string; pnl: string; notes: string; emotionBefore: string; emotionDuring: string; emotionAfter: string; mt5Ticket: string };
+const AnalysisDashboardLazy = React.lazy(async () => ({
+  default: (await import("@/components/AnalysisDashboard")).AnalysisDashboard,
+}));
+type View =
+  | "trades"
+  | "missed"
+  | "analysis"
+  | "goals"
+  | "calendar"
+  | "plan"
+  | "mentor"
+  | "mt5"
+  | "risk"
+  | "options";
+type TradeForm = {
+  tradeDate: string;
+  session: string;
+  direction: "" | "BUY" | "SELL";
+  result: "" | "WIN" | "LOSS" | "BREAK_EVEN" | "OPEN";
+  level: string;
+  timeframe: string;
+  setupQuality: string;
+  executionType: string;
+  marketCondition: string;
+  biasAlignment: string;
+  confirmationType: string;
+  slPlacement: string;
+  tpPlacement: string;
+  mistake: string;
+  holdQuality: string;
+  patienceScore: string;
+  risk: string;
+  reward: string;
+  pnl: string;
+  notes: string;
+  emotionBefore: string;
+  emotionDuring: string;
+  emotionAfter: string;
+  mt5Ticket: string;
+};
 
 export type AuthGate = "splash" | "auth-error" | "login" | "dashboard";
-export function getAuthGate(status: "booting" | "authenticated" | "unauthenticated" | "error"): AuthGate { if (status === "booting") return "splash"; if (status === "error") return "auth-error"; return status === "authenticated" ? "dashboard" : "login"; }
+export function getAuthGate(
+  status: "booting" | "authenticated" | "unauthenticated" | "error"
+): AuthGate {
+  if (status === "booting") return "splash";
+  if (status === "error") return "auth-error";
+  return status === "authenticated" ? "dashboard" : "login";
+}
 
 const navItems: { id: View; label: string; icon: typeof BookOpen }[] = [
-  { id: "trades", label: "Trade Log", icon: BookOpen }, { id: "missed", label: "Missed Trades", icon: Target }, { id: "analysis", label: "Analysis", icon: BarChart3 },
-  { id: "goals", label: "Goals", icon: Goal }, { id: "calendar", label: "PnL Calendar", icon: CalendarDays }, { id: "plan", label: "Plan & Execution", icon: Check },
-  { id: "mentor", label: "AI Mentor", icon: Bot }, { id: "mt5", label: "MT5 Live", icon: CircleDollarSign }, { id: "risk", label: "Risk Calculator", icon: CircleDollarSign }, { id: "options", label: "Options", icon: Settings2 },
+  { id: "trades", label: "Trade Log", icon: BookOpen },
+  { id: "missed", label: "Missed Trades", icon: Target },
+  { id: "analysis", label: "Analysis", icon: BarChart3 },
+  { id: "goals", label: "Goals", icon: Goal },
+  { id: "calendar", label: "PnL Calendar", icon: CalendarDays },
+  { id: "plan", label: "Plan & Execution", icon: Check },
+  { id: "mentor", label: "AI Mentor", icon: Bot },
+  { id: "mt5", label: "MT5 Live", icon: CircleDollarSign },
+  { id: "risk", label: "Risk Calculator", icon: CircleDollarSign },
+  { id: "options", label: "Options", icon: Settings2 },
 ];
 export const JOURNAL_RETRY_EVENT = "gold-journal:retry";
-const defaultRules = ["Maximum 3 trades today. Stop after 3.", "Stop trading if daily loss exceeds my limit.", "After a loss, wait 30 minutes before next entry.", "No chasing moves. Missed entry = wait for next setup.", "Only take A or A+ setups today.", "Never move SL against the trade once set.", "No trades 30 minutes before/after high-impact news.", "Take screenshot for every trade. No exceptions."];
-export const MENTOR_LOCAL_KEY_NOTICE = "OpenRouter credentials are server-only and are never stored in this browser or sent with journal data.";
-export function getMentorStorageKeys(_openId?: string | null) { return { storageKey: "", reportStorageKey: "" }; }
+const isJournalView = (value: unknown): value is View =>
+  navItems.some(item => item.id === value);
+const defaultRules = [
+  "Maximum 3 trades today. Stop after 3.",
+  "Stop trading if daily loss exceeds my limit.",
+  "After a loss, wait 30 minutes before next entry.",
+  "No chasing moves. Missed entry = wait for next setup.",
+  "Only take A or A+ setups today.",
+  "Never move SL against the trade once set.",
+  "No trades 30 minutes before/after high-impact news.",
+  "Take screenshot for every trade. No exceptions.",
+];
+export const MENTOR_LOCAL_KEY_NOTICE =
+  "OpenRouter credentials are server-only and are never stored in this browser or sent with journal data.";
+export function getMentorStorageKeys(_openId?: string | null) {
+  return { storageKey: "", reportStorageKey: "" };
+}
 
 const dateInput = getPktDateInput;
-export function defaultTrade(): TradeForm { return { tradeDate: dateInput(), session: getPktSession(), direction: "", result: "", level: "", timeframe: "", setupQuality: "", executionType: "", marketCondition: "", biasAlignment: "", confirmationType: "", slPlacement: "", tpPlacement: "", mistake: "", holdQuality: "", patienceScore: "", risk: "", reward: "", pnl: "", notes: "", emotionBefore: "", emotionDuring: "", emotionAfter: "", mt5Ticket: "" }; }
-function initials(name?: string | null) { return (name || "Gold Trader").split(" ").slice(0, 2).map(part => part[0]).join("").toUpperCase(); }
-function sanitize(value?: string | null) { return DOMPurify.sanitize(value ?? "", { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }); }
-function GoldMark({ size = 34 }: { size?: number }) { return <div className="gold-mark" style={{ width: size, height: size }}><img src={logoUrl} alt="Gold Journal" /></div>; }
-function StatCard({ label, value, detail, tone = "gold" }: { label: string; value: string; detail: string; tone?: string }) { return <div className={`stat-card stat-${tone}`}><p>{label}</p><strong className="data-text">{value}</strong><span>{detail}</span></div>; }
-function EmptyState({ title, copy, action }: { title: string; copy: string; action?: React.ReactNode }) { return <div className="empty-state"><div className="empty-orbit"><GoldMark size={42} /></div><h3>{title}</h3><p>{copy}</p>{action}</div>; }
-function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="field"><span>{label}</span>{children}</label>; }
-function FormSection({ title, children }: { title: string; children: React.ReactNode }) { return <section className="form-section modal-section"><span className="section-label">{title}</span><div className="field-grid">{children}</div></section>; }
+export function defaultTrade(): TradeForm {
+  return {
+    tradeDate: dateInput(),
+    session: getPktSession(),
+    direction: "",
+    result: "",
+    level: "",
+    timeframe: "",
+    setupQuality: "",
+    executionType: "",
+    marketCondition: "",
+    biasAlignment: "",
+    confirmationType: "",
+    slPlacement: "",
+    tpPlacement: "",
+    mistake: "",
+    holdQuality: "",
+    patienceScore: "",
+    risk: "",
+    reward: "",
+    pnl: "",
+    notes: "",
+    emotionBefore: "",
+    emotionDuring: "",
+    emotionAfter: "",
+    mt5Ticket: "",
+  };
+}
+function initials(name?: string | null) {
+  return (name || "Gold Trader")
+    .split(" ")
+    .slice(0, 2)
+    .map(part => part[0])
+    .join("")
+    .toUpperCase();
+}
+function sanitize(value?: string | null) {
+  return DOMPurify.sanitize(value ?? "", {
+    ALLOWED_TAGS: [],
+    ALLOWED_ATTR: [],
+  });
+}
+function GoldMark({ size = 34 }: { size?: number }) {
+  return (
+    <div className="gold-mark" style={{ width: size, height: size }}>
+      <img src={logoUrl} alt="Gold Journal" />
+    </div>
+  );
+}
+function StatCard({
+  label,
+  value,
+  detail,
+  tone = "gold",
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone?: string;
+}) {
+  return (
+    <div className={`stat-card stat-${tone}`}>
+      <p>{label}</p>
+      <strong className="data-text">{value}</strong>
+      <span>{detail}</span>
+    </div>
+  );
+}
+function EmptyState({
+  title,
+  copy,
+  action,
+}: {
+  title: string;
+  copy: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="empty-state">
+      <div className="empty-orbit">
+        <GoldMark size={42} />
+      </div>
+      <h3>{title}</h3>
+      <p>{copy}</p>
+      {action}
+    </div>
+  );
+}
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+function FormSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="form-section modal-section">
+      <span className="section-label">{title}</span>
+      <div className="field-grid">{children}</div>
+    </section>
+  );
+}
 
-export function journalStats(trades: any[], account: any, movements: any[], cashNet?: number, tradeSummary?: any) {
-  const summaryAvailable = Boolean(tradeSummary && tradeSummary.source !== "fallback");
-  const summaryNumber = (value: unknown, fallback: number) => summaryAvailable ? toNumber(value) : fallback;
-  const wins = summaryNumber(tradeSummary?.wins, trades.filter(trade => trade.result === "WIN").length);
-  const closed = summaryNumber(tradeSummary?.closed, trades.filter(trade => trade.result !== "OPEN").length);
-  const pnl = summaryNumber(tradeSummary?.pnl, trades.reduce((total, trade) => total + toNumber(trade.pnl), 0));
+export function journalStats(
+  trades: any[],
+  account: any,
+  movements: any[],
+  cashNet?: number,
+  tradeSummary?: any
+) {
+  const summaryAvailable = Boolean(
+    tradeSummary && tradeSummary.source !== "fallback"
+  );
+  const summaryNumber = (value: unknown, fallback: number) =>
+    summaryAvailable ? toNumber(value) : fallback;
+  const wins = summaryNumber(
+    tradeSummary?.wins,
+    trades.filter(trade => trade.result === "WIN").length
+  );
+  const closed = summaryNumber(
+    tradeSummary?.closed,
+    trades.filter(trade => trade.result !== "OPEN").length
+  );
+  const pnl = summaryNumber(
+    tradeSummary?.pnl,
+    trades.reduce((total, trade) => total + toNumber(trade.pnl), 0)
+  );
   const total = summaryNumber(tradeSummary?.total, trades.length);
-  const losses = summaryNumber(tradeSummary?.losses, trades.filter(trade => trade.result === "LOSS").length);
-  const cash = cashNet ?? movements.reduce((total, item) => total + (item.type === "DEPOSIT" ? toNumber(item.amount) : -toNumber(item.amount)), 0);
-  return { total, wins, losses, pnl, balance: toNumber(account?.startingBalance) + pnl + cash, winRate: closed ? wins / closed * 100 : 0 };
+  const losses = summaryNumber(
+    tradeSummary?.losses,
+    trades.filter(trade => trade.result === "LOSS").length
+  );
+  const cash =
+    cashNet ??
+    movements.reduce(
+      (total, item) =>
+        total +
+        (item.type === "DEPOSIT"
+          ? toNumber(item.amount)
+          : -toNumber(item.amount)),
+      0
+    );
+  return {
+    total,
+    wins,
+    losses,
+    pnl,
+    balance: toNumber(account?.startingBalance) + pnl + cash,
+    winRate: closed ? (wins / closed) * 100 : 0,
+  };
 }
 function goalState(goal: any, trades: any[]) {
   const entry = assessTraderGoal(goal, trades, []);
-  return { value: entry.value, target: entry.target, status: entry.status === "AT_RISK" ? "AT RISK" : entry.status, percentage: entry.percentage };
+  return {
+    value: entry.value,
+    target: entry.target,
+    status: entry.status === "AT_RISK" ? "AT RISK" : entry.status,
+    percentage: entry.percentage,
+  };
 }
 
 export default function GoldJournal() {
-  const { user, session, status: authStatus, isAuthenticated, profileReady, profileLoading, authError, authMeError, refresh: authRefresh, retryBootstrap, reconnect, logout } = useAuth();
-  const authUserId = session?.user?.id ?? null; const previousAuthUserId = useRef<string | null | undefined>(undefined);
-  const [view, setView] = useState<View>("trades"); const [mobileNav, setMobileNav] = useState(false); const [collapsed, setCollapsed] = useState(false); const [accountId, setAccountId] = useState<number | undefined>(() => getSelectedAccountId());
-  const [isOnline, setIsOnline] = useState(navigator.onLine); const [installEvent, setInstallEvent] = useState<any>(); const [installHelp, setInstallHelp] = useState(false);
-  const [tradeDialog, setTradeDialog] = useState(false); const [tradeForm, setTradeForm] = useState<TradeForm>(defaultTrade()); const [editing, setEditing] = useState<any>(); const [screenshot, setScreenshot] = useState<File>(); const [uploadProgress, setUploadProgress] = useState(0);
-  const [cashDialog, setCashDialog] = useState<"DEPOSIT" | "WITHDRAW" | null>(null); const [cashAmount, setCashAmount] = useState(""); const [cashNote, setCashNote] = useState(""); const [search, setSearch] = useState(""); const [resultFilter, setResultFilter] = useState("ALL"); const [tradePage, setTradePage] = useState(1);
-  const [missedDialog, setMissedDialog] = useState(false); const [queuedCount, setQueuedCount] = useState(0);
-  const accountListQuery = trpc.accounts.list.useQuery(undefined, { enabled: profileReady, retry: false, refetchOnWindowFocus: false, staleTime: 60_000 }); const accountBootstrap = trpc.journal.bootstrap.useQuery(undefined, { enabled: profileReady && (accountListQuery.data?.length ?? 0) === 0, retry: false, refetchOnWindowFocus: false, staleTime: 60_000 }); const ownedAccounts = accountListQuery.data ?? []; const accountSelectionResolved = accountListQuery.isSuccess || Boolean(accountBootstrap.data?.id); const queryInput = useMemo(() => ({ accountId }), [accountId]); const journalQuery = trpc.journal.get.useQuery(queryInput, { enabled: Boolean(profileReady && accountSelectionResolved && accountId), retry: false, refetchInterval: view === "goals" ? 300_000 : false, refetchOnWindowFocus: true }); const mt5WorkspaceInput = useMemo(() => accountId ? ({ accountId }) : undefined, [accountId]); const mt5Workspace = trpc.mt5.workspace.useQuery(mt5WorkspaceInput!, { enabled: Boolean(profileReady && mt5WorkspaceInput && (view === "trades" || view === "mt5")), refetchInterval: view === "trades" || view === "mt5" ? 2_500 : false, refetchOnWindowFocus: true }); const tradeListInput = useMemo(() => accountId ? ({ accountId, page: tradePage, pageSize: 12, search, result: resultFilter === "ALL" ? undefined : resultFilter as "WIN" | "LOSS" | "BREAK_EVEN" | "OPEN" }) : undefined, [accountId, tradePage, search, resultFilter]); const tradeListQuery = trpc.trades.list.useQuery(tradeListInput!, { enabled: Boolean(profileReady && tradeListInput) }); const utils = trpc.useUtils();
-  const createTrade = trpc.trades.create.useMutation(); const updateTrade = trpc.trades.update.useMutation(); const deleteTrade = trpc.trades.delete.useMutation(); const uploadScreenshot = trpc.trades.uploadScreenshot.useMutation(); const clearAll = trpc.trades.clearAll.useMutation(); const createCash = trpc.cash.create.useMutation(); const createGoal = trpc.goals.create.useMutation(); const updateGoal = trpc.goals.update.useMutation(); const deleteGoal = trpc.goals.delete.useMutation(); const clearGoals = trpc.goals.clearAll.useMutation(); const recordGoalAlerts = trpc.notifications.recordGoalAlerts.useMutation(); const createAccount = trpc.accounts.create.useMutation();
-  const refreshOfflineQueue = React.useCallback(() => setQueuedCount(queuedMutations(authUserId, accountId).length), [accountId, authUserId]);
+  const {
+    user,
+    session,
+    status: authStatus,
+    isAuthenticated,
+    profileReady,
+    profileLoading,
+    authError,
+    authMeError,
+    refresh: authRefresh,
+    retryBootstrap,
+    reconnect,
+    logout,
+  } = useAuth();
+  const authUserId = session?.user?.id ?? null;
+  const previousAuthUserId = useRef<string | null | undefined>(undefined);
+  const [view, setView] = useState<View>("trades");
+  const [mobileNav, setMobileNav] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [accountId, setAccountId] = useState<number | undefined>(() =>
+    getSelectedAccountId()
+  );
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [installEvent, setInstallEvent] = useState<any>();
+  const [installHelp, setInstallHelp] = useState(false);
+  const [tradeDialog, setTradeDialog] = useState(false);
+  const [tradeForm, setTradeForm] = useState<TradeForm>(defaultTrade());
+  const [editing, setEditing] = useState<any>();
+  const [screenshot, setScreenshot] = useState<File>();
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [cashDialog, setCashDialog] = useState<"DEPOSIT" | "WITHDRAW" | null>(
+    null
+  );
+  const [cashAmount, setCashAmount] = useState("");
+  const [cashNote, setCashNote] = useState("");
+  const [search, setSearch] = useState("");
+  const [resultFilter, setResultFilter] = useState("ALL");
+  const [tradePage, setTradePage] = useState(1);
+  const [missedDialog, setMissedDialog] = useState(false);
+  const [queuedCount, setQueuedCount] = useState(0);
+  useEffect(() => {
+    const navigate = (event: Event) => {
+      const next = (event as CustomEvent<{ view?: JournalViewTarget }>).detail
+        ?.view;
+      if (!isJournalView(next)) return;
+      setView(next);
+      setMobileNav(false);
+    };
+    window.addEventListener(JOURNAL_VIEW_EVENT, navigate);
+    return () => window.removeEventListener(JOURNAL_VIEW_EVENT, navigate);
+  }, []);
+  const accountListQuery = trpc.accounts.list.useQuery(undefined, {
+    enabled: profileReady,
+    retry: false,
+    refetchOnWindowFocus: false,
+    staleTime: 60_000,
+  });
+  const accountBootstrap = trpc.journal.bootstrap.useQuery(undefined, {
+    enabled: profileReady && (accountListQuery.data?.length ?? 0) === 0,
+    retry: false,
+    refetchOnWindowFocus: false,
+    staleTime: 60_000,
+  });
+  const ownedAccounts = accountListQuery.data ?? [];
+  const accountSelectionResolved =
+    accountListQuery.isSuccess || Boolean(accountBootstrap.data?.id);
+  const queryInput = useMemo(() => ({ accountId }), [accountId]);
+  const journalQuery = trpc.journal.get.useQuery(queryInput, {
+    enabled: Boolean(profileReady && accountSelectionResolved && accountId),
+    retry: false,
+    refetchInterval:
+      view === "trades" ? 2_500 : view === "goals" ? 300_000 : false,
+    refetchOnWindowFocus: true,
+  });
+  const mt5WorkspaceInput = useMemo(
+    () => (accountId ? { accountId } : undefined),
+    [accountId]
+  );
+  const mt5Workspace = trpc.mt5.workspace.useQuery(mt5WorkspaceInput!, {
+    enabled: Boolean(
+      profileReady && mt5WorkspaceInput && (view === "trades" || view === "mt5")
+    ),
+    refetchInterval: view === "trades" || view === "mt5" ? 2_500 : false,
+    refetchOnWindowFocus: true,
+  });
+  const tradeListInput = useMemo(
+    () =>
+      accountId
+        ? {
+            accountId,
+            page: tradePage,
+            pageSize: 12,
+            search,
+            result:
+              resultFilter === "ALL"
+                ? undefined
+                : (resultFilter as "WIN" | "LOSS" | "BREAK_EVEN" | "OPEN"),
+          }
+        : undefined,
+    [accountId, tradePage, search, resultFilter]
+  );
+  const tradeListQuery = trpc.trades.list.useQuery(tradeListInput!, {
+    enabled: Boolean(profileReady && tradeListInput),
+    refetchInterval: view === "trades" ? 2_500 : false,
+    refetchOnWindowFocus: true,
+  });
+  const utils = trpc.useUtils();
+  const createTrade = trpc.trades.create.useMutation();
+  const updateTrade = trpc.trades.update.useMutation();
+  const deleteTrade = trpc.trades.delete.useMutation();
+  const uploadScreenshot = trpc.trades.uploadScreenshot.useMutation();
+  const clearAll = trpc.trades.clearAll.useMutation();
+  const createCash = trpc.cash.create.useMutation();
+  const createGoal = trpc.goals.create.useMutation();
+  const updateGoal = trpc.goals.update.useMutation();
+  const deleteGoal = trpc.goals.delete.useMutation();
+  const clearGoals = trpc.goals.clearAll.useMutation();
+  const recordGoalAlerts = trpc.notifications.recordGoalAlerts.useMutation();
+  const createAccount = trpc.accounts.create.useMutation();
+  const refreshOfflineQueue = React.useCallback(
+    () => setQueuedCount(queuedMutations(authUserId, accountId).length),
+    [accountId, authUserId]
+  );
   const replayOfflineQueue = React.useCallback(async () => {
-    const result = await replayOfflineMutations(authUserId, accountId, async item => {
-      if (item.kind === "trade.create") await createTrade.mutateAsync(item.payload as any);
-      else if (item.kind === "cash.create") await createCash.mutateAsync(item.payload as any);
-    });
+    const result = await replayOfflineMutations(
+      authUserId,
+      accountId,
+      async item => {
+        if (item.kind === "trade.create")
+          await createTrade.mutateAsync(item.payload as any);
+        else if (item.kind === "cash.create")
+          await createCash.mutateAsync(item.payload as any);
+      }
+    );
     refreshOfflineQueue();
-    if (result.replayed) { toast.success(`${result.replayed} offline ${result.replayed === 1 ? "save" : "saves"} synced.`); void invalidateAccountScopedQueries(utils); }
-    if (result.failed) toast.warning("An offline save still needs a connection. It will retry when you are online again.");
-  }, [accountId, authUserId, createCash, createTrade, refreshOfflineQueue, utils]);
-  useEffect(() => { const up = () => setIsOnline(true); const down = () => setIsOnline(false); window.addEventListener("online", up); window.addEventListener("offline", down); return () => { window.removeEventListener("online", up); window.removeEventListener("offline", down); }; }, []);
-  useEffect(() => { const refreshQueue = () => refreshOfflineQueue(); refreshQueue(); window.addEventListener(OFFLINE_QUEUE_EVENT, refreshQueue); if (isOnline) void replayOfflineQueue(); return () => window.removeEventListener(OFFLINE_QUEUE_EVENT, refreshQueue); }, [isOnline, refreshOfflineQueue, replayOfflineQueue]);
-  useEffect(() => { const queueCash = (event: Event) => { const detail = (event as CustomEvent<{ type?: "DEPOSIT" | "WITHDRAW"; amount?: number; note?: string }>).detail; if (!accountId || !authUserId || !detail?.type || !Number.isFinite(detail.amount) || (detail.amount ?? 0) <= 0) return; const clientMutationId = newOfflineMutationId(); enqueueOfflineMutation({ id: clientMutationId, subject: authUserId, accountId, kind: "cash.create", payload: { accountId, movementDate: Date.now(), type: detail.type, amount: detail.amount, note: detail.note ?? "", clientMutationId } }); setCashDialog(null); setCashAmount(""); setCashNote(""); toast.success("Cash movement saved to the offline queue."); }; window.addEventListener(OFFLINE_CASH_REQUEST_EVENT, queueCash); return () => window.removeEventListener(OFFLINE_CASH_REQUEST_EVENT, queueCash); }, [accountId, authUserId]);
-  useEffect(() => { const eventHandler = (event: Event) => { event.preventDefault(); setInstallEvent(event); }; window.addEventListener("beforeinstallprompt", eventHandler); return () => window.removeEventListener("beforeinstallprompt", eventHandler); }, []);
-  useEffect(() => { if (accountBootstrap.data?.id) void accountListQuery.refetch(); }, [accountBootstrap.data?.id, accountListQuery.refetch]);
-  useEffect(() => { if (!profileReady) return; const bootstrapAccountId = Number((accountBootstrap.data as { id?: unknown } | undefined)?.id); const firstOwnedAccountId = Number((ownedAccounts[0] as { id?: unknown } | undefined)?.id); const valid: number | undefined = accountId && ownedAccounts.some((item: any) => Number(item.id) === accountId) ? accountId : (Number.isInteger(firstOwnedAccountId) && firstOwnedAccountId > 0 ? firstOwnedAccountId : undefined) ?? (Number.isInteger(bootstrapAccountId) && bootstrapAccountId > 0 ? bootstrapAccountId : undefined); if (valid && valid !== accountId) { setAccountId(valid); setSelectedAccountId(valid); } else if (!valid && accountListQuery.isSuccess && ownedAccounts.length === 0 && accountBootstrap.isError) setSelectedAccountId(undefined); }, [accountBootstrap.data?.id, accountBootstrap.isError, accountId, accountListQuery.isSuccess, ownedAccounts, profileReady]);
-  useEffect(() => { if (previousAuthUserId.current !== undefined && previousAuthUserId.current !== authUserId) { setAccountId(undefined); setSelectedAccountId(undefined); } previousAuthUserId.current = authUserId; }, [authUserId]);
-  const data = journalQuery.data as any; const account = data?.activeAccount ?? ownedAccounts.find(item => item.id === accountId); const trades = data?.trades ?? []; const goalTrades = data?.goalTrades ?? trades; const cashMovements = data?.cashMovements ?? []; const stats = journalStats(trades, account, cashMovements, data?.cashNet, data?.tradeSummary); const activeMt5Connection = mt5Workspace.data?.connections?.find((connection: any) => connection.active); const goalEntries = useMemo(() => (data?.goals ?? []).map((goal: any) => assessTraderGoal(goal, goalTrades, data?.dailyPlans ?? [])), [data?.goals, goalTrades, data?.dailyPlans]); const dangerGoals = goalEntries.filter((entry: any) => entry.status === "AT_RISK" || entry.status === "BREACHED"); const goalAlertPayload = useMemo(() => goalEntries.filter((entry: any) => entry.goal.active && entry.goal.notify && ["AT_RISK", "BREACHED"].includes(entry.status) && entry.hasActivity).map((entry: any) => ({ goalId: entry.goal.id, status: entry.status, cycleKey: `${entry.goal.period}-${entry.periodLabel}`, message: `${entry.goal.name}: ${entry.status === "BREACHED" ? "threshold breached" : "near threshold"} (${entry.current} / ${entry.targetLabel}).` })), [goalEntries]);
-  useEffect(() => { if (account?.id && account.id !== accountId) setAccountId(account.id); if (account?.id) setSelectedAccountId(account.id); }, [account?.id, accountId]);
-  useEffect(() => { if (!account?.id || !goalAlertPayload.length || recordGoalAlerts.isPending) return; void recordGoalAlerts.mutateAsync({ accountId: account.id, alerts: goalAlertPayload }).then(result => { if (result.recorded) void utils.notifications?.get?.invalidate?.(); }).catch(() => undefined); }, [account?.id, goalAlertPayload, recordGoalAlerts, utils.notifications]);
-  const switchAccount = React.useCallback((nextAccountId: number) => {
-    if (!nextAccountId || nextAccountId === accountId) return;
-    setAccountId(nextAccountId);
+    if (result.replayed) {
+      toast.success(
+        `${result.replayed} offline ${result.replayed === 1 ? "save" : "saves"} synced.`
+      );
+      void invalidateAccountScopedQueries(utils);
+    }
+    if (result.failed)
+      toast.warning(
+        "An offline save still needs a connection. It will retry when you are online again."
+      );
+  }, [
+    accountId,
+    authUserId,
+    createCash,
+    createTrade,
+    refreshOfflineQueue,
+    utils,
+  ]);
+  useEffect(() => {
+    const up = () => setIsOnline(true);
+    const down = () => setIsOnline(false);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    return () => {
+      window.removeEventListener("online", up);
+      window.removeEventListener("offline", down);
+    };
+  }, []);
+  useEffect(() => {
+    const refreshQueue = () => refreshOfflineQueue();
+    refreshQueue();
+    window.addEventListener(OFFLINE_QUEUE_EVENT, refreshQueue);
+    if (isOnline) void replayOfflineQueue();
+    return () => window.removeEventListener(OFFLINE_QUEUE_EVENT, refreshQueue);
+  }, [isOnline, refreshOfflineQueue, replayOfflineQueue]);
+  useEffect(() => {
+    const queueCash = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{
+          type?: "DEPOSIT" | "WITHDRAW";
+          amount?: number;
+          note?: string;
+        }>
+      ).detail;
+      if (
+        !accountId ||
+        !authUserId ||
+        !detail?.type ||
+        !Number.isFinite(detail.amount) ||
+        (detail.amount ?? 0) <= 0
+      )
+        return;
+      const clientMutationId = newOfflineMutationId();
+      enqueueOfflineMutation({
+        id: clientMutationId,
+        subject: authUserId,
+        accountId,
+        kind: "cash.create",
+        payload: {
+          accountId,
+          movementDate: Date.now(),
+          type: detail.type,
+          amount: detail.amount,
+          note: detail.note ?? "",
+          clientMutationId,
+        },
+      });
+      setCashDialog(null);
+      setCashAmount("");
+      setCashNote("");
+      toast.success("Cash movement saved to the offline queue.");
+    };
+    window.addEventListener(OFFLINE_CASH_REQUEST_EVENT, queueCash);
+    return () =>
+      window.removeEventListener(OFFLINE_CASH_REQUEST_EVENT, queueCash);
+  }, [accountId, authUserId]);
+  useEffect(() => {
+    const eventHandler = (event: Event) => {
+      event.preventDefault();
+      setInstallEvent(event);
+    };
+    window.addEventListener("beforeinstallprompt", eventHandler);
+    return () =>
+      window.removeEventListener("beforeinstallprompt", eventHandler);
+  }, []);
+  useEffect(() => {
+    if (accountBootstrap.data?.id) void accountListQuery.refetch();
+  }, [accountBootstrap.data?.id, accountListQuery.refetch]);
+  useEffect(() => {
+    if (!profileReady) return;
+    const bootstrapAccountId = Number(
+      (accountBootstrap.data as { id?: unknown } | undefined)?.id
+    );
+    const firstOwnedAccountId = Number(
+      (ownedAccounts[0] as { id?: unknown } | undefined)?.id
+    );
+    const valid: number | undefined =
+      accountId &&
+      ownedAccounts.some((item: any) => Number(item.id) === accountId)
+        ? accountId
+        : ((Number.isInteger(firstOwnedAccountId) && firstOwnedAccountId > 0
+            ? firstOwnedAccountId
+            : undefined) ??
+          (Number.isInteger(bootstrapAccountId) && bootstrapAccountId > 0
+            ? bootstrapAccountId
+            : undefined));
+    if (valid && valid !== accountId) {
+      setAccountId(valid);
+      setSelectedAccountId(valid);
+    } else if (
+      !valid &&
+      accountListQuery.isSuccess &&
+      ownedAccounts.length === 0 &&
+      accountBootstrap.isError
+    )
+      setSelectedAccountId(undefined);
+  }, [
+    accountBootstrap.data?.id,
+    accountBootstrap.isError,
+    accountId,
+    accountListQuery.isSuccess,
+    ownedAccounts,
+    profileReady,
+  ]);
+  useEffect(() => {
+    if (
+      previousAuthUserId.current !== undefined &&
+      previousAuthUserId.current !== authUserId
+    ) {
+      setAccountId(undefined);
+      setSelectedAccountId(undefined);
+    }
+    previousAuthUserId.current = authUserId;
+  }, [authUserId]);
+  const data = journalQuery.data as any;
+  const account =
+    data?.activeAccount ?? ownedAccounts.find(item => item.id === accountId);
+  const trades = data?.trades ?? [];
+  const goalTrades = data?.goalTrades ?? trades;
+  const cashMovements = data?.cashMovements ?? [];
+  const stats = journalStats(
+    trades,
+    account,
+    cashMovements,
+    data?.cashNet,
+    data?.tradeSummary
+  );
+  const activeMt5Connection = mt5Workspace.data?.connections?.find(
+    (connection: any) => connection.active
+  );
+  const goalEntries = useMemo(
+    () =>
+      (data?.goals ?? []).map((goal: any) =>
+        assessTraderGoal(goal, goalTrades, data?.dailyPlans ?? [])
+      ),
+    [data?.goals, goalTrades, data?.dailyPlans]
+  );
+  const dangerGoals = goalEntries.filter(
+    (entry: any) => entry.status === "AT_RISK" || entry.status === "BREACHED"
+  );
+  const goalAlertPayload = useMemo(
+    () =>
+      goalEntries
+        .filter(
+          (entry: any) =>
+            entry.goal.active &&
+            entry.goal.notify &&
+            ["AT_RISK", "BREACHED"].includes(entry.status) &&
+            entry.hasActivity
+        )
+        .map((entry: any) => ({
+          goalId: entry.goal.id,
+          status: entry.status,
+          cycleKey: `${entry.goal.period}-${entry.periodLabel}`,
+          message: `${entry.goal.name}: ${entry.status === "BREACHED" ? "threshold breached" : "near threshold"} (${entry.current} / ${entry.targetLabel}).`,
+        })),
+    [goalEntries]
+  );
+  useEffect(() => {
+    if (account?.id && account.id !== accountId) setAccountId(account.id);
+    if (account?.id) setSelectedAccountId(account.id);
+  }, [account?.id, accountId]);
+  useEffect(() => {
+    if (!account?.id || !goalAlertPayload.length || recordGoalAlerts.isPending)
+      return;
+    void recordGoalAlerts
+      .mutateAsync({ accountId: account.id, alerts: goalAlertPayload })
+      .then(result => {
+        if (result.recorded) void utils.notifications?.get?.invalidate?.();
+      })
+      .catch(() => undefined);
+  }, [account?.id, goalAlertPayload, recordGoalAlerts, utils.notifications]);
+  const switchAccount = React.useCallback(
+    (nextAccountId: number) => {
+      if (!nextAccountId || nextAccountId === accountId) return;
+      setAccountId(nextAccountId);
+      setTradePage(1);
+      void invalidateAccountScopedQueries(utils);
+    },
+    [accountId, utils]
+  );
+  useEffect(
+    () =>
+      subscribeSelectedAccount(nextAccountId => {
+        if (nextAccountId) switchAccount(nextAccountId);
+      }),
+    [switchAccount]
+  );
+  useEffect(() => {
     setTradePage(1);
-    void invalidateAccountScopedQueries(utils);
-  }, [accountId, utils]);
-  useEffect(() => subscribeSelectedAccount(nextAccountId => { if (nextAccountId) switchAccount(nextAccountId); }), [switchAccount]);
-  useEffect(() => { setTradePage(1); }, [accountId, search, resultFilter]);
-  const refresh = () => invalidateAccountScopedQueries(utils); const accountSelectionPending = profileReady && !accountListQuery.error && !accountBootstrap.error && (!accountSelectionResolved || !accountId); const journalLoading = profileLoading || accountBootstrap.isLoading || accountSelectionPending || (Boolean(accountId) && journalQuery.isLoading); const journalError = accountBootstrap.error || journalQuery.error;
-  const retryJournal = React.useCallback(() => { void journalQuery.refetch(); if (tradeListInput) void tradeListQuery.refetch(); }, [journalQuery, tradeListInput, tradeListQuery]);
+  }, [accountId, search, resultFilter]);
+  const refresh = () => invalidateAccountScopedQueries(utils);
+  const accountSelectionPending =
+    profileReady &&
+    !accountListQuery.error &&
+    !accountBootstrap.error &&
+    (!accountSelectionResolved || !accountId);
+  const journalLoading =
+    profileLoading ||
+    accountBootstrap.isLoading ||
+    accountSelectionPending ||
+    (Boolean(accountId) && journalQuery.isLoading);
+  const journalError = accountBootstrap.error || journalQuery.error;
+  const retryJournal = React.useCallback(() => {
+    void journalQuery.refetch();
+    if (tradeListInput) void tradeListQuery.refetch();
+  }, [journalQuery, tradeListInput, tradeListQuery]);
   const reconnectStatus = "ready";
-  const reconnectSession = () => { void journalQuery.refetch(); };
-  useEffect(() => { window.addEventListener(JOURNAL_RETRY_EVENT, retryJournal); return () => window.removeEventListener(JOURNAL_RETRY_EVENT, retryJournal); }, [retryJournal]);
-  const openNewTrade = (source?: any) => { const next = defaultTrade(); if (source) Object.assign(next, { ...source, tradeDate: dateInput(), session: getPktSession(), risk: source.risk ?? "", reward: source.reward ?? "", pnl: source.pnl ?? "", patienceScore: source.patienceScore ? String(source.patienceScore) : "", mt5Ticket: source.mt5Ticket ?? "" }); setEditing(undefined); setTradeForm(next); setScreenshot(undefined); setUploadProgress(0); setTradeDialog(true); };
-  const openEdit = (trade: any) => { setEditing(trade); setTradeForm({ tradeDate: dateInput(new Date(trade.tradeDate)), session: trade.session, direction: trade.direction, result: trade.result, level: trade.level || "", timeframe: trade.timeframe || "", setupQuality: trade.setupQuality || "", executionType: trade.executionType || "", marketCondition: trade.marketCondition || "", biasAlignment: trade.biasAlignment || "", confirmationType: trade.confirmationType || "", slPlacement: trade.slPlacement || "", tpPlacement: trade.tpPlacement || "", mistake: trade.mistake || "", holdQuality: trade.holdQuality || "", patienceScore: trade.patienceScore ? String(trade.patienceScore) : "", risk: trade.risk ?? "", reward: trade.reward ?? "", pnl: trade.pnl ?? "", notes: trade.notes || "", emotionBefore: trade.emotionBefore || "", emotionDuring: trade.emotionDuring || "", emotionAfter: trade.emotionAfter || "", mt5Ticket: trade.mt5Ticket ? String(trade.mt5Ticket) : "" }); setScreenshot(undefined); setTradeDialog(true); };
-  const submitTrade = async () => { if (!account) return; if (!tradeForm.direction || !tradeForm.result) { toast.error("Select a direction and result before saving a manual trade."); return; } const date = Date.parse(`${tradeForm.tradeDate}T12:00:00+05:00`); if (!Number.isFinite(date) || (!editing && isFuturePktDate(tradeForm.tradeDate))) { toast.error("Future trade dates are not allowed."); return; } const payload = { accountId: account.id, tradeDate: date, session: tradeForm.session, direction: tradeForm.direction, result: tradeForm.result, level: tradeForm.level, timeframe: tradeForm.timeframe, setupQuality: tradeForm.setupQuality, executionType: tradeForm.executionType, marketCondition: tradeForm.marketCondition, biasAlignment: tradeForm.biasAlignment, confirmationType: tradeForm.confirmationType, slPlacement: tradeForm.slPlacement, tpPlacement: tradeForm.tpPlacement, mistake: tradeForm.mistake, holdQuality: tradeForm.holdQuality, patienceScore: tradeForm.patienceScore ? Number(tradeForm.patienceScore) : null, risk: tradeForm.risk === "" ? null : Number(tradeForm.risk), reward: tradeForm.reward === "" ? null : Number(tradeForm.reward), pnl: Number(tradeForm.pnl || 0), notes: tradeForm.notes, emotionBefore: tradeForm.emotionBefore, emotionDuring: tradeForm.emotionDuring, emotionAfter: tradeForm.emotionAfter, mt5Ticket: tradeForm.mt5Ticket || undefined };
-    if (!isOnline && !editing && authUserId) { const clientMutationId = newOfflineMutationId(); enqueueOfflineMutation({ id: clientMutationId, subject: authUserId, accountId: account.id, kind: "trade.create", payload: { ...payload, clientMutationId } }); if (screenshot) toast.warning("Trade is queued. Re-open it after sync to attach the screenshot."); else toast.success("Trade saved to the offline queue and will sync automatically."); setTradeDialog(false); return; }
-    try { const result = editing ? await updateTrade.mutateAsync({ ...payload, tradeId: editing.id }) : await createTrade.mutateAsync(payload); const tradeId = editing?.id ?? ("id" in result ? result.id : undefined); if (screenshot && tradeId) { const fileData = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(screenshot); }); setUploadProgress(50); try { await uploadScreenshot.mutateAsync({ tradeId, fileName: screenshot.name, mimeType: screenshot.type as "image/jpeg" | "image/png" | "image/webp", base64: fileData }); setUploadProgress(100); } catch { toast.warning("Trade saved but screenshot upload failed. Re-upload from edit."); } } toast.success(editing ? "Trade updated." : "Trade saved and balance recalculated."); setTradeDialog(false); refresh(); } catch (error: any) { toast.error(error.message || "Trade could not be saved."); } };
-  const exportRows = trades.map((trade: any, index: number) => ({ "#": index + 1, Date: formatDate(trade.tradeDate), Session: trade.session, Side: trade.direction, Level: trade.level, Result: trade.result, Risk: toNumber(trade.risk), Reward: toNumber(trade.reward), "R:R": formatRr(trade.risk, trade.reward), "P&L": toNumber(trade.pnl), Notes: sanitize(trade.notes) }));
-  const exportCsv = () => { const headers = Object.keys(exportRows[0] ?? { Date: "" }); const rows = exportRows.map((row: Record<string, string | number>) => headers.map(header => `"${String(row[header as keyof typeof row] ?? "").replaceAll('"', '""')}"`).join(",")); const blob = new Blob([[headers.join(","), ...rows].join("\n")], { type: "text/csv" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "GoldJournal_Trades.csv"; link.click(); URL.revokeObjectURL(url); };
-  const exportExcel = async () => { try { const XLSX = await import("xlsx"); const workbook = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(exportRows), "Trades"); XLSX.writeFile(workbook, "GoldJournal_Trades.xlsx"); } catch { toast.error("Excel export could not be completed."); } };
-  const exportPdf = () => window.dispatchEvent(new Event("gold-journal:bulk-pdf"));
-  const requestInstall = async () => { if (installEvent) { installEvent.prompt(); await installEvent.userChoice; setInstallEvent(undefined); } else setInstallHelp(true); };
+  const reconnectSession = () => {
+    void journalQuery.refetch();
+  };
+  useEffect(() => {
+    window.addEventListener(JOURNAL_RETRY_EVENT, retryJournal);
+    return () => window.removeEventListener(JOURNAL_RETRY_EVENT, retryJournal);
+  }, [retryJournal]);
+  const openNewTrade = (source?: any) => {
+    const next = defaultTrade();
+    if (source)
+      Object.assign(next, {
+        ...source,
+        tradeDate: dateInput(),
+        session: getPktSession(),
+        risk: source.risk ?? "",
+        reward: source.reward ?? "",
+        pnl: source.pnl ?? "",
+        patienceScore: source.patienceScore ? String(source.patienceScore) : "",
+        mt5Ticket: source.mt5Ticket ?? "",
+      });
+    setEditing(undefined);
+    setTradeForm(next);
+    setScreenshot(undefined);
+    setUploadProgress(0);
+    setTradeDialog(true);
+  };
+  const openEdit = (trade: any) => {
+    setEditing(trade);
+    setTradeForm({
+      tradeDate: dateInput(new Date(trade.tradeDate)),
+      session: trade.session,
+      direction: trade.direction,
+      result: trade.result,
+      level: trade.level || "",
+      timeframe: trade.timeframe || "",
+      setupQuality: trade.setupQuality || "",
+      executionType: trade.executionType || "",
+      marketCondition: trade.marketCondition || "",
+      biasAlignment: trade.biasAlignment || "",
+      confirmationType: trade.confirmationType || "",
+      slPlacement: trade.slPlacement || "",
+      tpPlacement: trade.tpPlacement || "",
+      mistake: trade.mistake || "",
+      holdQuality: trade.holdQuality || "",
+      patienceScore: trade.patienceScore ? String(trade.patienceScore) : "",
+      risk: trade.risk ?? "",
+      reward: trade.reward ?? "",
+      pnl: trade.pnl ?? "",
+      notes: trade.notes || "",
+      emotionBefore: trade.emotionBefore || "",
+      emotionDuring: trade.emotionDuring || "",
+      emotionAfter: trade.emotionAfter || "",
+      mt5Ticket: trade.mt5Ticket ? String(trade.mt5Ticket) : "",
+    });
+    setScreenshot(undefined);
+    setTradeDialog(true);
+  };
+  const submitTrade = async () => {
+    if (!account) return;
+    if (!tradeForm.direction || !tradeForm.result) {
+      toast.error(
+        "Select a direction and result before saving a manual trade."
+      );
+      return;
+    }
+    const date = Date.parse(`${tradeForm.tradeDate}T12:00:00+05:00`);
+    if (
+      !Number.isFinite(date) ||
+      (!editing && isFuturePktDate(tradeForm.tradeDate))
+    ) {
+      toast.error("Future trade dates are not allowed.");
+      return;
+    }
+    const payload = {
+      accountId: account.id,
+      tradeDate: date,
+      session: tradeForm.session,
+      direction: tradeForm.direction,
+      result: tradeForm.result,
+      level: tradeForm.level,
+      timeframe: tradeForm.timeframe,
+      setupQuality: tradeForm.setupQuality,
+      executionType: tradeForm.executionType,
+      marketCondition: tradeForm.marketCondition,
+      biasAlignment: tradeForm.biasAlignment,
+      confirmationType: tradeForm.confirmationType,
+      slPlacement: tradeForm.slPlacement,
+      tpPlacement: tradeForm.tpPlacement,
+      mistake: tradeForm.mistake,
+      holdQuality: tradeForm.holdQuality,
+      patienceScore: tradeForm.patienceScore
+        ? Number(tradeForm.patienceScore)
+        : null,
+      risk: tradeForm.risk === "" ? null : Number(tradeForm.risk),
+      reward: tradeForm.reward === "" ? null : Number(tradeForm.reward),
+      pnl: Number(tradeForm.pnl || 0),
+      notes: tradeForm.notes,
+      emotionBefore: tradeForm.emotionBefore,
+      emotionDuring: tradeForm.emotionDuring,
+      emotionAfter: tradeForm.emotionAfter,
+      mt5Ticket: tradeForm.mt5Ticket || undefined,
+    };
+    if (!isOnline && !editing && authUserId) {
+      const clientMutationId = newOfflineMutationId();
+      enqueueOfflineMutation({
+        id: clientMutationId,
+        subject: authUserId,
+        accountId: account.id,
+        kind: "trade.create",
+        payload: { ...payload, clientMutationId },
+      });
+      if (screenshot)
+        toast.warning(
+          "Trade is queued. Re-open it after sync to attach the screenshot."
+        );
+      else
+        toast.success(
+          "Trade saved to the offline queue and will sync automatically."
+        );
+      setTradeDialog(false);
+      return;
+    }
+    try {
+      const result = editing
+        ? await updateTrade.mutateAsync({ ...payload, tradeId: editing.id })
+        : await createTrade.mutateAsync(payload);
+      const tradeId = editing?.id ?? ("id" in result ? result.id : undefined);
+      if (screenshot && tradeId) {
+        const fileData = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = reject;
+          reader.readAsDataURL(screenshot);
+        });
+        setUploadProgress(50);
+        try {
+          await uploadScreenshot.mutateAsync({
+            tradeId,
+            fileName: screenshot.name,
+            mimeType: screenshot.type as
+              | "image/jpeg"
+              | "image/png"
+              | "image/webp",
+            base64: fileData,
+          });
+          setUploadProgress(100);
+        } catch {
+          toast.warning(
+            "Trade saved but screenshot upload failed. Re-upload from edit."
+          );
+        }
+      }
+      toast.success(
+        editing ? "Trade updated." : "Trade saved and balance recalculated."
+      );
+      setTradeDialog(false);
+      refresh();
+    } catch (error: any) {
+      toast.error(error.message || "Trade could not be saved.");
+    }
+  };
+  const exportRows = trades.map((trade: any, index: number) => ({
+    "#": index + 1,
+    Date: formatDate(trade.tradeDate),
+    Session: trade.session,
+    Side: trade.direction,
+    Level: trade.level,
+    Result: trade.result,
+    Risk: toNumber(trade.risk),
+    Reward: toNumber(trade.reward),
+    "R:R": formatRr(trade.risk, trade.reward),
+    "P&L": toNumber(trade.pnl),
+    Notes: sanitize(trade.notes),
+  }));
+  const exportCsv = () => {
+    const headers = Object.keys(exportRows[0] ?? { Date: "" });
+    const rows = exportRows.map((row: Record<string, string | number>) =>
+      headers
+        .map(
+          header =>
+            `"${String(row[header as keyof typeof row] ?? "").replaceAll('"', '""')}"`
+        )
+        .join(",")
+    );
+    const blob = new Blob([[headers.join(","), ...rows].join("\n")], {
+      type: "text/csv",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "GoldJournal_Trades.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  const exportExcel = async () => {
+    try {
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.json_to_sheet(exportRows),
+        "Trades"
+      );
+      XLSX.writeFile(workbook, "GoldJournal_Trades.xlsx");
+    } catch {
+      toast.error("Excel export could not be completed.");
+    }
+  };
+  const exportPdf = () =>
+    window.dispatchEvent(new Event("gold-journal:bulk-pdf"));
+  const requestInstall = async () => {
+    if (installEvent) {
+      installEvent.prompt();
+      await installEvent.userChoice;
+      setInstallEvent(undefined);
+    } else setInstallHelp(true);
+  };
   const pagedTrades = tradeListQuery.data?.trades ?? [];
   const authGate = getAuthGate(authStatus);
-  if (authGate === "splash") return <SplashScreen />; if (authGate === "auth-error") return <AuthRecovery error={authError} onRetry={retryBootstrap} onReconnect={() => void reconnect()} />; if (authGate === "login") return <LoginScreen />;
+  if (authGate === "splash") return <SplashScreen />;
+  if (authGate === "auth-error")
+    return (
+      <AuthRecovery
+        error={authError}
+        onRetry={retryBootstrap}
+        onReconnect={() => void reconnect()}
+      />
+    );
+  if (authGate === "login") return <LoginScreen />;
   const TradeLog = TradeLogWithViewer;
   const MissedView = MissedTradesView;
   const CalendarView = PnlCalendarWithWeeks;
   const TradeDialog = TradeDialogWithCustomOptions;
   const PlanView = PlanExecutionEditor;
   const GoalsView = FlexibleGoalsView;
-const optionsPanel = <><OptionsView user={user} account={account} accounts={ownedAccounts.length ? ownedAccounts : (data?.accounts ?? [])} onAccount={switchAccount} onCreate={async (name: string) => { const result = await createAccount.mutateAsync({ name, startingBalance: 0 }); switchAccount(result.id); toast.success("New trading account created."); refresh(); }} onClear={async () => { if (!account || !window.confirm("Clear all active-account trades?")) return; await clearAll.mutateAsync({ accountId: account.id, confirmed: true }); refresh(); }} /><UserAiProviderSettings /></>;
-  return <div className="gj-shell"><>{!isOnline && <div className="offline-banner"><WifiOff size={15} /> You are offline — showing last synced data.</div>}{authMeError && <AuthProfileRecovery error={authMeError} onRetry={() => void authRefresh()} onReconnect={() => void reconnect()} onSignOut={logout} />}</><AppSidebar account={account} accounts={ownedAccounts.length ? ownedAccounts : (data?.accounts ?? [])} stats={stats} mt5Summary={activeMt5Connection} active={view} onView={(next: View) => { setView(next); setMobileNav(false); }} collapsed={collapsed} onCollapse={() => setCollapsed(!collapsed)} open={mobileNav} online={isOnline} alertCount={dangerGoals.length} user={user} onLogout={logout} onInstall={requestInstall} onAccount={switchAccount} /><main className="gj-main"><MobileTopbar onMenu={() => setMobileNav(true)} onAdd={() => openNewTrade()} /><PageHeader view={view} online={isOnline} alerts={dangerGoals.length} onNew={() => openNewTrade()} />{data?.tradeSummaryError && <div className="derived-status" role="status"><ShieldAlert size={15} /><span>{data.tradeSummaryError.message}</span><Button variant="outline" size="sm" onClick={retryJournal}>Retry summary</Button></div>}{view === "options" ? <div className="view-wrap">{optionsPanel}</div> : journalLoading ? <Loading onReconnect={reconnectSession} reconnectStatus={reconnectStatus} /> : journalError ? <QueryError error={journalError} onRetry={retryJournal} /> : <div className="view-wrap">{view === "trades" && <TradeLog stats={stats} trades={pagedTrades} allTrades={trades} pagination={tradeListQuery.data} listLoading={tradeListQuery.isLoading || tradeListQuery.isFetching} listError={tradeListQuery.error} onRetry={() => void tradeListQuery.refetch()} account={account} dangerGoals={dangerGoals} mt5LivePositions={mt5Workspace.data?.openPositions ?? []} mt5Summary={activeMt5Connection} mt5Syncing={mt5Workspace.isFetching} hasMt5Connection={(mt5Workspace.data?.connections?.length ?? 0) > 0} search={search} resultFilter={resultFilter} setSearch={setSearch} setResultFilter={setResultFilter} onPage={setTradePage} onNew={() => openNewTrade()} onDuplicate={() => openNewTrade(trades[0])} onEdit={openEdit} onDelete={async (id: number) => { if (!window.confirm("Delete this trade and remove its screenshot reference?")) return; await deleteTrade.mutateAsync({ tradeId: id }); toast.success("Trade deleted."); refresh(); }} onCash={setCashDialog} onCsv={exportCsv} onExcel={exportExcel} onPdf={exportPdf} onClear={async () => { if (!account || !window.confirm("Permanently delete every trade in the active account?")) return; await clearAll.mutateAsync({ accountId: account.id, confirmed: true }); refresh(); }} />}{view === "missed" && <MissedView rows={data?.skippedTrades ?? []} account={account} refresh={refresh} />}{view === "analysis" && <React.Suspense fallback={<Loading />}><AnalysisDashboardLazy accountId={account?.id} /></React.Suspense>}{view === "goals" && <GoalsView account={account} goals={data?.goals ?? []} trades={goalTrades} plans={data?.dailyPlans ?? []} pending={createGoal.isPending || updateGoal.isPending || deleteGoal.isPending || clearGoals.isPending} onCreate={async (draft: any) => { if (!account) return; await createGoal.mutateAsync({ accountId: account.id, ...draft }); toast.success("Goal created."); refresh(); }} onUpdate={async (goal: any) => { if (!account) return; await updateGoal.mutateAsync({ ...goal, accountId: account.id, goalId: goal.id }); toast.success("Goal updated."); refresh(); }} onDelete={async (goal: any) => { await deleteGoal.mutateAsync({ goalId: goal.id }); toast.success("Goal deleted."); refresh(); }} onClear={async () => { if (!account) return; await clearGoals.mutateAsync({ accountId: account.id, confirmed: true }); refresh(); }} />}{view === "calendar" && <CalendarView trades={trades} />}{view === "plan" && <PlanView account={account} plans={data?.dailyPlans ?? []} onSaved={refresh} />}{view === "mentor" && <MentorView trades={trades} stats={stats} account={account} user={user} />}{view === "mt5" && <Mt5LiveView account={account} accounts={ownedAccounts.length ? ownedAccounts : (data?.accounts ?? [])} onJournalNow={(position: any) => openNewTrade({ direction: position.direction, risk: String(position.riskUsd ?? ""), reward: String(position.rewardUsd ?? ""), pnl: String(position.realizedPnl ?? ""), result: position.result, mt5Ticket: position.ticket, notes: "MT5 trade auto-filled. Add your analysis details below." })} />}</div>}</main><MobileNav active={view} onView={setView} /><AccountRenameControl /><OptionListManager /><BulkPdfExporter /><TradeDialog open={tradeDialog} setOpen={setTradeDialog} form={tradeForm} setForm={setTradeForm} editing={editing} onSave={submitTrade} pending={createTrade.isPending || updateTrade.isPending} screenshot={screenshot} setScreenshot={setScreenshot} progress={uploadProgress} /><CashDialog type={cashDialog} setType={setCashDialog} amount={cashAmount} setAmount={setCashAmount} note={cashNote} setNote={setCashNote} onSave={async () => { if (!account || !cashDialog || Number(cashAmount) <= 0) return; await createCash.mutateAsync({ accountId: account.id, movementDate: Date.now(), type: cashDialog, amount: Number(cashAmount), note: cashNote }); toast.success("Cash movement saved."); setCashDialog(null); setCashAmount(""); setCashNote(""); refresh(); }} pending={createCash.isPending} /><InstallDialog open={installHelp} setOpen={setInstallHelp} /></div>;
+  const optionsPanel = (
+    <>
+      <OptionsView
+        user={user}
+        account={account}
+        accounts={ownedAccounts.length ? ownedAccounts : (data?.accounts ?? [])}
+        onAccount={switchAccount}
+        onCreate={async (name: string) => {
+          const result = await createAccount.mutateAsync({
+            name,
+            startingBalance: 0,
+          });
+          switchAccount(result.id);
+          toast.success("New trading account created.");
+          refresh();
+        }}
+        onClear={async () => {
+          if (!account || !window.confirm("Clear all active-account trades?"))
+            return;
+          await clearAll.mutateAsync({
+            accountId: account.id,
+            confirmed: true,
+          });
+          refresh();
+        }}
+      />
+      <UserAiProviderSettings />
+    </>
+  );
+  return (
+    <div className="gj-shell">
+      <>
+        {!isOnline && (
+          <div className="offline-banner">
+            <WifiOff size={15} /> You are offline — showing last synced data.
+          </div>
+        )}
+        {authMeError && (
+          <AuthProfileRecovery
+            error={authMeError}
+            onRetry={() => void authRefresh()}
+            onReconnect={() => void reconnect()}
+            onSignOut={logout}
+          />
+        )}
+      </>
+      <AppSidebar
+        account={account}
+        accounts={ownedAccounts.length ? ownedAccounts : (data?.accounts ?? [])}
+        stats={stats}
+        mt5Summary={activeMt5Connection}
+        active={view}
+        onView={(next: View) => {
+          setView(next);
+          setMobileNav(false);
+        }}
+        collapsed={collapsed}
+        onCollapse={() => setCollapsed(!collapsed)}
+        open={mobileNav}
+        online={isOnline}
+        alertCount={dangerGoals.length}
+        user={user}
+        onLogout={logout}
+        onInstall={requestInstall}
+        onAccount={switchAccount}
+      />
+      <main className="gj-main">
+        <MobileTopbar
+          onMenu={() => setMobileNav(true)}
+          onAdd={() => openNewTrade()}
+        />
+        <PageHeader
+          view={view}
+          online={isOnline}
+          alerts={dangerGoals.length}
+          onNew={() => openNewTrade()}
+        />
+        {data?.tradeSummaryError && (
+          <div className="derived-status" role="status">
+            <ShieldAlert size={15} />
+            <span>{data.tradeSummaryError.message}</span>
+            <Button variant="outline" size="sm" onClick={retryJournal}>
+              Retry summary
+            </Button>
+          </div>
+        )}
+        {view === "options" ? (
+          <div className="view-wrap">{optionsPanel}</div>
+        ) : journalLoading ? (
+          <Loading
+            onReconnect={reconnectSession}
+            reconnectStatus={reconnectStatus}
+          />
+        ) : journalError ? (
+          <QueryError error={journalError} onRetry={retryJournal} />
+        ) : (
+          <div className="view-wrap">
+            {view === "trades" && (
+              <TradeLog
+                stats={stats}
+                trades={pagedTrades}
+                allTrades={trades}
+                pagination={tradeListQuery.data}
+                listLoading={
+                  tradeListQuery.isLoading || tradeListQuery.isFetching
+                }
+                listError={tradeListQuery.error}
+                onRetry={() => void tradeListQuery.refetch()}
+                account={account}
+                dangerGoals={dangerGoals}
+                mt5LivePositions={mt5Workspace.data?.openPositions ?? []}
+                mt5Summary={activeMt5Connection}
+                mt5Syncing={mt5Workspace.isFetching}
+                hasMt5Connection={
+                  (mt5Workspace.data?.connections?.length ?? 0) > 0
+                }
+                search={search}
+                resultFilter={resultFilter}
+                setSearch={setSearch}
+                setResultFilter={setResultFilter}
+                onPage={setTradePage}
+                onNew={() => openNewTrade()}
+                onDuplicate={() => openNewTrade(trades[0])}
+                onEdit={openEdit}
+                onDelete={async (id: number) => {
+                  if (
+                    !window.confirm(
+                      "Delete this trade and remove its screenshot reference?"
+                    )
+                  )
+                    return;
+                  await deleteTrade.mutateAsync({ tradeId: id });
+                  toast.success("Trade deleted.");
+                  refresh();
+                }}
+                onCash={setCashDialog}
+                onCsv={exportCsv}
+                onExcel={exportExcel}
+                onPdf={exportPdf}
+                onClear={async () => {
+                  if (
+                    !account ||
+                    !window.confirm(
+                      "Permanently delete every trade in the active account?"
+                    )
+                  )
+                    return;
+                  await clearAll.mutateAsync({
+                    accountId: account.id,
+                    confirmed: true,
+                  });
+                  refresh();
+                }}
+              />
+            )}
+            {view === "missed" && (
+              <MissedView
+                rows={data?.skippedTrades ?? []}
+                account={account}
+                refresh={refresh}
+              />
+            )}
+            {view === "analysis" && (
+              <React.Suspense fallback={<Loading />}>
+                <AnalysisDashboardLazy accountId={account?.id} />
+              </React.Suspense>
+            )}
+            {view === "goals" && (
+              <GoalsView
+                account={account}
+                goals={data?.goals ?? []}
+                trades={goalTrades}
+                plans={data?.dailyPlans ?? []}
+                pending={
+                  createGoal.isPending ||
+                  updateGoal.isPending ||
+                  deleteGoal.isPending ||
+                  clearGoals.isPending
+                }
+                onCreate={async (draft: any) => {
+                  if (!account) return;
+                  await createGoal.mutateAsync({
+                    accountId: account.id,
+                    ...draft,
+                  });
+                  toast.success("Goal created.");
+                  refresh();
+                }}
+                onUpdate={async (goal: any) => {
+                  if (!account) return;
+                  await updateGoal.mutateAsync({
+                    ...goal,
+                    accountId: account.id,
+                    goalId: goal.id,
+                  });
+                  toast.success("Goal updated.");
+                  refresh();
+                }}
+                onDelete={async (goal: any) => {
+                  await deleteGoal.mutateAsync({ goalId: goal.id });
+                  toast.success("Goal deleted.");
+                  refresh();
+                }}
+                onClear={async () => {
+                  if (!account) return;
+                  await clearGoals.mutateAsync({
+                    accountId: account.id,
+                    confirmed: true,
+                  });
+                  refresh();
+                }}
+              />
+            )}
+            {view === "calendar" && <CalendarView trades={trades} />}
+            {view === "plan" && (
+              <PlanView
+                account={account}
+                plans={data?.dailyPlans ?? []}
+                onSaved={refresh}
+              />
+            )}
+            {view === "mentor" && (
+              <MentorView
+                trades={trades}
+                stats={stats}
+                account={account}
+                user={user}
+              />
+            )}
+            {view === "mt5" && (
+              <Mt5LiveView
+                account={account}
+                accounts={
+                  ownedAccounts.length ? ownedAccounts : (data?.accounts ?? [])
+                }
+                onJournalNow={(position: any) =>
+                  openNewTrade({
+                    direction: position.direction,
+                    risk: String(position.riskUsd ?? ""),
+                    reward: String(position.rewardUsd ?? ""),
+                    pnl: String(position.realizedPnl ?? ""),
+                    result: position.result,
+                    mt5Ticket: position.ticket,
+                    notes:
+                      "MT5 trade auto-filled. Add your analysis details below.",
+                  })
+                }
+              />
+            )}
+          </div>
+        )}
+      </main>
+      <MobileNav active={view} onView={setView} />
+      <AccountRenameControl />
+      <OptionListManager />
+      <BulkPdfExporter />
+      <TradeDialog
+        open={tradeDialog}
+        setOpen={setTradeDialog}
+        form={tradeForm}
+        setForm={setTradeForm}
+        editing={editing}
+        onSave={submitTrade}
+        pending={createTrade.isPending || updateTrade.isPending}
+        screenshot={screenshot}
+        setScreenshot={setScreenshot}
+        progress={uploadProgress}
+      />
+      <CashDialog
+        type={cashDialog}
+        setType={setCashDialog}
+        amount={cashAmount}
+        setAmount={setCashAmount}
+        note={cashNote}
+        setNote={setCashNote}
+        onSave={async () => {
+          if (!account || !cashDialog || Number(cashAmount) <= 0) return;
+          await createCash.mutateAsync({
+            accountId: account.id,
+            movementDate: Date.now(),
+            type: cashDialog,
+            amount: Number(cashAmount),
+            note: cashNote,
+          });
+          toast.success("Cash movement saved.");
+          setCashDialog(null);
+          setCashAmount("");
+          setCashNote("");
+          refresh();
+        }}
+        pending={createCash.isPending}
+      />
+      <InstallDialog open={installHelp} setOpen={setInstallHelp} />
+    </div>
+  );
 }
 
-function AppSidebar({ account, accounts, stats, mt5Summary, active, onView, collapsed, onCollapse, open, online, alertCount, user, onLogout, onInstall, onAccount }: any) {
+function AppSidebar({
+  account,
+  accounts,
+  stats,
+  mt5Summary,
+  active,
+  onView,
+  collapsed,
+  onCollapse,
+  open,
+  online,
+  alertCount,
+  user,
+  onLogout,
+  onInstall,
+  onAccount,
+}: any) {
   const broker = mt5Summary;
   const hasBrokerBalance = broker?.balance != null;
-  return <><aside className={`gj-sidebar ${open ? "is-open" : ""} ${collapsed ? "is-collapsed" : ""}`}><div className="sidebar-brand"><GoldMark /><div className="brand-copy"><strong>Gold Journal</strong><span>TRADE WITH INTENT</span></div><button className="collapse-button desktop-only" onClick={onCollapse}>{collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button></div><div className="account-switcher"><p>ACTIVE ACCOUNT</p><select value={account?.id || ""} onChange={event => onAccount(Number(event.target.value))}>{accounts.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><ChevronDown size={15} /></div><nav className="sidebar-nav">{navItems.map(item => { const Icon = item.icon; return <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => onView(item.id)}><Icon size={18} /><span>{item.label}</span>{item.id === "goals" && alertCount > 0 && <em>{alertCount}</em>}</button>; })}</nav><div className="sidebar-bottom"><div className="sync-row">{online ? <Wifi size={15} /> : <WifiOff size={15} />}<span>{online ? "Synced" : "Offline"}</span><i /></div><div className="side-balance"><span>{hasBrokerBalance ? "MT5 balance" : "Account balance"}</span><strong className="data-text">{formatMoney(hasBrokerBalance ? broker.balance : stats.balance)}</strong><small>{hasBrokerBalance ? `Equity ${formatMoney(broker.equity)}` : `${stats.winRate.toFixed(1)}% win rate`}</small></div><Button className="install-button" onClick={onInstall}><Download size={15} /><span>Install App</span></Button><button className="user-row" onClick={onLogout}><span className="avatar">{initials(user?.name)}</span><span className="user-copy"><strong>{user?.name || "Gold Trader"}</strong><small>Sign out</small></span><LogOut size={16} /></button></div></aside>{open && <button className="drawer-scrim" aria-label="Close menu" onClick={() => onView(active)} />}</>;
+  return (
+    <>
+      <aside
+        className={`gj-sidebar ${open ? "is-open" : ""} ${collapsed ? "is-collapsed" : ""}`}
+      >
+        <div className="sidebar-brand">
+          <GoldMark />
+          <div className="brand-copy">
+            <strong>Gold Journal</strong>
+            <span>TRADE WITH INTENT</span>
+          </div>
+          <button className="collapse-button desktop-only" onClick={onCollapse}>
+            {collapsed ? (
+              <PanelLeftOpen size={17} />
+            ) : (
+              <PanelLeftClose size={17} />
+            )}
+          </button>
+        </div>
+        <div className="account-switcher">
+          <p>ACTIVE ACCOUNT</p>
+          <select
+            value={account?.id || ""}
+            onChange={event => onAccount(Number(event.target.value))}
+          >
+            {accounts.map((item: any) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+          <ChevronDown size={15} />
+        </div>
+        <nav className="sidebar-nav">
+          {navItems.map(item => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                className={active === item.id ? "active" : ""}
+                onClick={() => onView(item.id)}
+              >
+                <Icon size={18} />
+                <span>{item.label}</span>
+                {item.id === "goals" && alertCount > 0 && <em>{alertCount}</em>}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="sidebar-bottom">
+          <div className="sync-row">
+            {online ? <Wifi size={15} /> : <WifiOff size={15} />}
+            <span>{online ? "Synced" : "Offline"}</span>
+            <i />
+          </div>
+          <div className="side-balance">
+            <span>{hasBrokerBalance ? "MT5 balance" : "Account balance"}</span>
+            <strong className="data-text">
+              {formatMoney(hasBrokerBalance ? broker.balance : stats.balance)}
+            </strong>
+            <small>
+              {hasBrokerBalance
+                ? `Equity ${formatMoney(broker.equity)}`
+                : `${stats.winRate.toFixed(1)}% win rate`}
+            </small>
+          </div>
+          <Button className="install-button" onClick={onInstall}>
+            <Download size={15} />
+            <span>Install App</span>
+          </Button>
+          <button className="user-row" onClick={onLogout}>
+            <span className="avatar">{initials(user?.name)}</span>
+            <span className="user-copy">
+              <strong>{user?.name || "Gold Trader"}</strong>
+              <small>Sign out</small>
+            </span>
+            <LogOut size={16} />
+          </button>
+        </div>
+      </aside>
+      {open && (
+        <button
+          className="drawer-scrim"
+          aria-label="Close menu"
+          onClick={() => onView(active)}
+        />
+      )}
+    </>
+  );
 }
-function MobileTopbar({ onMenu, onAdd }: any) { return <header className="mobile-topbar"><button onClick={onMenu}><Menu size={21} /></button><div><GoldMark size={27} /><strong>Gold Journal</strong></div><div className="mobile-top-actions"><ThemeToggle /><button className="quick-add" onClick={onAdd}><Plus size={19} /></button></div></header>; }
-function OfflineQueueIndicator() { const { session } = useAuth(); const [count, setCount] = useState(0); useEffect(() => { const update = () => setCount(queuedMutations(session?.user?.id, getSelectedAccountId()).length); const unsubscribe = subscribeSelectedAccount(update); update(); window.addEventListener(OFFLINE_QUEUE_EVENT, update); return () => { unsubscribe(); window.removeEventListener(OFFLINE_QUEUE_EVENT, update); }; }, [session?.user?.id]); return count ? <span className="sync-chip queue-sync-chip" title="These safe manual saves will replay only for this signed-in account."><RefreshCcw size={14} /> {count} queued</span> : null; }
-function RiskMetric({ label, value, detail, tone = "neutral" }: { label: string; value: string; detail: string; tone?: string }) { return <article className={`mt5-account-metric ${tone}`}><span>{label}</span><strong className="data-text">{value}</strong><small>{detail}</small></article>; }
+function MobileTopbar({ onMenu, onAdd }: any) {
+  return (
+    <header className="mobile-topbar">
+      <button onClick={onMenu}>
+        <Menu size={21} />
+      </button>
+      <div>
+        <GoldMark size={27} />
+        <strong>Gold Journal</strong>
+      </div>
+      <div className="mobile-top-actions">
+        <ThemeToggle />
+        <button className="quick-add" onClick={onAdd}>
+          <Plus size={19} />
+        </button>
+      </div>
+    </header>
+  );
+}
+function OfflineQueueIndicator() {
+  const { session } = useAuth();
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    const update = () =>
+      setCount(
+        queuedMutations(session?.user?.id, getSelectedAccountId()).length
+      );
+    const unsubscribe = subscribeSelectedAccount(update);
+    update();
+    window.addEventListener(OFFLINE_QUEUE_EVENT, update);
+    return () => {
+      unsubscribe();
+      window.removeEventListener(OFFLINE_QUEUE_EVENT, update);
+    };
+  }, [session?.user?.id]);
+  return count ? (
+    <span
+      className="sync-chip queue-sync-chip"
+      title="These safe manual saves will replay only for this signed-in account."
+    >
+      <RefreshCcw size={14} /> {count} queued
+    </span>
+  ) : null;
+}
+function RiskMetric({
+  label,
+  value,
+  detail,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone?: string;
+}) {
+  return (
+    <article className={`mt5-account-metric ${tone}`}>
+      <span>{label}</span>
+      <strong className="data-text">{value}</strong>
+      <small>{detail}</small>
+    </article>
+  );
+}
 function RiskCalculatorPanel() {
-  const accountId = getSelectedAccountId(); const [basis, setBasis] = useState<"EQUITY" | "BALANCE">("EQUITY"); const [riskPercent, setRiskPercent] = useState("1"); const [entryPrice, setEntryPrice] = useState(""); const [stopLoss, setStopLoss] = useState(""); const [jobId, setJobId] = useState<string | null>(null);
-  const validInput = Boolean(accountId && Number(riskPercent) > 0 && Number(entryPrice) > 0 && Number(stopLoss) > 0 && Number(entryPrice) !== Number(stopLoss)); const input = { accountId: accountId || 0, basis, riskPercent: Number(riskPercent), entryPrice: Number(entryPrice), stopLoss: Number(stopLoss) };
-  const calculation = trpc.mt5.risk.useQuery(input, { enabled: validInput, refetchOnWindowFocus: false, staleTime: 2_000 }); const coach = trpc.mt5.riskCoach.useMutation(); const job = trpc.aiJobs.status.useQuery({ jobId: jobId ?? "00000000-0000-0000-0000-000000000000" }, { enabled: Boolean(jobId), refetchInterval: query => { const status = (query.state.data as any)?.status; return status === "QUEUED" || status === "RUNNING" ? 1_500 : false; } });
-  const startCoach = async () => { const started = await coach.mutateAsync(input); const outcome: any = started.coach; if (outcome?.pending && outcome.jobId) setJobId(outcome.jobId); }; const result = calculation.data; const coachOutcome: any = job.data?.status === "COMPLETED" ? (job.data.result as any)?.coach : coach.data?.coach; const pending = Boolean(coachOutcome?.pending && (!job.data || job.data.status === "QUEUED" || job.data.status === "RUNNING"));
-  return <section className="panel risk-calculator-panel"><div className="mt5-section-head"><div><span className="eyebrow">LIVE MT5 RISK CALCULATOR</span><h3>Broker-sized XAUUSD position guide</h3><p>Uses this account’s latest MT5 balance, equity, free margin, tick-loss value, and volume step. It does not send or place an order.</p></div><span className="risk-calculator-badge"><CircleDollarSign size={15} /> No execution</span></div><div className="risk-calculator-grid"><Field label="Capital basis"><select value={basis} onChange={event => setBasis(event.target.value as "EQUITY" | "BALANCE")}><option value="EQUITY">Live equity</option><option value="BALANCE">Balance</option></select></Field><Field label="Risk %"><Input type="number" min="0.01" max="10" step="0.01" value={riskPercent} onChange={event => setRiskPercent(event.target.value)} /></Field><Field label="Entry price"><Input type="number" min="0" step="0.01" placeholder="e.g. 2350.00" value={entryPrice} onChange={event => setEntryPrice(event.target.value)} /></Field><Field label="Stop loss"><Input type="number" min="0" step="0.01" placeholder="e.g. 2344.00" value={stopLoss} onChange={event => setStopLoss(event.target.value)} /></Field></div>{!validInput ? <p className="muted">Select risk %, then enter a different entry and stop-loss price to calculate volume.</p> : calculation.isLoading ? <p className="muted">Checking live broker constraints…</p> : result ? <><div className="risk-result-grid"><RiskMetric label="Risk amount" value={formatMoney(result.riskAmount)} detail={String(result.riskPercent) + "% of " + result.basis.toLowerCase()} tone="gold" /><RiskMetric label="Suggested lots" value={result.lots ? result.lots.toFixed(2) : "—"} detail={result.symbol || "Broker symbol pending"} /><RiskMetric label="Actual risk" value={result.actualRisk ? formatMoney(result.actualRisk) : "—"} detail={String(result.stopTicks || 0) + " stop ticks"} tone={result.valid ? "profit" : "loss"} /><RiskMetric label="Free margin" value={formatMoney(result.freeMargin)} detail="Verify broker margin before order" /></div>{result.warnings.length > 0 && <div className="analysis-ai-empty"><ShieldAlert size={18} /><p>{result.warnings.join(" ")}</p></div>}<div className="risk-verification"><strong>Before you act</strong>{result.verification.map((step: string) => <p key={step}>{step}</p>)}</div><div className="dialog-actions"><Button variant="outline" disabled={!result.valid || coach.isPending || pending} onClick={() => void startCoach()}><Bot size={15} /> {coach.isPending ? "Starting risk review…" : pending ? "Reviewing in background…" : "AI risk coach review"}</Button></div>{pending && <div className="analysis-ai-empty"><Bot size={18} /><p>AI risk review is processing in the background. This panel will update when it completes.</p></div>}{job.data?.status === "FAILED" && <div className="analysis-ai-empty"><ShieldAlert size={18} /><p>{job.data.message}</p></div>}{coachOutcome?.available && coachOutcome.coach && <div className="analysis-ai-report"><span className="section-label">AI RISK PROCESS REVIEW · {coachOutcome.coach.readiness}</span><p>{coachOutcome.coach.summary}</p>{coachOutcome.coach.cautions.map((item: string) => <p key={item}>• {item}</p>)}{coachOutcome.coach.verificationSteps.map((item: string) => <p key={item}>Verify: {item}</p>)}</div>}{coachOutcome && !coachOutcome.available && !coachOutcome.pending && <div className="analysis-ai-empty"><ShieldAlert size={18} /><p>{coachOutcome.message}</p></div>}</> : <div className="analysis-ai-empty"><ShieldAlert size={18} /><p>{calculation.error?.message || "Live MT5 risk data is unavailable."}</p></div>}</section>;
+  const accountId = getSelectedAccountId();
+  const [basis, setBasis] = useState<"EQUITY" | "BALANCE">("EQUITY");
+  const [riskPercent, setRiskPercent] = useState("1");
+  const [entryPrice, setEntryPrice] = useState("");
+  const [stopLoss, setStopLoss] = useState("");
+  const [jobId, setJobId] = useState<string | null>(null);
+  const validInput = Boolean(
+    accountId &&
+      Number(riskPercent) > 0 &&
+      Number(entryPrice) > 0 &&
+      Number(stopLoss) > 0 &&
+      Number(entryPrice) !== Number(stopLoss)
+  );
+  const input = {
+    accountId: accountId || 0,
+    basis,
+    riskPercent: Number(riskPercent),
+    entryPrice: Number(entryPrice),
+    stopLoss: Number(stopLoss),
+  };
+  const calculation = trpc.mt5.risk.useQuery(input, {
+    enabled: validInput,
+    refetchOnWindowFocus: false,
+    staleTime: 2_000,
+  });
+  const aiConfig = trpc.analysis.config.useQuery(undefined, {
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const coach = trpc.mt5.riskCoach.useMutation();
+  const job = trpc.aiJobs.status.useQuery(
+    { jobId: jobId ?? "00000000-0000-0000-0000-000000000000" },
+    {
+      enabled: Boolean(jobId),
+      refetchInterval: query => {
+        const status = (query.state.data as any)?.status;
+        return status === "QUEUED" || status === "RUNNING" ? 1_500 : false;
+      },
+    }
+  );
+  const aiUnavailable = aiConfig.data
+    ? !aiConfig.data.vaultAvailable || !aiConfig.data.configured
+    : false;
+  const aiUnavailableCopy =
+    aiConfig.data?.vaultAvailable === false
+      ? "Secure AI key storage is unavailable on this deployment."
+      : "Add your personal OpenRouter key in Options to enable AI risk review.";
+  const startCoach = async () => {
+    if (aiUnavailable) return;
+    const started = await coach.mutateAsync(input);
+    const outcome: any = started.coach;
+    if (outcome?.pending && outcome.jobId) setJobId(outcome.jobId);
+  };
+  const result = calculation.data;
+  const coachOutcome: any =
+    job.data?.status === "COMPLETED"
+      ? (job.data.result as any)?.coach
+      : coach.data?.coach;
+  const pending = Boolean(
+    coachOutcome?.pending &&
+      (!job.data ||
+        job.data.status === "QUEUED" ||
+        job.data.status === "RUNNING")
+  );
+  return (
+    <section className="panel risk-calculator-panel">
+      <div className="mt5-section-head">
+        <div>
+          <span className="eyebrow">LIVE MT5 RISK CALCULATOR</span>
+          <h3>Broker-sized XAUUSD position guide</h3>
+          <p>
+            Uses this account’s latest MT5 balance, equity, free margin,
+            tick-loss value, and volume step. It does not send or place an
+            order.
+          </p>
+        </div>
+        <span className="risk-calculator-badge">
+          <CircleDollarSign size={15} /> No execution
+        </span>
+      </div>
+      <div className="risk-calculator-grid">
+        <Field label="Capital basis">
+          <select
+            value={basis}
+            onChange={event =>
+              setBasis(event.target.value as "EQUITY" | "BALANCE")
+            }
+          >
+            <option value="EQUITY">Live equity</option>
+            <option value="BALANCE">Balance</option>
+          </select>
+        </Field>
+        <Field label="Risk %">
+          <Input
+            type="number"
+            min="0.01"
+            max="10"
+            step="0.01"
+            value={riskPercent}
+            onChange={event => setRiskPercent(event.target.value)}
+          />
+        </Field>
+        <Field label="Entry price">
+          <Input
+            type="number"
+            min="0"
+            step="0.01"
+            placeholder="e.g. 2350.00"
+            value={entryPrice}
+            onChange={event => setEntryPrice(event.target.value)}
+          />
+        </Field>
+        <Field label="Stop loss">
+          <Input
+            type="number"
+            min="0"
+            step="0.01"
+            placeholder="e.g. 2344.00"
+            value={stopLoss}
+            onChange={event => setStopLoss(event.target.value)}
+          />
+        </Field>
+      </div>
+      {!validInput ? (
+        <p className="muted">
+          Select risk %, then enter a different entry and stop-loss price to
+          calculate volume.
+        </p>
+      ) : calculation.isLoading ? (
+        <p className="muted">Checking live broker constraints…</p>
+      ) : result ? (
+        <>
+          <div className="risk-result-grid">
+            <RiskMetric
+              label="Risk amount"
+              value={formatMoney(result.riskAmount)}
+              detail={
+                String(result.riskPercent) +
+                "% of " +
+                result.basis.toLowerCase()
+              }
+              tone="gold"
+            />
+            <RiskMetric
+              label="Suggested lots"
+              value={result.lots ? result.lots.toFixed(2) : "—"}
+              detail={result.symbol || "Broker symbol pending"}
+            />
+            <RiskMetric
+              label="Actual risk"
+              value={result.actualRisk ? formatMoney(result.actualRisk) : "—"}
+              detail={String(result.stopTicks || 0) + " stop ticks"}
+              tone={result.valid ? "profit" : "loss"}
+            />
+            <RiskMetric
+              label="Free margin"
+              value={formatMoney(result.freeMargin)}
+              detail="Verify broker margin before order"
+            />
+          </div>
+          {result.warnings.length > 0 && (
+            <div className="analysis-ai-empty">
+              <ShieldAlert size={18} />
+              <p>{result.warnings.join(" ")}</p>
+            </div>
+          )}
+          <div className="risk-verification">
+            <strong>Before you act</strong>
+            {result.verification.map((step: string) => (
+              <p key={step}>{step}</p>
+            ))}
+          </div>
+          {aiUnavailable && (
+            <div className="analysis-ai-empty">
+              <ShieldAlert size={18} />
+              <div>
+                <strong>OpenRouter is not configured.</strong>
+                <p>{aiUnavailableCopy}</p>
+                {aiConfig.data?.vaultAvailable !== false && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openJournalView("options")}
+                  >
+                    Open Options
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+          <div className="dialog-actions">
+            <Button
+              variant="outline"
+              disabled={
+                !result.valid ||
+                coach.isPending ||
+                pending ||
+                aiUnavailable ||
+                aiConfig.isLoading
+              }
+              onClick={() => void startCoach()}
+            >
+              <Bot size={15} />{" "}
+              {coach.isPending
+                ? "Starting risk review…"
+                : pending
+                  ? "Reviewing in background…"
+                  : "AI risk coach review"}
+            </Button>
+          </div>
+          {pending && (
+            <div className="analysis-ai-empty">
+              <Bot size={18} />
+              <p>
+                AI risk review is processing in the background. This panel will
+                update when it completes.
+              </p>
+            </div>
+          )}
+          {job.data?.status === "FAILED" && (
+            <div className="analysis-ai-empty">
+              <ShieldAlert size={18} />
+              <p>{job.data.message}</p>
+            </div>
+          )}
+          {coachOutcome?.available && coachOutcome.coach && (
+            <div className="analysis-ai-report">
+              <span className="section-label">
+                AI RISK PROCESS REVIEW · {coachOutcome.coach.readiness}
+              </span>
+              <p>{coachOutcome.coach.summary}</p>
+              {coachOutcome.coach.cautions.map((item: string) => (
+                <p key={item}>• {item}</p>
+              ))}
+              {coachOutcome.coach.verificationSteps.map((item: string) => (
+                <p key={item}>Verify: {item}</p>
+              ))}
+            </div>
+          )}
+          {coachOutcome && !coachOutcome.available && !coachOutcome.pending && (
+            <div className="analysis-ai-empty">
+              <ShieldAlert size={18} />
+              <p>{coachOutcome.message}</p>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="analysis-ai-empty">
+          <ShieldAlert size={18} />
+          <p>
+            {calculation.error?.message || "Live MT5 risk data is unavailable."}
+          </p>
+        </div>
+      )}
+    </section>
+  );
 }
-function PageHeader({ view, online, onNew }: any) { const title = navItems.find(item => item.id === view)?.label || "Gold Journal"; return <>{view === "risk" && <RiskCalculatorPanel />}<header className="desktop-pagebar"><div><p>{view === "trades" ? "TRADING PERFORMANCE" : "GOLD JOURNAL"}</p><h1>{title}</h1></div><div className="pagebar-actions"><span className="sync-chip"><Cloud size={14} /> {online ? "Live cloud sync" : "Offline"}</span><OfflineQueueIndicator /><ThemeToggle /><NotificationCenter triggerClassName="icon-button" /><Button onClick={onNew}><Plus size={16} /> New Trade</Button></div></header></>; }
-function MobileNav({ active, onView }: { active: View; onView: (view: View) => void }) { return <nav className="mobile-bottom-nav">{navItems.slice(0, 5).map(item => { const Icon = item.icon; return <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => onView(item.id)}><Icon size={18} /><span>{item.label.replace(" Trades", "")}</span></button>; })}</nav>; }
-export function Loading({ onReconnect = () => window.dispatchEvent(new Event("gold-journal:auth-request")), reconnectStatus = "ready" }: { onReconnect?: () => void; reconnectStatus?: "ready" | "checking" | "unavailable" }) { const [slow, setSlow] = useState(false); useEffect(() => { const timer = window.setTimeout(() => setSlow(true), 8_000); return () => window.clearTimeout(timer); }, []); return slow ? <SessionRecovery onRetry={() => window.dispatchEvent(new Event(JOURNAL_RETRY_EVENT))} onReconnect={onReconnect} reconnectStatus={reconnectStatus} /> : <div className="page-loader"><div /><span>Loading your secure journal…</span></div>; }
-export function QueryError({ error, onRetry }: { error: unknown; onRetry: () => void }) { const message = error instanceof Error ? error.message : "Your journal could not be loaded."; return <section className="panel query-error"><ShieldAlert size={25} /><div><span className="eyebrow">SYNC NEEDS ATTENTION</span><h2>We could not load this journal view.</h2><p>{message}</p><Button onClick={onRetry}><RefreshCcw size={15} /> Try again</Button></div></section>; }
+function PageHeader({ view, online, onNew }: any) {
+  const title =
+    navItems.find(item => item.id === view)?.label || "Gold Journal";
+  return (
+    <>
+      {view === "risk" && <RiskCalculatorPanel />}
+      <header className="desktop-pagebar">
+        <div>
+          <p>{view === "trades" ? "TRADING PERFORMANCE" : "GOLD JOURNAL"}</p>
+          <h1>{title}</h1>
+        </div>
+        <div className="pagebar-actions">
+          <span className="sync-chip">
+            <Cloud size={14} /> {online ? "Live cloud sync" : "Offline"}
+          </span>
+          <OfflineQueueIndicator />
+          <ThemeToggle />
+          <NotificationCenter triggerClassName="icon-button" />
+          <Button onClick={onNew}>
+            <Plus size={16} /> New Trade
+          </Button>
+        </div>
+      </header>
+    </>
+  );
+}
+function MobileNav({
+  active,
+  onView,
+}: {
+  active: View;
+  onView: (view: View) => void;
+}) {
+  return (
+    <nav className="mobile-bottom-nav">
+      {navItems.slice(0, 5).map(item => {
+        const Icon = item.icon;
+        return (
+          <button
+            key={item.id}
+            className={active === item.id ? "active" : ""}
+            onClick={() => onView(item.id)}
+          >
+            <Icon size={18} />
+            <span>{item.label.replace(" Trades", "")}</span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+export function Loading({
+  onReconnect = () =>
+    window.dispatchEvent(new Event("gold-journal:auth-request")),
+  reconnectStatus = "ready",
+}: {
+  onReconnect?: () => void;
+  reconnectStatus?: "ready" | "checking" | "unavailable";
+}) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSlow(true), 8_000);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return slow ? (
+    <SessionRecovery
+      onRetry={() => window.dispatchEvent(new Event(JOURNAL_RETRY_EVENT))}
+      onReconnect={onReconnect}
+      reconnectStatus={reconnectStatus}
+    />
+  ) : (
+    <div className="page-loader">
+      <div />
+      <span>Loading your secure journal…</span>
+    </div>
+  );
+}
+export function QueryError({
+  error,
+  onRetry,
+}: {
+  error: unknown;
+  onRetry: () => void;
+}) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : "Your journal could not be loaded.";
+  return (
+    <section className="panel query-error">
+      <ShieldAlert size={25} />
+      <div>
+        <span className="eyebrow">SYNC NEEDS ATTENTION</span>
+        <h2>We could not load this journal view.</h2>
+        <p>{message}</p>
+        <Button onClick={onRetry}>
+          <RefreshCcw size={15} /> Try again
+        </Button>
+      </div>
+    </section>
+  );
+}
 
-function MissedView({ rows, account, refresh }: any) { const createSkipped = trpc.skipped.create.useMutation(); const [open, setOpen] = useState(false); const [form, setForm] = useState({ date: dateInput(), session: getPktSession(), direction: "BUY", reason: "Fear - SL looked too big", confidence: "3", outcome: "TP Hit - Full", missed: "", notes: "" }); return <><section className="section-heading"><div><span className="eyebrow">OPPORTUNITY REVIEW</span><h2>Missed / skipped trades</h2><p>Track what you saw, why you passed, and what happened afterwards.</p></div><Button onClick={() => setOpen(true)}><Plus size={16} /> Log Skipped Trade</Button></section><div className="stats-grid compact"><StatCard label="Total skipped" value={String(rows.length)} detail="Recorded opportunities" tone="neutral" /><StatCard label="Estimated missed" value={formatMoney(rows.reduce((sum: number, row: any) => sum + toNumber(row.estimatedMissed), 0))} detail="Potential, not realized" /><StatCard label="Top reason" value={rows[0]?.skipReason || "—"} detail="Based on entries" tone="neutral" /></div><section className="panel">{rows.length ? <div className="trade-table-wrap"><table className="trade-table"><thead><tr><th>Date</th><th>Session</th><th>Direction</th><th>Reason</th><th>Confidence</th><th>Outcome</th><th>Est. missed</th></tr></thead><tbody>{rows.map((row: any) => <tr key={row.id}><td className="data-text">{formatDate(row.tradeDate)}</td><td>{row.session}</td><td>{row.direction}</td><td>{row.skipReason}</td><td>{row.confidence}/5</td><td>{row.outcome}</td><td className="positive data-text">{formatMoney(row.estimatedMissed)}</td></tr>)}</tbody></table></div> : <EmptyState title="No skipped opportunities yet." copy="Logging a skipped setup turns a moment of uncertainty into reviewable evidence." />}</section><Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>Log skipped trade</DialogTitle><DialogDescription>Capture the missed opportunity without diluting the main trade log.</DialogDescription></DialogHeader><div className="stacked-fields"><Field label="Date"><Input type="date" value={form.date} onChange={event => setForm({ ...form, date: event.target.value })} /></Field><Field label="Session"><select value={form.session} onChange={event => setForm({ ...form, session: event.target.value })}>{sessions.map(item => <option key={item}>{item}</option>)}</select></Field><Field label="Skip reason"><Input value={form.reason} onChange={event => setForm({ ...form, reason: event.target.value })} /></Field><Field label="Outcome"><Input value={form.outcome} onChange={event => setForm({ ...form, outcome: event.target.value })} /></Field><Field label="Estimated $ missed"><Input type="number" value={form.missed} onChange={event => setForm({ ...form, missed: event.target.value })} /></Field><Field label="Notes"><Textarea value={form.notes} onChange={event => setForm({ ...form, notes: event.target.value })} /></Field></div><div className="dialog-actions"><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={async () => { if (!account) return; await createSkipped.mutateAsync({ accountId: account.id, tradeDate: new Date(`${form.date}T12:00:00`).getTime(), session: form.session, level: "", timeframe: "", direction: form.direction as "BUY" | "SELL", skipReason: form.reason, confidence: Number(form.confidence), outcome: form.outcome, estimatedMissed: Number(form.missed || 0), notes: form.notes }); toast.success("Skipped trade logged."); setOpen(false); refresh(); }}>Save skipped trade</Button></div></DialogContent></Dialog></>; }
-
-
-
-
+function MissedView({ rows, account, refresh }: any) {
+  const createSkipped = trpc.skipped.create.useMutation();
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({
+    date: dateInput(),
+    session: getPktSession(),
+    direction: "BUY",
+    reason: "Fear - SL looked too big",
+    confidence: "3",
+    outcome: "TP Hit - Full",
+    missed: "",
+    notes: "",
+  });
+  return (
+    <>
+      <section className="section-heading">
+        <div>
+          <span className="eyebrow">OPPORTUNITY REVIEW</span>
+          <h2>Missed / skipped trades</h2>
+          <p>
+            Track what you saw, why you passed, and what happened afterwards.
+          </p>
+        </div>
+        <Button onClick={() => setOpen(true)}>
+          <Plus size={16} /> Log Skipped Trade
+        </Button>
+      </section>
+      <div className="stats-grid compact">
+        <StatCard
+          label="Total skipped"
+          value={String(rows.length)}
+          detail="Recorded opportunities"
+          tone="neutral"
+        />
+        <StatCard
+          label="Estimated missed"
+          value={formatMoney(
+            rows.reduce(
+              (sum: number, row: any) => sum + toNumber(row.estimatedMissed),
+              0
+            )
+          )}
+          detail="Potential, not realized"
+        />
+        <StatCard
+          label="Top reason"
+          value={rows[0]?.skipReason || "—"}
+          detail="Based on entries"
+          tone="neutral"
+        />
+      </div>
+      <section className="panel">
+        {rows.length ? (
+          <div className="trade-table-wrap">
+            <table className="trade-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Session</th>
+                  <th>Direction</th>
+                  <th>Reason</th>
+                  <th>Confidence</th>
+                  <th>Outcome</th>
+                  <th>Est. missed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row: any) => (
+                  <tr key={row.id}>
+                    <td className="data-text">{formatDate(row.tradeDate)}</td>
+                    <td>{row.session}</td>
+                    <td>{row.direction}</td>
+                    <td>{row.skipReason}</td>
+                    <td>{row.confidence}/5</td>
+                    <td>{row.outcome}</td>
+                    <td className="positive data-text">
+                      {formatMoney(row.estimatedMissed)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState
+            title="No skipped opportunities yet."
+            copy="Logging a skipped setup turns a moment of uncertainty into reviewable evidence."
+          />
+        )}
+      </section>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Log skipped trade</DialogTitle>
+            <DialogDescription>
+              Capture the missed opportunity without diluting the main trade
+              log.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="stacked-fields">
+            <Field label="Date">
+              <Input
+                type="date"
+                value={form.date}
+                onChange={event =>
+                  setForm({ ...form, date: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Session">
+              <select
+                value={form.session}
+                onChange={event =>
+                  setForm({ ...form, session: event.target.value })
+                }
+              >
+                {sessions.map(item => (
+                  <option key={item}>{item}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Skip reason">
+              <Input
+                value={form.reason}
+                onChange={event =>
+                  setForm({ ...form, reason: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Outcome">
+              <Input
+                value={form.outcome}
+                onChange={event =>
+                  setForm({ ...form, outcome: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Estimated $ missed">
+              <Input
+                type="number"
+                value={form.missed}
+                onChange={event =>
+                  setForm({ ...form, missed: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Notes">
+              <Textarea
+                value={form.notes}
+                onChange={event =>
+                  setForm({ ...form, notes: event.target.value })
+                }
+              />
+            </Field>
+          </div>
+          <div className="dialog-actions">
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!account) return;
+                await createSkipped.mutateAsync({
+                  accountId: account.id,
+                  tradeDate: new Date(`${form.date}T12:00:00`).getTime(),
+                  session: form.session,
+                  level: "",
+                  timeframe: "",
+                  direction: form.direction as "BUY" | "SELL",
+                  skipReason: form.reason,
+                  confidence: Number(form.confidence),
+                  outcome: form.outcome,
+                  estimatedMissed: Number(form.missed || 0),
+                  notes: form.notes,
+                });
+                toast.success("Skipped trade logged.");
+                setOpen(false);
+                refresh();
+              }}
+            >
+              Save skipped trade
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
 
 function MentorView({ account }: any) {
-  const aiConfig = trpc.analysis.config.useQuery(undefined, { staleTime: 60_000, refetchOnWindowFocus: false }); const analysis = trpc.analysis.ai.useMutation(); const [jobId, setJobId] = useState<string | null>(null);
-  const job = trpc.aiJobs.status.useQuery({ jobId: jobId ?? "00000000-0000-0000-0000-000000000000" }, { enabled: Boolean(jobId), refetchInterval: query => { const status = (query.state.data as any)?.status; return status === "QUEUED" || status === "RUNNING" ? 1_500 : false; } });
-  const run = async () => { if (!account?.id) return; const started = await analysis.mutateAsync({ accountId: account.id, filters: {} }); if (started.ai.pending && started.ai.jobId) setJobId(started.ai.jobId); };
-  const ai: any = job.data?.status === "COMPLETED" ? (job.data.result as any)?.ai : analysis.data?.ai; const report = ai?.report; const pending = Boolean(ai?.pending && (!job.data || job.data.status === "QUEUED" || job.data.status === "RUNNING"));
-  return <><section className="section-heading"><div><span className="eyebrow">BEHAVIORAL INTELLIGENCE</span><h2>AI Edge Analyst</h2><p>Interpretation runs from compact deterministic aggregates. No key, JWT, screenshot, or raw journal note is sent from this browser.</p></div></section><section className="panel mentor-run"><div className="mentor-icon"><Bot size={30} /></div><h3>Evidence-bound trading report</h3><p>AI is optional and never gates deterministic Analysis. It cannot issue BUY/SELL signals or invent journal statistics.</p>{aiConfig.data && !aiConfig.data.configured && <div className="analysis-ai-empty"><Bot size={20} /><div><strong>OpenRouter is not configured.</strong><p>Add your personal OpenRouter key in Options to enable secure AI analysis.</p></div></div>}{aiConfig.error && <div className="analysis-ai-empty"><ShieldAlert size={20} /><p>{aiConfig.error.message}</p></div>}<Button size="lg" disabled={analysis.isPending || pending || !account?.id || aiConfig.isLoading || aiConfig.data?.configured === false} onClick={() => void run()}>{analysis.isPending ? "Starting secure AI review…" : pending ? "Analyzing in background…" : "Analyze my journal"}</Button>{pending && <div className="analysis-ai-empty"><Bot size={20} /><p>AI review is running securely in the background. This screen will update when it completes.</p></div>}{job.data?.status === "FAILED" && <div className="analysis-ai-empty"><ShieldAlert size={20} /><p>{job.data.message}</p></div>}{ai && !ai.available && !ai.pending && <div className="analysis-ai-empty"><ShieldAlert size={20} /><p>{ai.message ?? "Add your key in Options and retry."}</p></div>}{analysis.error && <div className="analysis-ai-empty"><ShieldAlert size={20} /><p>{analysis.error.message}</p></div>}{report && <div className="analysis-ai-report"><div className="analysis-ai-summary"><span className="section-label">EVIDENCE-BOUND SUMMARY</span><p>{report.executiveSummary}</p></div><div className="analysis-ai-columns"><section><span className="section-label">STRONGEST EDGES</span>{report.strongestEdges.map((item: any) => <article className="ai-evidence-card" key={item.label}><strong>{item.label}</strong><p>{item.claim}</p><small>{item.sample} trades · {item.confidence} confidence · {item.evidence}</small></article>)}</section><section><span className="section-label">NEXT HYPOTHESES</span>{report.edgeHypotheses.map((item: any) => <article className="ai-evidence-card" key={item.title}><strong>{item.title}</strong><p>{item.statement}</p><small>{item.confidence} confidence · Next test: {item.nextTest}</small></article>)}</section></div></div>}</section></>;
+  const aiConfig = trpc.analysis.config.useQuery(undefined, {
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const analysis = trpc.analysis.ai.useMutation();
+  const [jobId, setJobId] = useState<string | null>(null);
+  const job = trpc.aiJobs.status.useQuery(
+    { jobId: jobId ?? "00000000-0000-0000-0000-000000000000" },
+    {
+      enabled: Boolean(jobId),
+      refetchInterval: query => {
+        const status = (query.state.data as any)?.status;
+        return status === "QUEUED" || status === "RUNNING" ? 1_500 : false;
+      },
+    }
+  );
+  const run = async () => {
+    if (!account?.id) return;
+    const started = await analysis.mutateAsync({
+      accountId: account.id,
+      filters: {},
+    });
+    if (started.ai.pending && started.ai.jobId) setJobId(started.ai.jobId);
+  };
+  const ai: any =
+    job.data?.status === "COMPLETED"
+      ? (job.data.result as any)?.ai
+      : analysis.data?.ai;
+  const report = ai?.report;
+  const pending = Boolean(
+    ai?.pending &&
+      (!job.data ||
+        job.data.status === "QUEUED" ||
+        job.data.status === "RUNNING")
+  );
+  return (
+    <>
+      <section className="section-heading">
+        <div>
+          <span className="eyebrow">BEHAVIORAL INTELLIGENCE</span>
+          <h2>AI Edge Analyst</h2>
+          <p>
+            Interpretation runs from compact deterministic aggregates. No key,
+            JWT, screenshot, or raw journal note is sent from this browser.
+          </p>
+        </div>
+      </section>
+      <section className="panel mentor-run">
+        <div className="mentor-icon">
+          <Bot size={30} />
+        </div>
+        <h3>Evidence-bound trading report</h3>
+        <p>
+          AI is optional and never gates deterministic Analysis. It cannot issue
+          BUY/SELL signals or invent journal statistics.
+        </p>
+        {aiConfig.data && !aiConfig.data.configured && (
+          <div className="analysis-ai-empty">
+            <Bot size={20} />
+            <div>
+              <strong>OpenRouter is not configured.</strong>
+              <p>
+                Add your personal OpenRouter key in Options to enable secure AI
+                analysis.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => openJournalView("options")}
+              >
+                Open Options
+              </Button>
+            </div>
+          </div>
+        )}
+        {aiConfig.error && (
+          <div className="analysis-ai-empty">
+            <ShieldAlert size={20} />
+            <p>{aiConfig.error.message}</p>
+          </div>
+        )}
+        <Button
+          size="lg"
+          disabled={
+            analysis.isPending ||
+            pending ||
+            !account?.id ||
+            aiConfig.isLoading ||
+            aiConfig.data?.configured === false
+          }
+          onClick={() => void run()}
+        >
+          {analysis.isPending
+            ? "Starting secure AI review…"
+            : pending
+              ? "Analyzing in background…"
+              : "Analyze my journal"}
+        </Button>
+        {pending && (
+          <div className="analysis-ai-empty">
+            <Bot size={20} />
+            <p>
+              AI review is running securely in the background. This screen will
+              update when it completes.
+            </p>
+          </div>
+        )}
+        {job.data?.status === "FAILED" && (
+          <div className="analysis-ai-empty">
+            <ShieldAlert size={20} />
+            <p>{job.data.message}</p>
+          </div>
+        )}
+        {ai && !ai.available && !ai.pending && (
+          <div className="analysis-ai-empty">
+            <ShieldAlert size={20} />
+            <p>{ai.message ?? "Add your key in Options and retry."}</p>
+          </div>
+        )}
+        {analysis.error && (
+          <div className="analysis-ai-empty">
+            <ShieldAlert size={20} />
+            <p>{analysis.error.message}</p>
+          </div>
+        )}
+        {report && (
+          <div className="analysis-ai-report">
+            <div className="analysis-ai-summary">
+              <span className="section-label">EVIDENCE-BOUND SUMMARY</span>
+              <p>{report.executiveSummary}</p>
+            </div>
+            <div className="analysis-ai-columns">
+              <section>
+                <span className="section-label">STRONGEST EDGES</span>
+                {report.strongestEdges.map((item: any) => (
+                  <article className="ai-evidence-card" key={item.label}>
+                    <strong>{item.label}</strong>
+                    <p>{item.claim}</p>
+                    <small>
+                      {item.sample} trades · {item.confidence} confidence ·{" "}
+                      {item.evidence}
+                    </small>
+                  </article>
+                ))}
+              </section>
+              <section>
+                <span className="section-label">NEXT HYPOTHESES</span>
+                {report.edgeHypotheses.map((item: any) => (
+                  <article className="ai-evidence-card" key={item.title}>
+                    <strong>{item.title}</strong>
+                    <p>{item.statement}</p>
+                    <small>
+                      {item.confidence} confidence · Next test: {item.nextTest}
+                    </small>
+                  </article>
+                ))}
+              </section>
+            </div>
+          </div>
+        )}
+      </section>
+    </>
+  );
 }
 
-export function OptionsView({ user, account, accounts, onAccount, onCreate, onClear }: any) {
+export function OptionsView({
+  user,
+  account,
+  accounts,
+  onAccount,
+  onCreate,
+  onClear,
+}: any) {
   const [name, setName] = useState("");
   const [category, setCategory] = useState("Trading rule");
   const [optionValue, setOptionValue] = useState("");
@@ -184,15 +2163,902 @@ export function OptionsView({ user, account, accounts, onAccount, onCreate, onCl
   const addOption = trpc.optionLists.add.useMutation();
   const toggleOption = trpc.optionLists.setActive.useMutation();
   const utils = trpc.useUtils();
-  const optionGroups = useMemo(() => (optionQuery.data ?? []).reduce((result: Record<string, any[]>, item: any) => { (result[item.category] ||= []).push(item); return result; }, {}), [optionQuery.data]);
-  const createOption = async () => { const trimmed = optionValue.trim(); if (!trimmed) return; await addOption.mutateAsync({ category, value: trimmed }); setOptionValue(""); await utils.optionLists.list.invalidate(); toast.success("Journal option saved."); };
-  return <><section className="section-heading"><div><span className="eyebrow">CONTROL CENTER</span><h2>Options</h2><p>Manage accounts, reusable journal lists, and security-sensitive actions.</p></div></section><div className="options-grid"><section className="panel profile-panel"><span className="section-label">PROFILE</span><div className="profile-row"><span className="avatar large">{initials(user?.name)}</span><div><strong>{user?.name || "Gold Trader"}</strong><p>{user?.email || "Authenticated account"}</p></div></div><div className="profile-meta"><span>Provider <b>Secure cloud sign-in</b></span><span>Data scope <b>Private to this account</b></span></div></section><section className="panel account-panel"><span className="section-label">TRADING ACCOUNTS</span><div className="account-list">{accounts.map((item: any) => <button key={item.id} className={item.id === account?.id ? "current" : ""} onClick={() => onAccount(item.id)}><span><Wallet size={15} /> {item.name}</span>{item.id === account?.id && <Check size={15} />}</button>)}</div><div className="inline-form"><Input value={name} onChange={event => setName(event.target.value)} placeholder="New account name" /><Button disabled={!name.trim()} onClick={() => { onCreate(name.trim()); setName(""); }}><Plus size={15} /> Add</Button></div></section><section className="panel list-manager"><span className="section-label">RULES & DROPDOWNS</span><p>Create custom rules and values for future trade, plan, and review entries. Disabling an item keeps existing records intact.</p><div className="inline-form option-page-create"><select value={category} onChange={event => setCategory(event.target.value)}>{["Trading rule", "Session", "Level", "Timeframe", "Setup quality", "Execution type", "Market condition", "Mistake", "Confirmation"].map(item => <option key={item}>{item}</option>)}</select><Input value={optionValue} onChange={event => setOptionValue(event.target.value)} placeholder="New rule or dropdown value" /><Button disabled={addOption.isPending || !optionValue.trim()} onClick={createOption}><Plus size={15} /> Add</Button></div><div className="option-page-groups">{Object.keys(optionGroups).length ? Object.entries(optionGroups).map(([group, items]) => <div key={group}><strong>{group}</strong><div className="option-pills">{(items as any[]).map(item => <label className={item.active ? "active" : "inactive"} key={item.id}><input type="checkbox" checked={item.active} disabled={toggleOption.isPending} onChange={async event => { await toggleOption.mutateAsync({ optionId: item.id, active: event.target.checked }); await utils.optionLists.list.invalidate(); }} />{item.value}</label>)}</div></div>) : <p className="muted">No custom journal values yet. Add one above to make it available for future entries.</p>}</div></section><section className="panel danger-zone"><span className="section-label">DANGER ZONE</span><h3>Clear active account trades</h3><p>This permanently removes the current account's trade log. Cash movements are retained separately.</p><Button variant="outline" className="danger-button" onClick={() => setConfirmClear(true)}><Trash2 size={15} /> Clear all trades</Button></section></div><Dialog open={confirmClear} onOpenChange={setConfirmClear}><DialogContent><DialogHeader><DialogTitle>Clear active account trades?</DialogTitle><DialogDescription>This permanently removes every trade in {account?.name || "the active account"}. Cash movements remain. This cannot be undone.</DialogDescription></DialogHeader><div className="dialog-actions"><Button variant="outline" onClick={() => setConfirmClear(false)}>Cancel</Button><Button className="danger-button" onClick={() => { onClear(); setConfirmClear(false); }}>Confirm clear</Button></div></DialogContent></Dialog></>; }
+  const optionGroups = useMemo(
+    () =>
+      (optionQuery.data ?? []).reduce(
+        (result: Record<string, any[]>, item: any) => {
+          (result[item.category] ||= []).push(item);
+          return result;
+        },
+        {}
+      ),
+    [optionQuery.data]
+  );
+  const createOption = async () => {
+    const trimmed = optionValue.trim();
+    if (!trimmed) return;
+    await addOption.mutateAsync({ category, value: trimmed });
+    setOptionValue("");
+    await utils.optionLists.list.invalidate();
+    toast.success("Journal option saved.");
+  };
+  return (
+    <>
+      <section className="section-heading">
+        <div>
+          <span className="eyebrow">CONTROL CENTER</span>
+          <h2>Options</h2>
+          <p>
+            Manage accounts, reusable journal lists, and security-sensitive
+            actions.
+          </p>
+        </div>
+      </section>
+      <div className="options-grid">
+        <section className="panel profile-panel">
+          <span className="section-label">PROFILE</span>
+          <div className="profile-row">
+            <span className="avatar large">{initials(user?.name)}</span>
+            <div>
+              <strong>{user?.name || "Gold Trader"}</strong>
+              <p>{user?.email || "Authenticated account"}</p>
+            </div>
+          </div>
+          <div className="profile-meta">
+            <span>
+              Provider <b>Secure cloud sign-in</b>
+            </span>
+            <span>
+              Data scope <b>Private to this account</b>
+            </span>
+          </div>
+        </section>
+        <section className="panel account-panel">
+          <span className="section-label">TRADING ACCOUNTS</span>
+          <div className="account-list">
+            {accounts.map((item: any) => (
+              <button
+                key={item.id}
+                className={item.id === account?.id ? "current" : ""}
+                onClick={() => onAccount(item.id)}
+              >
+                <span>
+                  <Wallet size={15} /> {item.name}
+                </span>
+                {item.id === account?.id && <Check size={15} />}
+              </button>
+            ))}
+          </div>
+          <div className="inline-form">
+            <Input
+              value={name}
+              onChange={event => setName(event.target.value)}
+              placeholder="New account name"
+            />
+            <Button
+              disabled={!name.trim()}
+              onClick={() => {
+                onCreate(name.trim());
+                setName("");
+              }}
+            >
+              <Plus size={15} /> Add
+            </Button>
+          </div>
+        </section>
+        <section className="panel list-manager">
+          <span className="section-label">RULES & DROPDOWNS</span>
+          <p>
+            Create custom rules and values for future trade, plan, and review
+            entries. Disabling an item keeps existing records intact.
+          </p>
+          <div className="inline-form option-page-create">
+            <select
+              value={category}
+              onChange={event => setCategory(event.target.value)}
+            >
+              {[
+                "Trading rule",
+                "Session",
+                "Level",
+                "Timeframe",
+                "Setup quality",
+                "Execution type",
+                "Market condition",
+                "Mistake",
+                "Confirmation",
+              ].map(item => (
+                <option key={item}>{item}</option>
+              ))}
+            </select>
+            <Input
+              value={optionValue}
+              onChange={event => setOptionValue(event.target.value)}
+              placeholder="New rule or dropdown value"
+            />
+            <Button
+              disabled={addOption.isPending || !optionValue.trim()}
+              onClick={createOption}
+            >
+              <Plus size={15} /> Add
+            </Button>
+          </div>
+          <div className="option-page-groups">
+            {Object.keys(optionGroups).length ? (
+              Object.entries(optionGroups).map(([group, items]) => (
+                <div key={group}>
+                  <strong>{group}</strong>
+                  <div className="option-pills">
+                    {(items as any[]).map(item => (
+                      <label
+                        className={item.active ? "active" : "inactive"}
+                        key={item.id}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={item.active}
+                          disabled={toggleOption.isPending}
+                          onChange={async event => {
+                            await toggleOption.mutateAsync({
+                              optionId: item.id,
+                              active: event.target.checked,
+                            });
+                            await utils.optionLists.list.invalidate();
+                          }}
+                        />
+                        {item.value}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="muted">
+                No custom journal values yet. Add one above to make it available
+                for future entries.
+              </p>
+            )}
+          </div>
+        </section>
+        <section className="panel danger-zone">
+          <span className="section-label">DANGER ZONE</span>
+          <h3>Clear active account trades</h3>
+          <p>
+            This permanently removes the current account's trade log. Cash
+            movements are retained separately.
+          </p>
+          <Button
+            variant="outline"
+            className="danger-button"
+            onClick={() => setConfirmClear(true)}
+          >
+            <Trash2 size={15} /> Clear all trades
+          </Button>
+        </section>
+      </div>
+      <Dialog open={confirmClear} onOpenChange={setConfirmClear}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Clear active account trades?</DialogTitle>
+            <DialogDescription>
+              This permanently removes every trade in{" "}
+              {account?.name || "the active account"}. Cash movements remain.
+              This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="dialog-actions">
+            <Button variant="outline" onClick={() => setConfirmClear(false)}>
+              Cancel
+            </Button>
+            <Button
+              className="danger-button"
+              onClick={() => {
+                onClear();
+                setConfirmClear(false);
+              }}
+            >
+              Confirm clear
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
 
-function TradeDialog({ open, setOpen, form, setForm, editing, onSave, pending, screenshot, setScreenshot, progress }: any) { const fileRef = useRef<HTMLInputElement>(null); return <Dialog open={open} onOpenChange={setOpen}><DialogContent className="trade-dialog"><DialogHeader><DialogTitle>{editing ? "Edit trade" : "New trade"}</DialogTitle><DialogDescription>{editing ? "Update the journal detail and retain the original session." : "Session is detected from Pakistan Standard Time and can be overridden."}</DialogDescription></DialogHeader><div className="trade-form"><FormSection title="Trade details"><Field label="Date"><Input type="date" value={form.tradeDate} max={dateInput()} onChange={event => setForm({ ...form, tradeDate: event.target.value })} /></Field><Field label="Session"><select value={form.session} onChange={event => setForm({ ...form, session: event.target.value })}>{sessions.map(item => <option key={item}>{item}</option>)}</select></Field><Field label="Direction"><select value={form.direction} onChange={event => setForm({ ...form, direction: event.target.value })}><option>BUY</option><option>SELL</option></select></Field><Field label="Result"><select value={form.result} onChange={event => setForm({ ...form, result: event.target.value })}>{results.map(item => <option key={item} value={item}>{item.replace("_", " ")}</option>)}</select></Field></FormSection><FormSection title="Strategy"><Field label="Level"><select value={form.level} onChange={event => setForm({ ...form, level: event.target.value })}><option value="">Select level</option>{levels.map(item => <option key={item}>{item}</option>)}</select></Field><Field label="Timeframe"><select value={form.timeframe} onChange={event => setForm({ ...form, timeframe: event.target.value })}>{["1m", "5m", "15m", "H1", "4H"].map(item => <option key={item}>{item}</option>)}</select></Field><Field label="Setup quality"><select value={form.setupQuality} onChange={event => setForm({ ...form, setupQuality: event.target.value })}>{["A+", "A", "B"].map(item => <option key={item}>{item}</option>)}</select></Field><Field label="Confirmation"><Input value={form.confirmationType} placeholder="BOS, CHoCH…" onChange={event => setForm({ ...form, confirmationType: event.target.value })} /></Field></FormSection><FormSection title="Execution"><Field label="Execution type"><select value={form.executionType} onChange={event => setForm({ ...form, executionType: event.target.value })}>{executionTypes.map(item => <option key={item}>{item}</option>)}</select></Field><Field label="Market condition"><Input value={form.marketCondition} placeholder="Bullish, ranging…" onChange={event => setForm({ ...form, marketCondition: event.target.value })} /></Field><Field label="Patience 1–5"><Input type="number" min="1" max="5" value={form.patienceScore} onChange={event => setForm({ ...form, patienceScore: event.target.value })} /></Field></FormSection><FormSection title="Risk"><Field label="Risk $"><Input type="number" min="0" step="0.01" value={form.risk} onChange={event => setForm({ ...form, risk: event.target.value })} /></Field><Field label="Reward $"><Input type="number" min="0" step="0.01" value={form.reward} onChange={event => setForm({ ...form, reward: event.target.value })} /></Field><Field label="P&L $"><Input type="number" step="0.01" value={form.pnl} onChange={event => setForm({ ...form, pnl: event.target.value })} /></Field><div className="rr-live"><span>LIVE R:R</span><strong className="data-text">{formatRr(form.risk, form.reward)}</strong></div></FormSection><FormSection title="Screenshot"><div className="upload-box" onClick={() => fileRef.current?.click()}><ImagePlus size={20} /><div><strong>{screenshot ? screenshot.name : "Click to upload a screenshot"}</strong><span>JPG, PNG or WEBP · 5MB maximum</span></div><input ref={fileRef} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { const file = event.target.files?.[0]; if (!file) return; if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { toast.error("Use a JPG, PNG, or WEBP screenshot."); return; } if (file.size > 5 * 1024 * 1024) { toast.error("Screenshot must be 5MB or smaller."); return; } setScreenshot(file); }} /></div>{progress > 0 && <div className="upload-progress"><i style={{ width: `${progress}%` }} /></div>}</FormSection><FormSection title="Emotions"><Field label="Before trade"><Textarea value={form.emotionBefore} placeholder="Calm, focused, dar raha tha…" onChange={event => setForm({ ...form, emotionBefore: event.target.value })} /></Field><Field label="During trade"><Textarea value={form.emotionDuring} placeholder="What were you thinking?" onChange={event => setForm({ ...form, emotionDuring: event.target.value })} /></Field><Field label="After trade"><Textarea value={form.emotionAfter} placeholder="Satisfied, gussa aya, should have held…" onChange={event => setForm({ ...form, emotionAfter: event.target.value })} /></Field></FormSection><FormSection title="Notes"><Textarea value={form.notes} rows={4} placeholder="English + Roman Urdu supported…" onChange={event => setForm({ ...form, notes: event.target.value })} /></FormSection></div><div className="dialog-actions"><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button disabled={pending} onClick={onSave}>{pending ? "Saving…" : editing ? "Save changes" : "Save trade"}</Button></div></DialogContent></Dialog>; }
-function CashDialog({ type, setType, amount, setAmount, note, setNote, onSave, pending }: any) { const save = () => { if (!navigator.onLine) { window.dispatchEvent(new CustomEvent(OFFLINE_CASH_REQUEST_EVENT, { detail: { type, amount: Number(amount), note } })); return; } onSave(); }; return <Dialog open={Boolean(type)} onOpenChange={open => !open && setType(null)}><DialogContent><DialogHeader><DialogTitle>{type === "DEPOSIT" ? "Deposit funds" : "Withdraw funds"}</DialogTitle><DialogDescription>The cash movement recalculates balance immediately.</DialogDescription></DialogHeader><div className="stacked-fields"><Field label="Amount"><Input autoFocus type="number" min="0.01" value={amount} onChange={event => setAmount(event.target.value)} /></Field><Field label="Note"><Textarea value={note} onChange={event => setNote(event.target.value)} /></Field></div><div className="dialog-actions"><Button variant="outline" onClick={() => setType(null)}>Cancel</Button><Button disabled={pending || Number(amount) <= 0} onClick={save}>{pending ? "Saving…" : "Save movement"}</Button></div></DialogContent></Dialog>; }
-function GoalDialog({ open, setOpen, draft, setDraft, onSave }: any) { return <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>Add custom goal</DialogTitle><DialogDescription>Create a trackable goal for the active account.</DialogDescription></DialogHeader><div className="stacked-fields"><Field label="Name"><Input value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} /></Field><Field label="Description"><Input value={draft.description} onChange={event => setDraft({ ...draft, description: event.target.value })} /></Field><Field label="Period"><select value={draft.period} onChange={event => setDraft({ ...draft, period: event.target.value })}><option value="DAILY">Daily</option><option value="WEEKLY">Weekly</option><option value="MONTHLY">Monthly</option></select></Field><Field label="Metric"><select value={draft.metric} onChange={event => setDraft({ ...draft, metric: event.target.value })}><option value="trade_count">Trade count</option><option value="net_pnl">Net P&L</option><option value="win_rate">Win rate</option><option value="avg_rr">Average R:R</option></select></Field><Field label="Direction"><select value={draft.comparison} onChange={event => setDraft({ ...draft, comparison: event.target.value })}><option value="GTE">At least</option><option value="LTE">At most</option></select></Field><Field label="Target"><Input type="number" min="0" value={draft.target} onChange={event => setDraft({ ...draft, target: event.target.value })} /></Field></div><div className="dialog-actions"><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={onSave}>Add goal</Button></div></DialogContent></Dialog>; }
-function InstallDialog({ open, setOpen }: any) { return <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>Install Gold Journal</DialogTitle><DialogDescription>Add the journal to your device for a focused, standalone experience.</DialogDescription></DialogHeader><div className="install-instructions"><p><b>Android / Desktop:</b> use Install App in the browser menu or address bar.</p><p><b>iPhone / iPad:</b> tap Share, then choose <b>Add to Home Screen</b>.</p></div><Button onClick={() => setOpen(false)}>Done</Button></DialogContent></Dialog>; }
-function SplashScreen() { return <div className="splash-screen" role="status" aria-label="Loading Gold Journal"><div className="splash-content"><GoldMark size={82} /><strong>GOLD JOURNAL</strong><span>PRIVATE TRADING INTELLIGENCE</span><div className="loading-line"><i /></div></div></div>; }
-function AuthRecovery({ error, onRetry, onReconnect }: { error: Error | null; onRetry: () => void; onReconnect: () => void }) { return <div className="login-screen"><section className="login-card query-error" role="alert"><ShieldAlert size={28} /><span className="eyebrow">SECURE SESSION CHECK FAILED</span><h1>Your sign-in could not be verified.</h1><p>{error?.message || "Supabase Auth is temporarily unavailable."}</p><div className="dialog-actions"><Button onClick={onRetry}><RefreshCcw size={15} /> Retry</Button><Button variant="outline" onClick={onReconnect}>Reconnect session</Button></div><small>Your private journal remains unchanged.</small></section></div>; }
-export function AuthProfileRecovery({ error, onRetry, onReconnect, onSignOut }: { error: { message?: string }; onRetry: () => void; onReconnect: () => void; onSignOut: () => void }) { return <section className="auth-profile-recovery" role="alert"><ShieldAlert size={17} /><div><strong>Secure profile sync is temporarily unavailable.</strong><span>{error.message || "Your sign-in is still present, but the private profile could not be verified."}</span></div><Button size="sm" onClick={onRetry}><RefreshCcw size={14} /> Retry</Button><Button size="sm" variant="outline" onClick={onReconnect}>Reconnect session</Button><Button size="sm" variant="outline" onClick={onSignOut}>Sign out</Button></section>; }
-export function LoginScreen() { const [mode, setMode] = useState<"signin" | "signup">("signin"); const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [busy, setBusy] = useState(false); const [message, setMessage] = useState(""); const submit = async (event: React.FormEvent) => { event.preventDefault(); if (!supabase) { setMessage("Supabase Auth is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."); return; } if (!email.trim() || password.length < 6) { setMessage("Enter a valid email and a password of at least 6 characters."); return; } setBusy(true); setMessage(""); try { const result = mode === "signin" ? await supabase.auth.signInWithPassword({ email: email.trim(), password }) : await supabase.auth.signUp({ email: email.trim(), password, options: { emailRedirectTo: getAuthRedirectUrl() } }); if (result.error) throw result.error; setMessage(mode === "signup" ? "Account created. Check your email if confirmation is enabled, then return here." : "Signed in successfully."); } catch (error: any) { setMessage(error?.message || "Supabase Auth could not complete the request."); } finally { setBusy(false); } }; const magicLink = async () => { if (!supabase || !email.trim()) { setMessage("Enter your email first."); return; } setBusy(true); setMessage(""); const result = await supabase.auth.signInWithOtp({ email: email.trim(), options: { emailRedirectTo: getAuthRedirectUrl() } }); setBusy(false); setMessage(result.error?.message || "Magic link sent. Check your email."); }; return <div className="login-screen"><div className="login-noise" /><section className="login-card"><div className="login-lockup"><GoldMark size={58} /><div><span>AU / XAUUSD</span><strong>Gold Journal</strong></div></div><span className="eyebrow">PRIVATE PERFORMANCE JOURNAL</span><h1>Trade with intent.<br /><em>Review with truth.</em></h1><p>Private execution records for disciplined decisions. Accounts stay isolated; every review is yours alone.</p><div className="instrument-readout"><span>XAUUSD</span><span className="data-text">PKT UTC+5</span><span className="data-text">SUPABASE AUTH</span></div><form className="login-form" onSubmit={submit}><Field label="Email"><Input type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" placeholder="you@example.com" /></Field><Field label="Password"><Input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete={mode === "signin" ? "current-password" : "new-password"} placeholder="At least 6 characters" /></Field>{message && <div className="login-service-alert" role="alert"><ShieldAlert size={16} /><div>{message}</div></div>}<Button size="lg" type="submit" disabled={busy}>{busy ? "Connecting…" : mode === "signin" ? "Enter private journal" : "Create private account"}</Button><Button type="button" variant="outline" disabled={busy} onClick={magicLink}>Send magic link</Button></form><button className="text-button" type="button" onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setMessage(""); }}>{mode === "signin" ? "Need an account? Create one" : "Already registered? Sign in"}</button><small>Authenticated access · private account data · Supabase-backed</small></section><div className="login-footnote"><span>GOLD JOURNAL</span><span>AU / XAUUSD JOURNAL</span></div></div>; }
+function TradeDialog({
+  open,
+  setOpen,
+  form,
+  setForm,
+  editing,
+  onSave,
+  pending,
+  screenshot,
+  setScreenshot,
+  progress,
+}: any) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent className="trade-dialog">
+        <DialogHeader>
+          <DialogTitle>{editing ? "Edit trade" : "New trade"}</DialogTitle>
+          <DialogDescription>
+            {editing
+              ? "Update the journal detail and retain the original session."
+              : "Session is detected from Pakistan Standard Time and can be overridden."}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="trade-form">
+          <FormSection title="Trade details">
+            <Field label="Date">
+              <Input
+                type="date"
+                value={form.tradeDate}
+                max={dateInput()}
+                onChange={event =>
+                  setForm({ ...form, tradeDate: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Session">
+              <select
+                value={form.session}
+                onChange={event =>
+                  setForm({ ...form, session: event.target.value })
+                }
+              >
+                {sessions.map(item => (
+                  <option key={item}>{item}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Direction">
+              <select
+                value={form.direction}
+                onChange={event =>
+                  setForm({ ...form, direction: event.target.value })
+                }
+              >
+                <option>BUY</option>
+                <option>SELL</option>
+              </select>
+            </Field>
+            <Field label="Result">
+              <select
+                value={form.result}
+                onChange={event =>
+                  setForm({ ...form, result: event.target.value })
+                }
+              >
+                {results.map(item => (
+                  <option key={item} value={item}>
+                    {item.replace("_", " ")}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </FormSection>
+          <FormSection title="Strategy">
+            <Field label="Level">
+              <select
+                value={form.level}
+                onChange={event =>
+                  setForm({ ...form, level: event.target.value })
+                }
+              >
+                <option value="">Select level</option>
+                {levels.map(item => (
+                  <option key={item}>{item}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Timeframe">
+              <select
+                value={form.timeframe}
+                onChange={event =>
+                  setForm({ ...form, timeframe: event.target.value })
+                }
+              >
+                {["1m", "5m", "15m", "H1", "4H"].map(item => (
+                  <option key={item}>{item}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Setup quality">
+              <select
+                value={form.setupQuality}
+                onChange={event =>
+                  setForm({ ...form, setupQuality: event.target.value })
+                }
+              >
+                {["A+", "A", "B"].map(item => (
+                  <option key={item}>{item}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Confirmation">
+              <Input
+                value={form.confirmationType}
+                placeholder="BOS, CHoCH…"
+                onChange={event =>
+                  setForm({ ...form, confirmationType: event.target.value })
+                }
+              />
+            </Field>
+          </FormSection>
+          <FormSection title="Execution">
+            <Field label="Execution type">
+              <select
+                value={form.executionType}
+                onChange={event =>
+                  setForm({ ...form, executionType: event.target.value })
+                }
+              >
+                {executionTypes.map(item => (
+                  <option key={item}>{item}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Market condition">
+              <Input
+                value={form.marketCondition}
+                placeholder="Bullish, ranging…"
+                onChange={event =>
+                  setForm({ ...form, marketCondition: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Patience 1–5">
+              <Input
+                type="number"
+                min="1"
+                max="5"
+                value={form.patienceScore}
+                onChange={event =>
+                  setForm({ ...form, patienceScore: event.target.value })
+                }
+              />
+            </Field>
+          </FormSection>
+          <FormSection title="Risk">
+            <Field label="Risk $">
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.risk}
+                onChange={event =>
+                  setForm({ ...form, risk: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Reward $">
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.reward}
+                onChange={event =>
+                  setForm({ ...form, reward: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="P&L $">
+              <Input
+                type="number"
+                step="0.01"
+                value={form.pnl}
+                onChange={event =>
+                  setForm({ ...form, pnl: event.target.value })
+                }
+              />
+            </Field>
+            <div className="rr-live">
+              <span>LIVE R:R</span>
+              <strong className="data-text">
+                {formatRr(form.risk, form.reward)}
+              </strong>
+            </div>
+          </FormSection>
+          <FormSection title="Screenshot">
+            <div
+              className="upload-box"
+              onClick={() => fileRef.current?.click()}
+            >
+              <ImagePlus size={20} />
+              <div>
+                <strong>
+                  {screenshot
+                    ? screenshot.name
+                    : "Click to upload a screenshot"}
+                </strong>
+                <span>JPG, PNG or WEBP · 5MB maximum</span>
+              </div>
+              <input
+                ref={fileRef}
+                hidden
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={event => {
+                  const file = event.target.files?.[0];
+                  if (!file) return;
+                  if (
+                    !["image/jpeg", "image/png", "image/webp"].includes(
+                      file.type
+                    )
+                  ) {
+                    toast.error("Use a JPG, PNG, or WEBP screenshot.");
+                    return;
+                  }
+                  if (file.size > 5 * 1024 * 1024) {
+                    toast.error("Screenshot must be 5MB or smaller.");
+                    return;
+                  }
+                  setScreenshot(file);
+                }}
+              />
+            </div>
+            {progress > 0 && (
+              <div className="upload-progress">
+                <i style={{ width: `${progress}%` }} />
+              </div>
+            )}
+          </FormSection>
+          <FormSection title="Emotions">
+            <Field label="Before trade">
+              <Textarea
+                value={form.emotionBefore}
+                placeholder="Calm, focused, dar raha tha…"
+                onChange={event =>
+                  setForm({ ...form, emotionBefore: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="During trade">
+              <Textarea
+                value={form.emotionDuring}
+                placeholder="What were you thinking?"
+                onChange={event =>
+                  setForm({ ...form, emotionDuring: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="After trade">
+              <Textarea
+                value={form.emotionAfter}
+                placeholder="Satisfied, gussa aya, should have held…"
+                onChange={event =>
+                  setForm({ ...form, emotionAfter: event.target.value })
+                }
+              />
+            </Field>
+          </FormSection>
+          <FormSection title="Notes">
+            <Textarea
+              value={form.notes}
+              rows={4}
+              placeholder="English + Roman Urdu supported…"
+              onChange={event =>
+                setForm({ ...form, notes: event.target.value })
+              }
+            />
+          </FormSection>
+        </div>
+        <div className="dialog-actions">
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button disabled={pending} onClick={onSave}>
+            {pending ? "Saving…" : editing ? "Save changes" : "Save trade"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+function CashDialog({
+  type,
+  setType,
+  amount,
+  setAmount,
+  note,
+  setNote,
+  onSave,
+  pending,
+}: any) {
+  const save = () => {
+    if (!navigator.onLine) {
+      window.dispatchEvent(
+        new CustomEvent(OFFLINE_CASH_REQUEST_EVENT, {
+          detail: { type, amount: Number(amount), note },
+        })
+      );
+      return;
+    }
+    onSave();
+  };
+  return (
+    <Dialog open={Boolean(type)} onOpenChange={open => !open && setType(null)}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            {type === "DEPOSIT" ? "Deposit funds" : "Withdraw funds"}
+          </DialogTitle>
+          <DialogDescription>
+            The cash movement recalculates balance immediately.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="stacked-fields">
+          <Field label="Amount">
+            <Input
+              autoFocus
+              type="number"
+              min="0.01"
+              value={amount}
+              onChange={event => setAmount(event.target.value)}
+            />
+          </Field>
+          <Field label="Note">
+            <Textarea
+              value={note}
+              onChange={event => setNote(event.target.value)}
+            />
+          </Field>
+        </div>
+        <div className="dialog-actions">
+          <Button variant="outline" onClick={() => setType(null)}>
+            Cancel
+          </Button>
+          <Button disabled={pending || Number(amount) <= 0} onClick={save}>
+            {pending ? "Saving…" : "Save movement"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+function GoalDialog({ open, setOpen, draft, setDraft, onSave }: any) {
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add custom goal</DialogTitle>
+          <DialogDescription>
+            Create a trackable goal for the active account.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="stacked-fields">
+          <Field label="Name">
+            <Input
+              value={draft.name}
+              onChange={event =>
+                setDraft({ ...draft, name: event.target.value })
+              }
+            />
+          </Field>
+          <Field label="Description">
+            <Input
+              value={draft.description}
+              onChange={event =>
+                setDraft({ ...draft, description: event.target.value })
+              }
+            />
+          </Field>
+          <Field label="Period">
+            <select
+              value={draft.period}
+              onChange={event =>
+                setDraft({ ...draft, period: event.target.value })
+              }
+            >
+              <option value="DAILY">Daily</option>
+              <option value="WEEKLY">Weekly</option>
+              <option value="MONTHLY">Monthly</option>
+            </select>
+          </Field>
+          <Field label="Metric">
+            <select
+              value={draft.metric}
+              onChange={event =>
+                setDraft({ ...draft, metric: event.target.value })
+              }
+            >
+              <option value="trade_count">Trade count</option>
+              <option value="net_pnl">Net P&L</option>
+              <option value="win_rate">Win rate</option>
+              <option value="avg_rr">Average R:R</option>
+            </select>
+          </Field>
+          <Field label="Direction">
+            <select
+              value={draft.comparison}
+              onChange={event =>
+                setDraft({ ...draft, comparison: event.target.value })
+              }
+            >
+              <option value="GTE">At least</option>
+              <option value="LTE">At most</option>
+            </select>
+          </Field>
+          <Field label="Target">
+            <Input
+              type="number"
+              min="0"
+              value={draft.target}
+              onChange={event =>
+                setDraft({ ...draft, target: event.target.value })
+              }
+            />
+          </Field>
+        </div>
+        <div className="dialog-actions">
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button onClick={onSave}>Add goal</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+function InstallDialog({ open, setOpen }: any) {
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Install Gold Journal</DialogTitle>
+          <DialogDescription>
+            Add the journal to your device for a focused, standalone experience.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="install-instructions">
+          <p>
+            <b>Android / Desktop:</b> use Install App in the browser menu or
+            address bar.
+          </p>
+          <p>
+            <b>iPhone / iPad:</b> tap Share, then choose{" "}
+            <b>Add to Home Screen</b>.
+          </p>
+        </div>
+        <Button onClick={() => setOpen(false)}>Done</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+function SplashScreen() {
+  return (
+    <div
+      className="splash-screen"
+      role="status"
+      aria-label="Loading Gold Journal"
+    >
+      <div className="splash-content">
+        <GoldMark size={82} />
+        <strong>GOLD JOURNAL</strong>
+        <span>PRIVATE TRADING INTELLIGENCE</span>
+        <div className="loading-line">
+          <i />
+        </div>
+      </div>
+    </div>
+  );
+}
+function AuthRecovery({
+  error,
+  onRetry,
+  onReconnect,
+}: {
+  error: Error | null;
+  onRetry: () => void;
+  onReconnect: () => void;
+}) {
+  return (
+    <div className="login-screen">
+      <section className="login-card query-error" role="alert">
+        <ShieldAlert size={28} />
+        <span className="eyebrow">SECURE SESSION CHECK FAILED</span>
+        <h1>Your sign-in could not be verified.</h1>
+        <p>{error?.message || "Supabase Auth is temporarily unavailable."}</p>
+        <div className="dialog-actions">
+          <Button onClick={onRetry}>
+            <RefreshCcw size={15} /> Retry
+          </Button>
+          <Button variant="outline" onClick={onReconnect}>
+            Reconnect session
+          </Button>
+        </div>
+        <small>Your private journal remains unchanged.</small>
+      </section>
+    </div>
+  );
+}
+export function AuthProfileRecovery({
+  error,
+  onRetry,
+  onReconnect,
+  onSignOut,
+}: {
+  error: { message?: string };
+  onRetry: () => void;
+  onReconnect: () => void;
+  onSignOut: () => void;
+}) {
+  return (
+    <section className="auth-profile-recovery" role="alert">
+      <ShieldAlert size={17} />
+      <div>
+        <strong>Secure profile sync is temporarily unavailable.</strong>
+        <span>
+          {error.message ||
+            "Your sign-in is still present, but the private profile could not be verified."}
+        </span>
+      </div>
+      <Button size="sm" onClick={onRetry}>
+        <RefreshCcw size={14} /> Retry
+      </Button>
+      <Button size="sm" variant="outline" onClick={onReconnect}>
+        Reconnect session
+      </Button>
+      <Button size="sm" variant="outline" onClick={onSignOut}>
+        Sign out
+      </Button>
+    </section>
+  );
+}
+export function LoginScreen() {
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!supabase) {
+      setMessage(
+        "Supabase Auth is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."
+      );
+      return;
+    }
+    if (!email.trim() || password.length < 6) {
+      setMessage(
+        "Enter a valid email and a password of at least 6 characters."
+      );
+      return;
+    }
+    setBusy(true);
+    setMessage("");
+    try {
+      const result =
+        mode === "signin"
+          ? await supabase.auth.signInWithPassword({
+              email: email.trim(),
+              password,
+            })
+          : await supabase.auth.signUp({
+              email: email.trim(),
+              password,
+              options: { emailRedirectTo: getAuthRedirectUrl() },
+            });
+      if (result.error) throw result.error;
+      setMessage(
+        mode === "signup"
+          ? "Account created. Check your email if confirmation is enabled, then return here."
+          : "Signed in successfully."
+      );
+    } catch (error: any) {
+      setMessage(
+        error?.message || "Supabase Auth could not complete the request."
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const magicLink = async () => {
+    if (!supabase || !email.trim()) {
+      setMessage("Enter your email first.");
+      return;
+    }
+    setBusy(true);
+    setMessage("");
+    const result = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: { emailRedirectTo: getAuthRedirectUrl() },
+    });
+    setBusy(false);
+    setMessage(result.error?.message || "Magic link sent. Check your email.");
+  };
+  return (
+    <div className="login-screen">
+      <div className="login-noise" />
+      <section className="login-card">
+        <div className="login-lockup">
+          <GoldMark size={58} />
+          <div>
+            <span>AU / XAUUSD</span>
+            <strong>Gold Journal</strong>
+          </div>
+        </div>
+        <span className="eyebrow">PRIVATE PERFORMANCE JOURNAL</span>
+        <h1>
+          Trade with intent.
+          <br />
+          <em>Review with truth.</em>
+        </h1>
+        <p>
+          Private execution records for disciplined decisions. Accounts stay
+          isolated; every review is yours alone.
+        </p>
+        <div className="instrument-readout">
+          <span>XAUUSD</span>
+          <span className="data-text">PKT UTC+5</span>
+          <span className="data-text">SUPABASE AUTH</span>
+        </div>
+        <form className="login-form" onSubmit={submit}>
+          <Field label="Email">
+            <Input
+              type="email"
+              value={email}
+              onChange={event => setEmail(event.target.value)}
+              autoComplete="email"
+              placeholder="you@example.com"
+            />
+          </Field>
+          <Field label="Password">
+            <Input
+              type="password"
+              value={password}
+              onChange={event => setPassword(event.target.value)}
+              autoComplete={
+                mode === "signin" ? "current-password" : "new-password"
+              }
+              placeholder="At least 6 characters"
+            />
+          </Field>
+          {message && (
+            <div className="login-service-alert" role="alert">
+              <ShieldAlert size={16} />
+              <div>{message}</div>
+            </div>
+          )}
+          <Button size="lg" type="submit" disabled={busy}>
+            {busy
+              ? "Connecting…"
+              : mode === "signin"
+                ? "Enter private journal"
+                : "Create private account"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={magicLink}
+          >
+            Send magic link
+          </Button>
+        </form>
+        <button
+          className="text-button"
+          type="button"
+          onClick={() => {
+            setMode(mode === "signin" ? "signup" : "signin");
+            setMessage("");
+          }}
+        >
+          {mode === "signin"
+            ? "Need an account? Create one"
+            : "Already registered? Sign in"}
+        </button>
+        <small>
+          Authenticated access · private account data · Supabase-backed
+        </small>
+      </section>
+      <div className="login-footnote">
+        <span>GOLD JOURNAL</span>
+        <span>AU / XAUUSD JOURNAL</span>
+      </div>
+    </div>
+  );
+}

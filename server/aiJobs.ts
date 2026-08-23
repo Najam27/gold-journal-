@@ -33,9 +33,30 @@ function workerOrigin() {
   return "";
 }
 
+function allowInlineWorkerFallback() {
+  const explicit = process.env.AI_JOB_INLINE_FALLBACK?.trim().toLowerCase();
+  if (explicit === "true") return true;
+  if (explicit === "false") return false;
+  return process.env.NODE_ENV !== "production";
+}
+
+function dispatchInlineAiJob(dispatch: Dispatch) {
+  setTimeout(() => {
+    void runAiJob(dispatch.id, dispatch.token).catch(error => {
+      console.warn("[ai-job] inline dispatch failed", JSON.stringify({ jobId: dispatch.id, reason: error instanceof Error ? error.message : "unknown" }));
+    });
+  }, 0);
+}
+
 export async function dispatchAiJob(dispatch: Dispatch) {
   const origin = workerOrigin();
-  if (!origin) throw new Error("AI background processing is unavailable on this deployment.");
+  if (!origin) {
+    if (allowInlineWorkerFallback()) {
+      dispatchInlineAiJob(dispatch);
+      return;
+    }
+    throw new Error("AI background processing is unavailable on this deployment.");
+  }
   const response = await fetch(`${origin}/.netlify/functions/ai-job-worker`, { method: "POST", headers: { "Content-Type": "application/json", "X-Gold-Journal-AI-Dispatch": dispatch.token }, body: JSON.stringify({ jobId: dispatch.id }), signal: AbortSignal.timeout(10_000) });
   if (response.status !== 202) throw new Error("AI background processing could not be started. Please retry.");
 }
@@ -92,4 +113,4 @@ export async function runAiJob(jobId: string, token: string) {
   }
 }
 
-export const aiJobTestHooks = { tokenHash, workerOrigin };
+export const aiJobTestHooks = { tokenHash, workerOrigin, allowInlineWorkerFallback };

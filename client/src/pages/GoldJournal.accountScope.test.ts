@@ -11,4 +11,12 @@ describe("Gold Journal account switching", () => {
     expect(source).toContain("const refresh = () => invalidateAccountScopedQueries(utils);");
     expect(source).toContain("onAccount={switchAccount}");
   });
+
+  it("keeps the Trade Log list polling while MT5 live sync is visible", () => {
+    const source = readFileSync(resolve(process.cwd(), "client/src/pages/GoldJournal.tsx"), "utf8");
+
+    expect(source).toMatch(/journal\.get\.useQuery[\s\S]*?refetchInterval:\s*view === "trades" \? 2_500 : view === "goals" \? 300_000 : false/);
+    expect(source).toMatch(/mt5\.workspace\.useQuery[\s\S]*?refetchInterval:\s*view === "trades" \|\| view === "mt5" \? 2_500 : false/);
+    expect(source).toMatch(/trpc\.trades\.list\.useQuery[\s\S]*?refetchInterval:\s*view === "trades" \? 2_500 : false/);
+  });
 });

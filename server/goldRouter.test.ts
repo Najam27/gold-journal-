@@ -178,7 +178,7 @@ describe("Gold Journal protected server workflows", () => {
     expect(mocks.getDb).not.toHaveBeenCalled();
   });
 
-    it("rejects a connection mutation when the connection is unavailable to the explicitly selected account", async () => {
+  it("rejects a connection mutation when the connection is unavailable to the explicitly selected account", async () => {
     const update = vi.fn();
     mocks.getOwnedAccount.mockResolvedValue({ id: 25, userId: 7, name: "Second account" });
     mocks.getDb.mockResolvedValue({ select: () => limitedRows([]), update });
@@ -186,6 +186,33 @@ describe("Gold Journal protected server workflows", () => {
     await expect(caller.mt5.setConnectionActive({ accountId: 25, connectionId: 44, active: false })).rejects.toThrow("unavailable");
     expect(mocks.getOwnedAccount).toHaveBeenCalledWith(7, 25);
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it("replaces a missing-orphaned MT5 connection row by account id without deleting journal history", async () => {
+    const where = vi.fn().mockResolvedValue(undefined);
+    const set = vi.fn(() => ({ where }));
+    const update = vi.fn(() => ({ set }));
+    mocks.getOwnedAccount.mockResolvedValue({ id: 12, userId: 7, name: "Primary account" });
+    mocks.getDb.mockResolvedValue({ select: () => limitedRows([{ id: 44, userId: 999 }]), update });
+    const caller = goldRouter.createCaller({ user } as any);
+
+    const result = await caller.mt5.replaceConnection({ accountId: 12, label: "Primary account Live", brokerUtcOffsetMinutes: 180 });
+
+    expect(result).toMatchObject({ id: 44, replaced: true });
+    expect(result.apiKey).toHaveLength(43);
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 7,
+      accountId: 12,
+      label: "Primary account Live",
+      active: true,
+      brokerUtcOffsetMinutes: 180,
+      lastPing: null,
+      lastContactAt: null,
+      balance: null,
+      equity: null,
+    }));
+    expect(set.mock.calls[0][0].apiKey).not.toBe(result.apiKey);
+    expect(where).toHaveBeenCalled();
   });
 
   it("rejects a goal mutation when the goal belongs to another user", async () => {
