@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   invalidate: vi.fn(),
   create: vi.fn(),
   replace: vi.fn(),
+  rotate: vi.fn(),
   setActive: vi.fn(),
   updateOffset: vi.fn(),
   remove: vi.fn(),
@@ -123,6 +124,9 @@ vi.mock("@/lib/trpc", () => ({
       replaceConnection: {
         useMutation: () => ({ mutateAsync: mocks.replace, isPending: false }),
       },
+      rotateConnectionKey: {
+        useMutation: () => ({ mutateAsync: mocks.rotate, isPending: false }),
+      },
       updateConnectionOffset: {
         useMutation: () => ({ mutateAsync: mocks.updateOffset }),
       },
@@ -169,9 +173,12 @@ describe("Mt5LiveView", () => {
       id: 44,
       apiKey: "mt5_live_replacement_key_1234567890",
     });
+    mocks.rotate.mockResolvedValue({
+      apiKey: "mt5_live_rotated_key_1234567890",
+    });
   });
 
-  it("shows masked credentials, account metrics, historical positions, EA v2.4, and automatic Trade Log synchronization", () => {
+  it("shows masked credentials, account metrics, historical positions, EA v2.5, and automatic Trade Log synchronization", () => {
     const onJournalNow = vi.fn();
     render(
       <Mt5LiveView
@@ -193,7 +200,7 @@ describe("Mt5LiveView", () => {
     expect(screen.getByText("$10,042.50")).toBeTruthy();
     expect(screen.getByText(/42 closed positions synced/i)).toBeTruthy();
     expect(screen.getByText(/Live refresh every 2\.5s/i)).toBeTruthy();
-    expect(screen.getByText(/SETUP GUIDE · EA v2\.4/i)).toBeTruthy();
+    expect(screen.getByText(/SETUP GUIDE · EA v2\.5/i)).toBeTruthy();
     const ea = screen.getByRole("link", { name: /Download EA/i });
     expect(ea.getAttribute("href")).toBe("/GoldJournal_EA.mq5");
     expect(
@@ -307,5 +314,22 @@ describe("Mt5LiveView", () => {
     expect(screen.getAllByText(/Server URL/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/WebRequest/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/API key/i).length).toBeGreaterThan(0);
+  });
+
+  it("offers a non-destructive new key for an existing connection that has never contacted MT5 Live", async () => {
+    mocks.workspaceData = {
+      connections: [{ id: 1, accountName: "GFT 10K", label: "GFT Live", active: true, brokerUtcOffsetMinutes: 180, lastPing: null, lastContactAt: null, syncHealth: { state: "WAITING", label: "Waiting for MT5", message: "Waiting for the first terminal contact." } }],
+      openPositions: [],
+      closedPositions: [],
+    };
+    mocks.historyData = { positions: [], total: 0, page: 1, pageSize: 20, pageCount: 1 };
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<Mt5LiveView account={{ id: 12, name: "GFT 10K" }} accounts={[{ id: 12, name: "GFT 10K" }]} onJournalNow={vi.fn()} />);
+    fireEvent.click(screen.getAllByRole("button", { name: /Issue new API key/i })[0]);
+
+    await waitFor(() => expect(mocks.rotate).toHaveBeenCalledWith({ accountId: 12, connectionId: 1, confirmed: true }));
+    await waitFor(() => expect(screen.getByText("mt5_live_rotated_key_1234567890")).toBeTruthy());
+    expect(mocks.remove).not.toHaveBeenCalled();
   });
 });

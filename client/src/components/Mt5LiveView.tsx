@@ -162,6 +162,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
   });
   const createConnection = trpc.mt5.createConnection.useMutation();
   const replaceConnection = trpc.mt5.replaceConnection.useMutation();
+  const rotateConnectionKey = trpc.mt5.rotateConnectionKey.useMutation();
   const setActive = trpc.mt5.setConnectionActive.useMutation();
   const deleteConnection = trpc.mt5.deleteConnection.useMutation();
   const updateOffset = trpc.mt5.updateConnectionOffset.useMutation();
@@ -237,6 +238,22 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
       toast.error(error.message || "Could not reconnect MT5 Live.");
     }
   };
+  const rotateCurrentConnectionKey = async (connection: any) => {
+    if (!account?.id || rotateConnectionKey.isPending) return;
+    if (!window.confirm(`Issue a new API key for ${connection.label}? The old EA key stops working, but MT5 history and Trade Log records remain unchanged.`)) return;
+    try {
+      const rotated = await rotateConnectionKey.mutateAsync({
+        accountId: account.id,
+        connectionId: connection.id,
+        confirmed: true,
+      });
+      setNewApiKey(rotated.apiKey);
+      toast.success("New MT5 key issued. Paste it into EA v2.5, then restart the EA.");
+      refresh();
+    } catch (error: any) {
+      toast.error(error.message || "Could not issue a new MT5 key.");
+    }
+  };
   const healthPrefix =
     activeConnection?.syncHealth?.label || "MT5 status pending";
   const historyStatus = history.isError
@@ -299,9 +316,9 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
             </h3>
             <p>
               {recoveredMt5History
-                ? "Your existing journaled MT5 trades are safe. Create a replacement connection below, copy its new key into EA v2.4, then restart the EA once to restore live balance, equity, and margin updates."
+                ? "Your existing journaled MT5 trades are safe. Create a replacement connection below, copy its new key into EA v2.5, then restart the EA once to restore live balance, equity, and margin updates."
                 : activeConnection?.syncHealth?.message ||
-                  "Attach EA v2.4 to any chart. Balance, equity, free margin, and floating P&L appear after its next summary event."}
+                  "Attach EA v2.5 to any chart. Balance, equity, free margin, and floating P&L appear after its next summary event."}
             </p>
           </div>
         ) : (
@@ -401,6 +418,22 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
                   <p className="mt5-health-detail" role="status">
                     {state.message}
                   </p>
+                  {!connection.lastContactAt && !connection.lastPing && (
+                    <div className="mt5-first-contact-recovery">
+                      <strong>First-contact recovery</strong>
+                      <p>
+                        Download EA v2.5, paste this connection&apos;s current API key and exact server URL, then remove and reattach the EA. EA v2.5 uses only those two values. If the original one-time key is unavailable, issue a replacement below; history remains unchanged.
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={rotateConnectionKey.isPending}
+                        onClick={() => void rotateCurrentConnectionKey(connection)}
+                      >
+                        <RefreshCcw size={14} /> {rotateConnectionKey.isPending ? "Issuing…" : "Issue new API key"}
+                      </Button>
+                    </div>
+                  )}
                   <div className="mt5-secret-row">
                     <span>SERVER URL</span>
                     <code>{serverUrl}</code>
@@ -513,7 +546,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
           onClick={() => setGuideOpen(!guideOpen)}
         >
           <div>
-            <span className="eyebrow">SETUP GUIDE · EA v2.4</span>
+            <span className="eyebrow">SETUP GUIDE · EA v2.5</span>
             <h3>How to connect MT5 and backfill history</h3>
           </div>
           <ChevronDown size={18} />
@@ -524,7 +557,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
               <div>
                 <strong>Replace the earlier EA build</strong>
                 <p>
-                  Download EA v2.4. It sends balance, equity, floating P&amp;L,
+                  Download EA v2.5. It sends the first compatibility heartbeat, balance, equity, floating P&amp;L,
                   and live positions approximately every 3 seconds, plus history
                   and close events using an explicit broker UTC offset whenever
                   available. Transient server errors now retry with bounded
@@ -536,7 +569,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
                 href={EA_DOWNLOAD}
                 download="GoldJournal_EA.mq5"
               >
-                <Download size={15} /> Download EA v2.4
+                <Download size={15} /> Download EA v2.5
               </a>
             </li>
             <li>
@@ -548,7 +581,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
                     C:\Users\[YourName]\AppData\Roaming\MetaQuotes\Terminal\[ID]\MQL5\Experts\
                   </code>
                   . In MT5, open Navigator → Expert Advisors, right-click, then
-                  Refresh.
+                  Refresh. Configure only the server URL and matching API key; do not add a Connection ID.
                 </p>
               </div>
             </li>
@@ -652,7 +685,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
             <h3>No open positions in MT5</h3>
             <p>
               Positions will appear in both MT5 Live and Trade Log after an
-              active connection receives data from EA v2.4.
+              active connection receives data from EA v2.5.
             </p>
           </div>
         )}
