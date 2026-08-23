@@ -13,6 +13,7 @@ import {
 } from "../../server/mt5Db";
 import { validateRuntimeConfiguration } from "../../server/_core/env";
 import { httpCompression } from "../../server/httpCompression";
+import { apiNoStore } from "../../server/apiNoStore";
 import { mt5JsonBody } from "../../server/mt5Http";
 import { registerMt5EaDownload } from "../../server/mt5EaDownload";
 
@@ -35,6 +36,7 @@ app.use((_req, res, next) => {
     );
   next();
 });
+app.use(apiNoStore);
 app.use(httpCompression);
 app.use(["/api/mt5", "/mt5"], mt5JsonBody);
 app.use("/api/trpc", express.json({ limit: "10mb" }));
