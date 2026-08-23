@@ -28,3 +28,8 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  # These values are public identifiers/origins, not credentials. They were
+  # incorrectly marked as secret environment variables in the Netlify site,
+  # causing value-based scanning to block production before deployment.
+  # Keep scanning enabled for every other configured secret.
+  SECRETS_SCAN_OMIT_KEYS = "SUPABASE_STORAGE_BUCKET,VITE_AUTH_REDIRECT_URL"
