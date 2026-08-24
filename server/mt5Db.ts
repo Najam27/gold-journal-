@@ -54,12 +54,14 @@ function safePosition(position: typeof mt5LivePositions.$inferSelect, journaledT
 }
 
 export function isMt5PositionAfterJournalReset(
-  resetAt: Date | null | undefined,
+  resetAt: Date | string | null | undefined,
   position: { status: "OPEN" | "CLOSED"; openTime: Date; closeTime?: Date | null },
 ) {
   if (!resetAt) return true;
+  const resetAtMilliseconds = resetAt instanceof Date ? resetAt.getTime() : Date.parse(resetAt);
+  if (!Number.isFinite(resetAtMilliseconds)) return true;
   const effectiveTime = position.status === "CLOSED" ? (position.closeTime ?? position.openTime) : position.openTime;
-  return effectiveTime.getTime() > resetAt.getTime();
+  return effectiveTime.getTime() > resetAtMilliseconds;
 }
 
 async function getJournalDataResetAt(database: any, accountId: number) {

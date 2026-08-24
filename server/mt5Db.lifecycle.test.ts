@@ -97,4 +97,10 @@ describe("MT5 position lifecycle", () => {
     expect(isMt5PositionAfterJournalReset(resetAt, { status: "OPEN", openTime: new Date("2026-08-17T11:59:00.000Z") })).toBe(false);
     expect(isMt5PositionAfterJournalReset(resetAt, { status: "CLOSED", openTime: new Date("2026-08-17T11:00:00.000Z"), closeTime: new Date("2026-08-17T12:01:00.000Z") })).toBe(true);
   });
+
+  it("accepts the ISO reset watermark string returned by Supabase", () => {
+    const resetAt = "2026-08-17T12:00:00.000Z";
+    expect(isMt5PositionAfterJournalReset(resetAt, { status: "OPEN", openTime: new Date("2026-08-17T11:59:00.000Z") })).toBe(false);
+    expect(isMt5PositionAfterJournalReset(resetAt, { status: "CLOSED", openTime: new Date("2026-08-17T11:00:00.000Z"), closeTime: new Date("2026-08-17T12:01:00.000Z") })).toBe(true);
+  });
 });
