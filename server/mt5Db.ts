@@ -89,17 +89,30 @@ export function pktSession(date: Date) {
 export async function getMt5Workspace(userId: number, accountId: number) {
   const account = await getOwnedAccount(userId, accountId);
   const db = await requireDb();
-  const [connections, openPositions, closedPositions] = await Promise.all([
+  const [connections, openPositions, closedPositions, liveConnections, ownedAccounts] = await Promise.all([
     db.select().from(mt5Connections).where(eq(mt5Connections.accountId, account.id)).orderBy(desc(mt5Connections.createdAt)).limit(20),
     db.select().from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, accountId), eq(mt5LivePositions.status, "OPEN"))).orderBy(desc(mt5LivePositions.updatedAt)).limit(500),
     db.select().from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, accountId), eq(mt5LivePositions.status, "CLOSED"))).orderBy(desc(mt5LivePositions.closeTime)).limit(10),
+    db.select().from(mt5Connections).where(and(eq(mt5Connections.userId, userId), eq(mt5Connections.active, true), eq(mt5Connections.retiredAt, null))).orderBy(desc(mt5Connections.lastContactAt)).limit(100),
+    db.select({ id: accounts.id, name: accounts.name }).from(accounts).where(eq(accounts.userId, userId)).limit(1_000),
   ]);
   const canonicalConnections = await Promise.all(connections.map(connection => canonicalizeMt5ConnectionOwner(db, connection)));
+  const accountNames = new Map(ownedAccounts.map(item => [item.id, item.name]));
+  const liveElsewhere = liveConnections
+    .filter(connection => connection.accountId !== account.id && (connection.lastContactAt ?? connection.lastPing))
+    .map(connection => ({
+      accountId: connection.accountId,
+      accountName: accountNames.get(connection.accountId) ?? "Another journal account",
+      connectionReference: mt5ConnectionReference(connection.apiKey),
+      lastContactAt: connection.lastContactAt ?? connection.lastPing,
+      lastSummaryAt: connection.lastSummarySuccessAt,
+    }));
   const visibleTickets = [...openPositions, ...closedPositions].map(position => position.ticket);
   const journalRows = visibleTickets.length ? await db.select({ mt5Ticket: trades.mt5Ticket }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId), or(...visibleTickets.map(ticket => eq(trades.mt5Ticket, ticket))))) : [];
   const journaledTickets = new Set(journalRows.flatMap(row => row.mt5Ticket == null ? [] : [row.mt5Ticket.toString()]));
   return {
     dataSourceReference: supabaseDataSourceReference(),
+    liveElsewhere,
     connections: canonicalConnections.map(connection => ({ id: connection.id, connectionReference: mt5ConnectionReference(connection.apiKey), accountName: account.name, label: connection.label, active: connection.active, retiredAt: connection.retiredAt, retiredReason: connection.retiredReason, brokerUtcOffsetMinutes: (connection as typeof connection & { brokerUtcOffsetMinutes?: number }).brokerUtcOffsetMinutes ?? 180, lastPing: connection.lastPing, lastContactAt: connection.lastContactAt, lastSummaryAt: connection.lastSummaryAt, lastSummarySuccessAt: connection.lastSummarySuccessAt, lastSummaryErrorAt: connection.lastSummaryErrorAt, lastOpenSyncAt: connection.lastOpenSyncAt, lastOpenSyncSuccessAt: connection.lastOpenSyncSuccessAt, lastOpenSyncErrorAt: connection.lastOpenSyncErrorAt, lastErrorCode: connection.lastErrorCode, lastErrorMessage: connection.lastErrorMessage, consecutiveFailures: connection.consecutiveFailures, mt5Login: connection.mt5Login?.toString() ?? null, brokerServer: connection.brokerServer, currency: connection.currency, balance: connection.balance, equity: connection.equity, margin: connection.margin, freeMargin: connection.freeMargin, floatingPnl: connection.floatingPnl, riskSymbol: connection.riskSymbol, riskTickSize: connection.riskTickSize, riskTickValueLoss: connection.riskTickValueLoss, riskContractSize: connection.riskContractSize, riskVolumeMin: connection.riskVolumeMin, riskVolumeMax: connection.riskVolumeMax, riskVolumeStep: connection.riskVolumeStep, riskSymbolUpdatedAt: connection.riskSymbolUpdatedAt, syncHealth: classifyMt5SyncHealth(connection), lastHistorySync: connection.lastHistorySync, historySyncedCount: connection.historySyncedCount, lastHistoryAttempt: connection.lastHistoryAttempt, lastHistoryStatus: connection.lastHistoryStatus, lastHistoryMessage: connection.lastHistoryMessage, lastHistoryBatchSize: connection.lastHistoryBatchSize, createdAt: connection.createdAt })),
     openPositions: openPositions.map(position => safePosition(position, journaledTickets)),
     closedPositions: closedPositions.map(position => safePosition(position, journaledTickets)),

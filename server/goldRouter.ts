@@ -198,6 +198,8 @@ export const goldRouter = router({
     }),
     create: protectedProcedure.input(z.object({ name: z.string().trim().min(1).max(100), startingBalance: money(0).default(0) })).mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
+      const duplicate = await db.select({ id: accounts.id }).from(accounts).where(and(eq(accounts.userId, ctx.user.id), eq(accounts.name, input.name))).limit(1);
+      if (duplicate[0]) throw new TRPCError({ code: "CONFLICT", message: "A journal account with this exact name already exists. Rename the existing account or choose a distinct name before linking MT5." });
       const inserted = await db.insert(accounts).values({ userId: ctx.user.id, name: input.name, startingBalance: input.startingBalance.toFixed(2) }).returning({ id: accounts.id });
       return { id: inserted[0].id };
     }),

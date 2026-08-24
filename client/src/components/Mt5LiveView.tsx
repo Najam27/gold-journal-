@@ -150,7 +150,7 @@ function AccountMetric({
   );
 }
 
-export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
+export function Mt5LiveView({ account, accounts, onJournalNow, onSwitchAccount }: any) {
   const accountInput = useMemo(
     () => (account?.id ? { accountId: account.id } : undefined),
     [account?.id]
@@ -194,6 +194,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
   }, [account?.id]);
   const connections = workspace.data?.connections ?? [];
   const dataSourceReference = workspace.data?.dataSourceReference;
+  const liveElsewhere = workspace.data?.liveElsewhere ?? [];
   const workspaceLoading = Boolean(workspace.isLoading || (!workspace.data && !workspace.error));
   const workspaceConfirmedEmpty = !workspaceLoading && !workspace.isError && connections.length === 0;
   const historyLoaded = Boolean(history.data);
@@ -307,6 +308,16 @@ export function Mt5LiveView({ account, accounts, onJournalNow }: any) {
           </Button>
         )}
       </header>
+      {liveElsewhere.length > 0 && (
+        <div className="mt5-recovery-callout" role="status">
+          <p>
+            The terminal is currently updating another one of your journal accounts{liveElsewhere[0].accountName === account?.name ? " with the same name" : ""}. This card&apos;s key is not the key currently used by MT5.
+          </p>
+          <Button variant="outline" size="sm" onClick={() => onSwitchAccount?.(liveElsewhere[0].accountId)}>
+            Open active terminal account ({liveElsewhere[0].connectionReference})
+          </Button>
+        </div>
+      )}
       <section className="mt5-account-panel panel">
         <div className="mt5-section-head">
           <div>

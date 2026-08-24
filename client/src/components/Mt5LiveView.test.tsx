@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   invalidate: vi.fn(),
@@ -167,6 +167,7 @@ vi.mock("@/components/ui/dialog", () => ({
 import { Mt5LiveView } from "./Mt5LiveView";
 
 describe("Mt5LiveView", () => {
+  afterEach(() => cleanup());
   beforeEach(() => {
     Object.values(mocks).forEach(value => {
       if (typeof value === "function" && "mockReset" in value)
@@ -225,6 +226,27 @@ describe("Mt5LiveView", () => {
       ).value
     ).toBe("180");
     expect(onJournalNow).not.toHaveBeenCalled();
+  });
+
+  it("offers a safe switch when another same-name account is receiving the terminal events", () => {
+    mocks.workspaceData = {
+      connections: [],
+      openPositions: [],
+      closedPositions: [],
+      liveElsewhere: [{
+        accountId: 14,
+        accountName: "Blueberry",
+        connectionReference: "gjmt5-c31ef4b77946",
+        lastContactAt: new Date(),
+      }],
+    };
+    mocks.historyData = { positions: [], total: 0, page: 1, pageSize: 20, pageCount: 1 };
+    const onSwitchAccount = vi.fn();
+    const { unmount } = render(<Mt5LiveView account={{ id: 15, name: "Blueberry" }} accounts={[{ id: 14, name: "Blueberry" }, { id: 15, name: "Blueberry" }]} onJournalNow={vi.fn()} onSwitchAccount={onSwitchAccount} />);
+    expect(screen.getByText(/another one of your journal accounts with the same name/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Open active terminal account.*gjmt5-c31ef4b77946/i }));
+    expect(onSwitchAccount).toHaveBeenCalledWith(14);
+    unmount();
   });
 
   it("generates a replacement key directly when MT5 history exists but the connection record is missing", async () => {

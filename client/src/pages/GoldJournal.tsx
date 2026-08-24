@@ -1209,6 +1209,7 @@ export default function GoldJournal() {
                       "MT5 trade auto-filled. Add your analysis details below.",
                   })
                 }
+                onSwitchAccount={switchAccount}
               />
             )}
           </div>
