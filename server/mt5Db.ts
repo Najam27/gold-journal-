@@ -93,13 +93,13 @@ export async function getMt5Workspace(userId: number, accountId: number) {
     db.select().from(mt5Connections).where(eq(mt5Connections.accountId, account.id)).orderBy(desc(mt5Connections.createdAt)).limit(20),
     db.select().from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, accountId), eq(mt5LivePositions.status, "OPEN"))).orderBy(desc(mt5LivePositions.updatedAt)).limit(500),
     db.select().from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, accountId), eq(mt5LivePositions.status, "CLOSED"))).orderBy(desc(mt5LivePositions.closeTime)).limit(10),
-    db.select().from(mt5Connections).where(and(eq(mt5Connections.userId, userId), eq(mt5Connections.active, true), eq(mt5Connections.retiredAt, null))).orderBy(desc(mt5Connections.lastContactAt)).limit(100),
+    db.select().from(mt5Connections).where(and(eq(mt5Connections.userId, userId), eq(mt5Connections.active, true))).orderBy(desc(mt5Connections.lastContactAt)).limit(100),
     db.select({ id: accounts.id, name: accounts.name }).from(accounts).where(eq(accounts.userId, userId)).limit(1_000),
   ]);
   const canonicalConnections = await Promise.all(connections.map(connection => canonicalizeMt5ConnectionOwner(db, connection)));
   const accountNames = new Map(ownedAccounts.map(item => [item.id, item.name]));
   const liveElsewhere = liveConnections
-    .filter(connection => connection.accountId !== account.id && (connection.lastContactAt ?? connection.lastPing))
+    .filter(connection => connection.accountId !== account.id && !connection.retiredAt && (connection.lastContactAt ?? connection.lastPing))
     .map(connection => ({
       accountId: connection.accountId,
       accountName: accountNames.get(connection.accountId) ?? "Another journal account",
