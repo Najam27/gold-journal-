@@ -72,12 +72,17 @@ describe("Gold Journal protected server workflows", () => {
     const where = vi.fn().mockResolvedValue(undefined);
     const set = vi.fn(() => ({ where }));
     const update = vi.fn(() => ({ set }));
+    const duplicateLimit = vi.fn().mockResolvedValue([]);
+    const duplicateWhere = vi.fn(() => ({ limit: duplicateLimit }));
+    const duplicateFrom = vi.fn(() => ({ where: duplicateWhere }));
+    const select = vi.fn(() => ({ from: duplicateFrom }));
     mocks.getOwnedAccount.mockResolvedValue({ id: 24, userId: 7, name: "Selected account" });
-    mocks.getDb.mockResolvedValue({ update });
+    mocks.getDb.mockResolvedValue({ select, update });
     const caller = goldRouter.createCaller({ user } as any);
 
     await expect(caller.accounts.rename({ accountId: 24, name: "Renamed selected account" })).resolves.toEqual({ success: true });
     expect(mocks.getOwnedAccount).toHaveBeenCalledWith(7, 24);
+    expect(select).toHaveBeenCalledTimes(1);
     expect(update).toHaveBeenCalledTimes(1);
     expect(where).toHaveBeenCalledTimes(1);
   });

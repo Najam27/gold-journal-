@@ -4,6 +4,7 @@ import { storageGetSignedUrl } from "./storage";
 import { getSupabaseAdmin } from "./supabaseAdmin";
 import { getDb } from "./db";
 import { toSafeAccount, toSafeJournalRecord, toSafeTrade } from "./journalPrivacy";
+import { normalizeAccountName } from "./accountIdentity";
 
 async function requireDb() { const db = await getDb(); if (!db) throw new Error("Supabase database is unavailable. Please retry shortly."); return db; }
 
@@ -32,7 +33,7 @@ export async function ensureAccount(userId: number) {
   const db = await requireDb();
   const existing = await db.select().from(accounts).where(eq(accounts.userId, userId)).limit(1);
   if (existing[0]) return existing[0];
-  await db.insert(accounts).values({ userId, name: "Primary Account", bootstrapKey: "PRIMARY", startingBalance: "0.00" }).onConflictDoUpdate({ target: [accounts.userId, accounts.bootstrapKey], set: { bootstrapKey: "PRIMARY" } });
+  await db.insert(accounts).values({ userId, name: "Primary Account", normalizedName: normalizeAccountName("Primary Account"), bootstrapKey: "PRIMARY", startingBalance: "0.00" }).onConflictDoUpdate({ target: [accounts.userId, accounts.bootstrapKey], set: { bootstrapKey: "PRIMARY" } });
   const created = await db.select().from(accounts).where(and(eq(accounts.userId, userId), eq(accounts.bootstrapKey, "PRIMARY"))).limit(1);
   if (created[0]) return created[0];
   const fallback = await db.select().from(accounts).where(eq(accounts.userId, userId)).limit(1);

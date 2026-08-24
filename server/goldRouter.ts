@@ -6,6 +6,7 @@ import { TRPCError } from "@trpc/server";
 import { accounts, cashMovements, dailyPlans, goals, mt5Connections, mt5LivePositions, notificationHistory, notificationSettings, optionLists, skippedTrades, trades } from "../drizzle/schema";
 import { ensureAccount, getJournal, getOwnedAccount, ownsTrade } from "./goldDb";
 import { getDb } from "./db";
+import { normalizeAccountName } from "./accountIdentity";
 import { getMt5History, getMt5Workspace, syncStoredMt5PositionsToTradeLog } from "./mt5Db";
 import { mt5ApiKeyFingerprint, mt5ConnectionReference } from "./mt5Security";
 import { getMt5Integrity } from "./mt5Reliability";
@@ -198,15 +199,19 @@ export const goldRouter = router({
     }),
     create: protectedProcedure.input(z.object({ name: z.string().trim().min(1).max(100), startingBalance: money(0).default(0) })).mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
-      const duplicate = await db.select({ id: accounts.id }).from(accounts).where(and(eq(accounts.userId, ctx.user.id), eq(accounts.name, input.name))).limit(1);
-      if (duplicate[0]) throw new TRPCError({ code: "CONFLICT", message: "A journal account with this exact name already exists. Rename the existing account or choose a distinct name before linking MT5." });
-      const inserted = await db.insert(accounts).values({ userId: ctx.user.id, name: input.name, startingBalance: input.startingBalance.toFixed(2) }).returning({ id: accounts.id });
+      const normalizedName = normalizeAccountName(input.name);
+      const duplicate = await db.select({ id: accounts.id }).from(accounts).where(and(eq(accounts.userId, ctx.user.id), eq(accounts.normalizedName, normalizedName))).limit(1);
+      if (duplicate[0]) throw new TRPCError({ code: "CONFLICT", message: "A journal account with this name already exists. Rename the existing account or choose a distinct name before linking MT5." });
+      const inserted = await db.insert(accounts).values({ userId: ctx.user.id, name: input.name, normalizedName, startingBalance: input.startingBalance.toFixed(2) }).returning({ id: accounts.id });
       return { id: inserted[0].id };
     }),
     rename: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), name: z.string().trim().min(1).max(100) })).mutation(async ({ ctx, input }) => {
       await getOwnedAccount(ctx.user.id, input.accountId);
       const db = await dbOrThrow();
-      await db.update(accounts).set({ name: input.name }).where(and(eq(accounts.id, input.accountId), eq(accounts.userId, ctx.user.id)));
+      const normalizedName = normalizeAccountName(input.name);
+      const duplicate = await db.select({ id: accounts.id }).from(accounts).where(and(eq(accounts.userId, ctx.user.id), eq(accounts.normalizedName, normalizedName))).limit(1);
+      if (duplicate[0] && duplicate[0].id !== input.accountId) throw new TRPCError({ code: "CONFLICT", message: "A journal account with this name already exists. Choose a distinct name." });
+      await db.update(accounts).set({ name: input.name, normalizedName }).where(and(eq(accounts.id, input.accountId), eq(accounts.userId, ctx.user.id)));
       return { success: true };
     }),
     remove: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), confirmed: z.literal(true) })).mutation(async ({ ctx, input }) => {
