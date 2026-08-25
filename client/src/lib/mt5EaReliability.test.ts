@@ -46,4 +46,11 @@ describe("Gold Journal MT5 EA reliability contract", () => {
     expect(source).toContain("g_history_in_progress || (g_last_history_attempt == 0");
     expect(source).toContain("skipped unreconstructable historical position");
   });
+
+  it("starts a recent incremental history scan when a broker-manual close transaction arrives after full history completed", () => {
+    expect(source).toContain("void OnTradeTransaction(const MqlTradeTransaction &transaction");
+    expect(source).toContain("if(entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_OUT_BY || entry == DEAL_ENTRY_INOUT) SendHistory(false);");
+    expect(source).not.toContain("if(!fullReplay && g_history_full_replay) return;");
+    expect(source).toContain("datetime from = now - (g_history_full_replay ? HistoryDays * 86400 : MathMax(3600, SyncSeconds * 4));");
+  });
 });

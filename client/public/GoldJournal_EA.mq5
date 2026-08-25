@@ -300,7 +300,6 @@ void SendHistory(bool fullReplay) {
       g_history_in_progress = true;
       g_history_full_replay = fullReplay;
    }
-   if(!fullReplay && g_history_full_replay) return;
    datetime from = now - (g_history_full_replay ? HistoryDays * 86400 : MathMax(3600, SyncSeconds * 4));
    if(!HistorySelect(from, now)) {
       PrintFormat("Gold Journal HistorySelect failed: %d", GetLastError());
