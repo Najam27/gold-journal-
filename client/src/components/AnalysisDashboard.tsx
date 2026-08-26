@@ -548,7 +548,7 @@ export function AnalysisDashboard({ accountId }: Props) {
               </b>
             </span>
             <span>
-              Average R delta{" "}
+              Average actual R delta{" "}
               <b>{number(comparisonQuery.data.delta.overview.averageR, 3)}</b>
             </span>
             <span>
@@ -598,11 +598,25 @@ export function AnalysisDashboard({ accountId }: Props) {
           <span>{analysis.overview.drawdownCount} drawdown periods</span>
         </div>
         <div className="stat-card stat-neutral">
-          <p>TOTAL R</p>
+          <p>AVERAGE ACTUAL R</p>
           <strong className="data-text">
-            {number(analysis.overview.totalR, 2)}
+            {number(analysis.execution.averageActualR, 3)}R
           </strong>
-          <span>{number(analysis.overview.averageR, 3)}R average</span>
+          <span>{analysis.execution.actualRAvailable} risk-defined closed trades</span>
+        </div>
+        <div className="stat-card stat-gold">
+          <p>AVERAGE PLANNED R:R</p>
+          <strong className="data-text">
+            {analysis.execution.averagePlannedR == null ? "—" : `1 : ${number(analysis.execution.averagePlannedR, 3)}`}
+          </strong>
+          <span>{analysis.execution.plannedRAvailable} trades with planned risk and reward</span>
+        </div>
+        <div className="stat-card stat-neutral">
+          <p>AVERAGE TARGET CAPTURE</p>
+          <strong className="data-text">
+            {analysis.execution.averageTargetCapture == null ? "—" : `${number(analysis.execution.averageTargetCapture, 1)}%`}
+          </strong>
+          <span>Actual P&amp;L ÷ planned reward</span>
         </div>
       </section>
       <section className="edge-callouts">
@@ -744,6 +758,22 @@ export function AnalysisDashboard({ accountId }: Props) {
               </b>
             </span>
             <span>
+              Planned R:R average{" "}
+              <b>{analysis.execution.averagePlannedR == null ? "—" : `1 : ${number(analysis.execution.averagePlannedR, 3)}`}</b>
+            </span>
+            <span>
+              Actual R average{" "}
+              <b>{analysis.execution.averageActualR == null ? "—" : `${number(analysis.execution.averageActualR, 3)}R`}</b>
+            </span>
+            <span>
+              Reached / exceeded target{" "}
+              <b>{analysis.execution.targetCaptureAvailable ? `${analysis.execution.reachedOrExceededTarget}/${analysis.execution.targetCaptureAvailable}` : "—"}</b>
+            </span>
+            <span>
+              Profitable below target{" "}
+              <b>{analysis.execution.targetCaptureAvailable ? `${analysis.execution.profitableBelowTarget}/${analysis.execution.targetCaptureAvailable}` : "—"}</b>
+            </span>
+            <span>
               Duration median{" "}
               <b>
                 {analysis.duration.medianMinutes == null
@@ -751,10 +781,9 @@ export function AnalysisDashboard({ accountId }: Props) {
                   : `${analysis.duration.medianMinutes} min`}
               </b>
             </span>
-            <span>
-              Exit efficiency <b>Unavailable</b>
-            </span>
+            <span>Target capture <b>{analysis.execution.medianTargetCapture == null ? "—" : `${number(analysis.execution.medianTargetCapture, 1)}% median`}</b></span>
           </div>
+          <p className="analysis-filter-note">{analysis.execution.message}</p>
         </section>
       </section>
       <section className="panel">

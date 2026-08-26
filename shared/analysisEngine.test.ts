@@ -63,6 +63,21 @@ describe("deterministic analysis engine", () => {
     expect(analysis.behavior.limitations.some(item => item.includes("no emotion field"))).toBe(true);
   });
 
+  it("separates planned R:R, actual R, and target capture for execution review", () => {
+    const analysis = buildAnalysis([
+      trade({ risk: 10, reward: 30, pnl: 15, result: "WIN" }),
+      trade({ tradeDate: "2026-01-02", risk: 10, reward: 20, pnl: -10, result: "LOSS" }),
+      trade({ tradeDate: "2026-01-03", risk: null, reward: 100, pnl: 50, result: "WIN" }),
+    ]);
+    expect(analysis.execution.plannedRAvailable).toBe(2);
+    expect(analysis.execution.actualRAvailable).toBe(2);
+    expect(analysis.execution.averagePlannedR).toBe(2.5);
+    expect(analysis.execution.averageActualR).toBe(0.25);
+    expect(analysis.execution.averageTargetCapture).toBe(0);
+    expect(analysis.execution.profitableBelowTarget).toBe(1);
+    expect(analysis.execution.nonPositiveOutcome).toBe(1);
+  });
+
   it("compares periods without inventing PF or R deltas when either side is unavailable", () => {
     const current = buildAnalysis([trade(), trade({ tradeDate: "2026-01-02", pnl: 5 })]);
     const previous = buildAnalysis([trade({ result: "BREAK_EVEN", pnl: 0, risk: null })]);

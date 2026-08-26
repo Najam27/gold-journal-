@@ -14,6 +14,9 @@ describe("AnalysisDashboard", () => {
     render(<AnalysisDashboard accountId={1} />);
     expect(screen.getByText("Analysis & Edge Development")).toBeTruthy();
     expect(screen.getByText("SESSION ANALYSIS")).toBeTruthy();
+    expect(screen.getByText("AVERAGE PLANNED R:R")).toBeTruthy();
+    expect(screen.getByText("AVERAGE ACTUAL R")).toBeTruthy();
+    expect(screen.getByText("AVERAGE TARGET CAPTURE")).toBeTruthy();
     expect(screen.getAllByText("INSUFFICIENT DATA").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/MFE\/MAE/).length).toBeGreaterThan(0);
     expect(screen.getByText(/no excursion series is stored/i)).toBeTruthy();

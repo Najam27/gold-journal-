@@ -24,6 +24,9 @@ describe("TradeLogWithViewer", () => {
     expect(screen.getAllByText("Aligned").length).toBeGreaterThan(1);
     expect(screen.getByText("Below swing")).toBeTruthy();
     expect(screen.getByText("Good")).toBeTruthy();
+    expect(screen.getAllByText("Planned R:R").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Actual R").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("+5.00R").length).toBeGreaterThan(0);
     ["Journal entry ID", "Account ID", "Owner ID", "Screenshot file", "Screenshot key", "Saved", "Last updated", "gold-journal/21/trades/8.png", "entry.png"].forEach(value => expect(screen.queryByText(value)).toBeNull());
     expect(screen.getByAltText(/Trade screenshot/i)).toBeTruthy();
   });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getPktDateInput, getPktSession, isFuturePktDate } from "./gold";
+import { actualRMultiple, formatActualR, formatRr, getPktDateInput, getPktSession, isFuturePktDate } from "./gold";
 
 describe("getPktSession", () => {
   it("classifies a manual trade opened at 05:30 PKT as Asian regardless of the browser timezone", () => {
@@ -21,5 +21,13 @@ describe("getPktSession", () => {
     expect(getPktDateInput(afterPktMidnight)).toBe("2026-08-17");
     expect(isFuturePktDate("2026-08-18", afterPktMidnight)).toBe(true);
     expect(isFuturePktDate("2026-08-17", afterPktMidnight)).toBe(false);
+  });
+
+  it("keeps planned R:R separate from realized actual R and blocks undefined risk", () => {
+    expect(formatRr(12.3, 101.25)).toBe("1 : 8.23");
+    expect(actualRMultiple(12.3, -7.4)).toBeCloseTo(-0.6016, 4);
+    expect(formatActualR(12.3, -7.4)).toBe("-0.60R");
+    expect(formatActualR(0, 100)).toBe("—");
+    expect(actualRMultiple(0, 100)).toBeNull();
   });
 });

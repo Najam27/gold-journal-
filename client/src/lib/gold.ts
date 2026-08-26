@@ -32,6 +32,19 @@ export function formatRr(risk: number | string | null | undefined, reward: numbe
   return `1 : ${(rewardValue / riskValue).toFixed(2)}`;
 }
 
+export function actualRMultiple(risk: number | string | null | undefined, pnl: number | string | null | undefined) {
+  const riskValue = Number(risk);
+  const pnlValue = Number(pnl);
+  if (!Number.isFinite(riskValue) || !Number.isFinite(pnlValue) || riskValue <= 0) return null;
+  return pnlValue / riskValue;
+}
+
+export function formatActualR(risk: number | string | null | undefined, pnl: number | string | null | undefined) {
+  const multiple = actualRMultiple(risk, pnl);
+  if (multiple === null) return "—";
+  return `${multiple >= 0 ? "+" : ""}${multiple.toFixed(2)}R`;
+}
+
 export function getPktSession(date = new Date()) {
   const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Karachi", hour: "2-digit", hour12: false }).format(date));
   if (hour < 3 || hour >= 20) return "Post-NY";
