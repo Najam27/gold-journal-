@@ -2008,6 +2008,10 @@ function MentorView({ account }: any) {
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
+  const behaviorEvidence = trpc.analysis.get.useQuery(
+    { accountId: account?.id ?? 0, filters: {} },
+    { enabled: Boolean(account?.id), staleTime: 30_000, refetchOnWindowFocus: false }
+  );
   const analysis = trpc.analysis.ai.useMutation();
   const [jobId, setJobId] = useState<string | null>(null);
   const job = trpc.aiJobs.status.useQuery(
@@ -2033,6 +2037,7 @@ function MentorView({ account }: any) {
       ? (job.data.result as any)?.ai
       : analysis.data?.ai;
   const report = ai?.report;
+  const behavior: any = (behaviorEvidence.data as any)?.behavior;
   const pending = Boolean(
     ai?.pending &&
       (!job.data ||
@@ -2084,6 +2089,50 @@ function MentorView({ account }: any) {
             <ShieldAlert size={20} />
             <p>{aiConfig.error.message}</p>
           </div>
+        )}
+        {behavior && (
+          <section className="analysis-ai-report" aria-label="Deterministic behavior baseline">
+            <span className="section-label">DETERMINISTIC BEHAVIOR BASELINE</span>
+            <p>
+              This is saved journal evidence, not a diagnosis. High activity is a
+              concentration signal only; FOMO, revenge, overtrading, or oversizing
+              appear here only when you tagged the related trade.
+            </p>
+            <div className="risk-result-grid">
+              <RiskMetric label="Behavior-tagged" value={`${behavior.coverage.taggedTrades}/${behavior.coverage.closedTrades}`} detail="Closed trades with saved process tags" />
+              <RiskMetric label="Emotion captured" value={`${behavior.coverage.emotionTaggedTrades}/${behavior.coverage.closedTrades}`} detail="Closed trades with an emotion field" />
+              <RiskMetric label="Avg trades / day" value={String(behavior.activity.averageTradesPerActiveDay)} detail={`${behavior.activity.activeDays} active PKT days`} />
+              <RiskMetric label="Most active day" value={String(behavior.activity.maxTradesInDay)} detail={`${behavior.activity.concentratedDays} concentrated day(s), not proof of overtrading`} />
+            </div>
+            <div className="analysis-ai-columns">
+              <section>
+                <span className="section-label">SAVED PROCESS TAGS</span>
+                {behavior.tags.length ? behavior.tags.slice(0, 6).map((item: any) => (
+                  <article className="ai-evidence-card" key={item.label}>
+                    <strong>{item.label}</strong>
+                    <p>{item.sample} tagged trade(s) · {item.expectancy >= 0 ? "+" : ""}{formatMoney(item.expectancy)} average P&amp;L</p>
+                    <small>{item.confidence} confidence · tag only, not a psychological conclusion</small>
+                  </article>
+                )) : <p>No behavior tags are saved yet. Tag FOMO, revenge, overtrading, oversizing, or custom behaviors on a trade to review them here.</p>}
+              </section>
+              <section>
+                <span className="section-label">EMOTIONAL CONTEXT</span>
+                {behavior.emotions.length ? behavior.emotions.slice(0, 6).map((item: any) => (
+                  <article className="ai-evidence-card" key={item.label}>
+                    <strong>{item.label}</strong>
+                    <p>{item.sample} tagged trade(s) · {item.expectancy >= 0 ? "+" : ""}{formatMoney(item.expectancy)} average P&amp;L</p>
+                    <small>{item.confidence} confidence · self-reported journal context</small>
+                  </article>
+                )) : <p>No emotion fields are saved yet. Add how you felt before, during, and after a trade for useful behavioral review.</p>}
+              </section>
+            </div>
+            {behavior.limitations.length > 0 && (
+              <div className="analysis-ai-empty">
+                <ShieldAlert size={18} />
+                <div><strong>Behavior evidence is incomplete.</strong>{behavior.limitations.map((item: string) => <p key={item}>{item}</p>)}</div>
+              </div>
+            )}
+          </section>
         )}
         <Button
           size="lg"

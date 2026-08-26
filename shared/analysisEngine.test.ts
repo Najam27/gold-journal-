@@ -48,6 +48,21 @@ describe("deterministic analysis engine", () => {
     expect(all.mfeMae.available).toBe(0);
   });
 
+  it("aggregates saved multi-tag behavior and emotion context without diagnosing the trader", () => {
+    const rows = [
+      trade({ tradeDate: "2026-01-01T01:00:00Z", mistake: "FOMO, Revenge trading", emotionBefore: "Anxious", pnl: -10, result: "LOSS" }),
+      trade({ tradeDate: "2026-01-01T02:00:00Z", mistake: JSON.stringify(["FOMO", "Oversizing"]), emotionDuring: "Frustrated", pnl: -15, result: "LOSS" }),
+      trade({ tradeDate: "2026-01-01T03:00:00Z", mistake: "Overtrading", pnl: 5 }),
+    ];
+    const analysis = buildAnalysis(rows);
+    expect(analysis.behavior.tags.find(row => row.label === "FOMO")?.sample).toBe(2);
+    expect(analysis.behavior.tags.find(row => row.label === "Revenge trading")?.sample).toBe(1);
+    expect(analysis.behavior.emotions.find(row => row.label === "Before: Anxious")?.sample).toBe(1);
+    expect(analysis.behavior.activity.maxTradesInDay).toBe(3);
+    expect(analysis.behavior.coverage.taggedTrades).toBe(3);
+    expect(analysis.behavior.limitations.some(item => item.includes("no emotion field"))).toBe(true);
+  });
+
   it("compares periods without inventing PF or R deltas when either side is unavailable", () => {
     const current = buildAnalysis([trade(), trade({ tradeDate: "2026-01-02", pnl: 5 })]);
     const previous = buildAnalysis([trade({ result: "BREAK_EVEN", pnl: 0, risk: null })]);
