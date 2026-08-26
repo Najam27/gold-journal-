@@ -1592,6 +1592,27 @@ function RiskCalculatorPanel() {
               value={formatMoney(result.freeMargin)}
               detail="Verify broker margin before order"
             />
+            <RiskMetric
+              label="Stop distance"
+              value={String(result.stopDistance || "—")}
+              detail={`${result.stopTicks || 0} broker ticks`}
+            />
+            <RiskMetric
+              label="Loss per lot"
+              value={result.lossPerLot ? formatMoney(result.lossPerLot) : "—"}
+              detail="At the specified stop"
+            />
+            <RiskMetric
+              label="Risk budget used"
+              value={`${result.riskBudgetUtilization.toFixed(1)}%`}
+              detail="Actual risk ÷ requested risk"
+              tone={result.riskBudgetUtilization >= 99 ? "profit" : "gold"}
+            />
+            <RiskMetric
+              label="Risk / free margin"
+              value={result.freeMarginRiskPercent == null ? "—" : `${result.freeMarginRiskPercent.toFixed(2)}%`}
+              detail="Not a broker margin estimate"
+            />
           </div>
           {result.warnings.length > 0 && (
             <div className="analysis-ai-empty">
@@ -1663,7 +1684,7 @@ function RiskCalculatorPanel() {
               <span className="section-label">
                 AI RISK PROCESS REVIEW · {coachOutcome.coach.readiness}
               </span>
-              <p>{coachOutcome.coach.summary}</p>
+            <p>{coachOutcome.coach.summary}</p>
               {coachOutcome.coach.cautions.map((item: string) => (
                 <p key={item}>• {item}</p>
               ))}
@@ -2111,7 +2132,7 @@ function MentorView({ account }: any) {
         {report && (
           <div className="analysis-ai-report">
             <div className="analysis-ai-summary">
-              <span className="section-label">EVIDENCE-BOUND SUMMARY</span>
+              <span className="section-label">DIRECT, EVIDENCE-BOUND VERDICT</span>
               <p>{report.executiveSummary}</p>
             </div>
             <div className="analysis-ai-columns">
@@ -2141,6 +2162,28 @@ function MentorView({ account }: any) {
                 ))}
               </section>
             </div>
+            <div className="analysis-ai-columns">
+              <section>
+                <span className="section-label">WEAKEST CONTEXTS</span>
+                {report.weakestContexts.length ? report.weakestContexts.map((item: any) => (
+                  <article className="ai-evidence-card" key={`${item.label}-${item.claim}`}>
+                    <strong>{item.label}</strong>
+                    <p>{item.claim}</p>
+                    <small>{item.sample} trades · {item.confidence} confidence · {item.evidence}</small>
+                  </article>
+                )) : <p>No qualified weak context can be supported by this sample.</p>}
+              </section>
+              <section>
+                <span className="section-label">LEAKS AND BLIND SPOTS</span>
+                {(report.behavioralLeaks.length ? report.behavioralLeaks : report.winLossDifferences.potentialLeaks).map((item: string) => <p key={item}>• {item}</p>)}
+                {!report.behavioralLeaks.length && !report.winLossDifferences.potentialLeaks.length && <p>No behavioral conclusion can be supported from the saved fields.</p>}
+                {[...report.dataQuality.missing, ...report.dataQuality.warnings].map((item: string) => <p key={item}>• {item}</p>)}
+              </section>
+            </div>
+            <details className="analysis-details">
+              <summary>Controlled experiments before changing your strategy</summary>
+              {report.experiments.map((item: any) => <p key={item.name}><b>{item.name}:</b> {item.compare} Required sample: {item.requiredSample}. {item.caution}</p>)}
+            </details>
           </div>
         )}
       </section>

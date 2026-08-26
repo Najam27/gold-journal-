@@ -182,6 +182,29 @@ function AiReport({ result }: { result: any }) {
           ))}
         </section>
       </div>
+      <details className="analysis-details" open>
+        <summary>Direct risk, behavior, and data review</summary>
+        <div className="analysis-ai-columns">
+          <section>
+            <span className="section-label">WEAKEST CONTEXTS</span>
+            {report.weakestContexts.length ? report.weakestContexts.map((item: any) => (
+              <article className="ai-evidence-card" key={`${item.label}-${item.claim}`}>
+                <strong>{item.label}</strong>
+                <p>{item.claim}</p>
+                <small>{item.sample} trades · {item.confidence} confidence · {item.evidence}</small>
+              </article>
+            )) : <p>No qualified weak context was found in this sample.</p>}
+          </section>
+          <section>
+            <span className="section-label">BEHAVIORAL / PROCESS LEAKS</span>
+            {(report.behavioralLeaks.length ? report.behavioralLeaks : report.winLossDifferences.potentialLeaks).map((item: string) => <p key={item}>• {item}</p>)}
+            {!report.behavioralLeaks.length && !report.winLossDifferences.potentialLeaks.length && <p>No behavior leak can be supported by the saved data.</p>}
+            <span className="section-label">DATA LIMITS</span>
+            {[...report.dataQuality.missing, ...report.dataQuality.warnings].map((item: string) => <p key={item}>• {item}</p>)}
+            {!report.dataQuality.missing.length && !report.dataQuality.warnings.length && <p>No material data-quality limitation was reported.</p>}
+          </section>
+        </div>
+      </details>
       <details className="analysis-details">
         <summary>Personal playbook and experiments</summary>
         <div className="analysis-ai-columns">

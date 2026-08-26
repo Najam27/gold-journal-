@@ -3,7 +3,7 @@ vi.mock("./userAiProviderVault", () => ({ getUserAiCredential: vi.fn() }));
 import { coachRiskWithOpenRouter, DEFAULT_RISK_COACH_TIMEOUT_MS, resolveRiskCoachTimeoutMs } from "./riskCoachAi";
 import { getUserAiCredential } from "./userAiProviderVault";
 
-const calculation = { valid: true, basis: "EQUITY" as const, capital: 10_000, freeMargin: 9_900, riskPercent: 1, riskAmount: 100, stopDistance: 5, stopTicks: 50, lossPerLot: 500, rawLots: 0.2, lots: 0.2, actualRisk: 100, symbol: "XAUUSDm", currency: "USD", warnings: [], verification: ["Confirm broker values."] };
+const calculation = { valid: true, basis: "EQUITY" as const, capital: 10_000, freeMargin: 9_900, riskPercent: 1, riskAmount: 100, stopDistance: 5, stopTicks: 50, lossPerLot: 500, rawLots: 0.2, lots: 0.2, actualRisk: 100, riskBudgetUtilization: 100, freeMarginRiskPercent: 1.01, symbol: "XAUUSDm", currency: "USD", warnings: [], verification: ["Confirm broker values."] };
 
 describe("risk coach safeguards", () => {
   it("uses the selected bounded two-minute policy and caps environment overrides", () => {
