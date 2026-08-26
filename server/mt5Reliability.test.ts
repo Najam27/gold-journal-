@@ -139,8 +139,7 @@ describe("MT5 sync health", () => {
   it("distinguishes a missing record from an offline active connection", () => {
     const now = Date.parse("2026-08-20T12:00:00.000Z");
     expect(classifyMt5SyncHealth(null, now).state).toBe("MISSING");
-    expect(
-      classifyMt5SyncHealth(
+    const offline = classifyMt5SyncHealth(
         {
           active: true,
           lastPing: new Date(now - 301_000),
@@ -151,8 +150,9 @@ describe("MT5 sync health", () => {
           historySyncedCount: 0,
         },
         now
-      ).state
-    ).toBe("OFFLINE");
+      );
+    expect(offline.state).toBe("OFFLINE");
+    expect(offline.message).toContain("connection record remains active");
   });
   it("gives a concrete setup checklist before the first terminal contact", () => {
     const result = classifyMt5SyncHealth({

@@ -71,7 +71,12 @@ function connectionState(connection: {
   const health = connection.syncHealth;
   if (health?.state)
     return {
-      label: health.label || health.state,
+      label:
+        health.state === "STALE"
+          ? "MT5 configured · terminal stale"
+          : health.state === "OFFLINE"
+            ? "MT5 configured · terminal offline"
+            : health.label || health.state,
       tone:
         health.state === "CONNECTED"
           ? "live"

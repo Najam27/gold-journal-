@@ -349,6 +349,36 @@ describe("Mt5LiveView", () => {
     expect(screen.getAllByText(/Allow the server origin/i).length).toBeGreaterThan(0);
   });
 
+  it("keeps an already configured connection visibly active when its terminal is temporarily offline", () => {
+    mocks.workspaceData = {
+      connections: [{
+        id: 1,
+        accountName: "GFT 10K",
+        label: "GFT Live",
+        active: true,
+        brokerUtcOffsetMinutes: 180,
+        lastPing: new Date("2026-08-20T10:00:00Z"),
+        lastContactAt: new Date("2026-08-20T10:00:00Z"),
+        syncHealth: {
+          state: "OFFLINE",
+          label: "MT5 offline",
+          message: "The last MT5 contact was 86400s ago. The connection record remains active; check the terminal, WebRequest permission, and internet connection.",
+        },
+      }],
+      openPositions: [],
+      closedPositions: [],
+    };
+    mocks.historyData = { positions: [], total: 0, page: 1, pageSize: 20, pageCount: 1 };
+
+    render(<Mt5LiveView account={{ id: 12, name: "GFT 10K" }} accounts={[{ id: 12, name: "GFT 10K" }]} onJournalNow={vi.fn()} />);
+
+    expect(screen.getByText("MT5 configured · terminal offline")).toBeTruthy();
+    expect(screen.getAllByText(/connection record remains active/i).length).toBeGreaterThan(0);
+    expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+    expect(screen.queryByText("MT5 connection retired")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Reconnect GFT 10K/i })).toBeNull();
+  });
+
   it("does not show missing-connection recovery or create controls while the workspace request is loading", () => {
     mocks.workspaceLoading = true;
     mocks.historyData = { positions: [], total: 1, page: 1, pageSize: 20, pageCount: 1 };
