@@ -5,7 +5,7 @@ describe("Supabase auth redirect URL", () => {
   const local = { origin: "http://localhost:5173", pathname: "/" };
 
   it("uses an explicit deployed origin and removes query/hash fragments", () => {
-    expect(getAuthRedirectUrl(local, "https://gold-journal.netlify.app/?from=email#callback")).toBe("https://gold-journal.netlify.app/");
+    expect(getAuthRedirectUrl(local, "https://app.gold-journal.example/?from=email#callback")).toBe("https://app.gold-journal.example/");
   });
 
   it("falls back to the current origin and pathname for local development", () => {

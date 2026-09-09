@@ -1,5 +1,5 @@
 #property strict
-#property version   "2.12"
+#property version   "2.13"
 #property description "Gold Journal read-only journal bridge: never places or manages trades; sends account, position, and history facts to Gold Journal."
 
 input string Endpoint = "__GOLD_JOURNAL_MT5_ENDPOINT__";
@@ -10,21 +10,25 @@ input int HistoryDays = 3650;
 input bool SendHistoryOnInit = true;
 input string RiskSymbol = "";
 
-const string EA_VERSION = "2.12.0";
+const string EA_VERSION = "2.13.0";
 const string PAYLOAD_VERSION = "2";
 const int REQUEST_TIMEOUT_MS = 15000;
 const int HISTORY_BATCH_SIZE = 50;
 const int FULL_HISTORY_RETRY_SECONDS = 24 * 60 * 60;
+const int QUICK_HISTORY_WINDOW_SECONDS = 24 * 60 * 60;
 const int MAX_RETRY_BACKOFF_SECONDS = 60;
 
 datetime g_last_history_sync = 0;
 datetime g_last_history_attempt = 0;
+datetime g_last_close_event_at = 0;
 datetime g_next_retry_at = 0;
 datetime g_last_summary_success = 0;
 datetime g_last_open_success = 0;
 datetime g_last_history_success = 0;
 int g_consecutive_failures = 0;
 bool g_permanent_rejection = false;
+bool g_api_rejected = false;
+bool g_endpoint_rejected = false;
 bool g_compatibility_reported = false;
 bool g_summary_reported = false;
 bool g_open_batch_reported = false;
@@ -32,6 +36,7 @@ bool g_history_reported = false;
 bool g_history_in_progress = false;
 bool g_history_full_replay = true;
 int g_history_cursor = 0;
+ulong g_deal_position_id = 0;
 string g_connection_reference = "";
 string g_data_source_reference = "";
 
@@ -53,7 +58,7 @@ string Direction(ENUM_POSITION_TYPE type) { return type == POSITION_TYPE_BUY ? "
 string DealDirection(long type) { return type == DEAL_TYPE_BUY ? "BUY" : "SELL"; }
 string OppositeDirection(long type) { return type == DEAL_TYPE_BUY ? "SELL" : "BUY"; }
 
-bool IsTransientStatus(int status) { return status == -1 || status == 408 || status == 429 || status == 500 || status == 502 || status == 503 || status == 504; }
+bool IsTransientStatus(int status) { return status == -1 || status == 400 || status == 408 || status == 410 || status == 422 || status == 429 || status == 500 || status == 502 || status == 503 || status == 504; }
 int RetryDelaySeconds() {
    int exponent = MathMin(g_consecutive_failures - 1, 4);
    int base_delay = MathMin(MAX_RETRY_BACKOFF_SECONDS, SyncSeconds * (1 << exponent));
@@ -103,6 +108,7 @@ void MarkEventSuccess(string expectedEvent, string connection_reference, string 
 bool SendJson(string payload, string expectedEvent) {
    if(StringLen(payload) == 0) return false;
    if(g_permanent_rejection) return false;
+   if(g_api_rejected && expectedEvent != "compat") return false;
    if(g_next_retry_at > TimeCurrent()) return false;
    if(!TerminalInfoInteger(TERMINAL_CONNECTED)) {
       PrintFormat("[MT5 LIVE] %s deferred: terminal is not connected to the broker", expectedEvent);
@@ -127,11 +133,19 @@ bool SendJson(string payload, string expectedEvent) {
          g_consecutive_failures++;
          int delay = RetryDelaySeconds();
          g_next_retry_at = TimeCurrent() + delay;
-         PrintFormat("[MT5 LIVE] server temporarily unavailable; operation=%s; http=%d; endpoint=%s; retry=%d; retry_in=%ds", expectedEvent, status, Endpoint, g_consecutive_failures, delay);
+         string server_code = JsonStringValue(response_text, "code");
+         if(server_code != "") PrintFormat("[MT5 LIVE] server rejected the %s payload (%s); http=%d; retry_in=%ds. If the code is FUTURE_TRADE or INVALID_MT5_TIMESTAMP, verify BrokerUtcOffsetMinutes and the broker clock in MT5.", expectedEvent, server_code, status, delay);
+         else PrintFormat("[MT5 LIVE] server temporarily unavailable; operation=%s; http=%d; endpoint=%s; retry=%d; retry_in=%ds", expectedEvent, status, Endpoint, g_consecutive_failures, delay);
       } else {
          g_permanent_rejection = true;
-         if(status == 401 || status == 403) PrintFormat("[MT5 LIVE] API key rejected or retired; operation=%s; http=%d. In Gold Journal MT5 Live, issue a replacement key, paste it into EA Inputs, then restart the EA", expectedEvent, status);
-         else if(status == 404 || status == 405) PrintFormat("[MT5 LIVE] MT5 endpoint not found; operation=%s; http=%d; endpoint=%s. Download a fresh EA from the same Gold Journal deployment, then restart it", expectedEvent, status, Endpoint);
+         if(status == 401 || status == 403) {
+            g_api_rejected = true;
+            PrintFormat("[MT5 LIVE] API key rejected or retired; operation=%s; http=%d. In Gold Journal MT5 Live, issue a replacement key, paste it into EA Inputs, then restart the EA", expectedEvent, status);
+         }
+         else if(status == 404 || status == 405) {
+            g_endpoint_rejected = true;
+            PrintFormat("[MT5 LIVE] MT5 endpoint not found; operation=%s; http=%d; endpoint=%s. Download a fresh EA from the same Gold Journal deployment, then restart it", expectedEvent, status, Endpoint);
+         }
          else PrintFormat("[MT5 LIVE] request rejected; operation=%s; http=%d; endpoint=%s. Check the endpoint and payload, then restart the EA", expectedEvent, status, Endpoint);
       }
       return false;
@@ -294,13 +308,31 @@ string ClosedPositionJson(ulong position_id) {
 
 void SendHistory(bool fullReplay) {
    datetime now = TimeCurrent();
+   if(g_history_in_progress && !fullReplay) return;
    g_last_history_attempt = now;
    if(!g_history_in_progress) {
       g_history_cursor = 0;
       g_history_in_progress = true;
       g_history_full_replay = fullReplay;
    }
-   datetime from = now - (g_history_full_replay ? HistoryDays * 86400 : MathMax(3600, SyncSeconds * 4));
+   datetime from;
+   if(g_history_full_replay) {
+      from = now - HistoryDays * 86400;
+   } else {
+      // Always re-scan back to the last successful close sync (bounded by the
+      // configured history window). The previous fixed 1-hour quick sweep could
+      // miss a close that happened while the EA was offline or backing off, and
+      // then the next 1-hour sweep found nothing and re-armed the 24-hour full
+      // replay timer, leaving the position OPEN in the journal for up to a day.
+      datetime window_start = now - QUICK_HISTORY_WINDOW_SECONDS;
+      datetime oldest = now - HistoryDays * 86400;
+      // Before the first successful sync the full replay owns the backfill, so
+      // an incremental sweep simply covers the configured history window.
+      datetime since_last_success = (g_last_history_sync > 0 ? g_last_history_sync : oldest);
+      if(since_last_success < window_start) window_start = since_last_success;
+      if(window_start < oldest) window_start = oldest;
+      from = window_start;
+   }
    if(!HistorySelect(from, now)) {
       PrintFormat("Gold Journal HistorySelect failed: %d", GetLastError());
       return;
@@ -391,5 +423,17 @@ void OnTimer() { Sync(); }
 void OnTradeTransaction(const MqlTradeTransaction &transaction, const MqlTradeRequest &request, const MqlTradeResult &result) {
    if(transaction.deal == 0) return;
    long entry = HistoryDealGetInteger(transaction.deal, DEAL_ENTRY);
-   if(entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_OUT_BY || entry == DEAL_ENTRY_INOUT) SendHistory(false);
+   if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_OUT_BY && entry != DEAL_ENTRY_INOUT) return;
+   // MT5 emits one transaction per closing deal. A stop-out/TP/manual close can
+   // produce several deals for the same position (for example a netting
+   // INOUT or multiple partial fills); debounce to a single quick sync so the
+   // first deal is not missed while a later transaction restarts the sweep.
+   ulong position_id = (ulong)HistoryDealGetInteger(transaction.deal, DEAL_POSITION_ID);
+   if(position_id != 0 && position_id == g_deal_position_id) {
+      if(TimeCurrent() - g_last_close_event_at > 60) g_deal_position_id = 0;
+      else return;
+   }
+   g_deal_position_id = position_id;
+   g_last_close_event_at = TimeCurrent();
+   SendHistory(false);
 }

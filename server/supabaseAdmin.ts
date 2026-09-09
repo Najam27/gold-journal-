@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { createHash } from "crypto";
+import { createHash } from "node:crypto";
 
 const SUPABASE_REQUEST_TIMEOUT_MS = 15_000;
 let cachedConfig = "";

@@ -1,0 +1,33 @@
+# Cloudflare Workers deployment for Gold Journal (free plan: app + API, one origin).
+#
+# Frontend and API share one hostname: Worker Assets serve the Vite build from
+# dist/public and this script answers /api/*, /mt5*, and SPA fallbacks.
+#
+# Build first (always):
+#   pnpm build            # vite -> dist/public, Node server -> dist/index.js,
+#                         # Worker bundle -> dist/worker/worker.js (EA inlined)
+#
+# Deploy (one-time login via `pnpm dlx wrangler login`):
+#   pnpm dlx wrangler deploy
+#
+# Required secrets (never commit them; set once per worker name):
+#   pnpm dlx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+#   pnpm dlx wrangler secret put AI_KEY_ENCRYPTION_SECRET
+#
+# Non-secret server variables. SUPABASE_URL is a public project identifier
+# (not a credential) and is safe in this file; AI_JOB_WORKER_BASE_URL is the
+# canonical public origin used for durable AI job dispatch to
+# /api/ai-job-dispatch — uncomment and set both to real values.
+
+name = "gold-journal"
+main = "dist/worker/worker.js"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+assets = { directory = "./dist/public", not_found_handling = "none" }
+
+[vars]
+NODE_ENV = "production"
+SUPABASE_STORAGE_BUCKET = "trade-screenshots"
+# SUPABASE_URL = "https://<project-ref>.supabase.co"
+# AI_JOB_WORKER_BASE_URL = "https://app.yourdomain.com"

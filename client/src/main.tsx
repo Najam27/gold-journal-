@@ -8,6 +8,7 @@ import App from "./App";
 import { queryClient } from "./lib/queryClient";
 import { getSupabaseAccessToken } from "./lib/authSession";
 import { fetchTrpcResponse } from "./lib/trpcFetch";
+import { apiBaseUrl } from "./lib/apiBase";
 import "./index.css";
 import "./uiux-system.css";
 import "./theme-repair.css";
@@ -42,7 +43,7 @@ queryClient.getMutationCache().subscribe(event => {
 const trpcClient = trpc.createClient({
   links: [
     httpBatchLink({
-      url: "/api/trpc",
+      url: `${apiBaseUrl}/api/trpc`,
       transformer: superjson,
       async headers() {
         const token = await getSupabaseAccessToken();

@@ -44,7 +44,8 @@ function connectionBody(connection: { apiKey: string }) {
   return { connectionReference: mt5ConnectionReference(connection.apiKey), dataSourceReference: supabaseDataSourceReference() };
 }
 
-type Mt5FailureCode = "MIGRATION_REQUIRED_0008" | "DATABASE_RETRYABLE" | "INVALID_SYNC_DATA" | "SYNC_PERMISSION_DENIED" | "INVALID_MT5_TIMESTAMP" | "FUTURE_TRADE" | "SYNC_UNAVAILABLE";
+export type Mt5FailureCode = "MIGRATION_REQUIRED_0008" | "DATABASE_RETRYABLE" | "INVALID_SYNC_DATA" | "SYNC_PERMISSION_DENIED" | "INVALID_MT5_TIMESTAMP" | "FUTURE_TRADE" | "SYNC_UNAVAILABLE";
+export type Mt5HttpOutcome = { status: number; body: Record<string, unknown> };
 type SupabaseWrappedError = Error & { supabaseCode?: string; supabaseDetails?: string; supabaseHint?: string };
 
 function errorText(error: unknown) {
@@ -52,23 +53,23 @@ function errorText(error: unknown) {
   return [wrapped?.message, wrapped?.supabaseDetails, wrapped?.supabaseHint, wrapped?.supabaseCode].filter(Boolean).join(" ").toLowerCase();
 }
 
-function syncFailureDiagnostic(error: unknown) {
+export function syncFailureDiagnostic(error: unknown) {
   if (error instanceof Mt5TimestampError) {
     return error.code === "FUTURE_TRADE" ? "MT5 history contains a timestamp in the future; verify the broker clock and UTC offset." : "MT5 history contains an invalid timestamp.";
   }
   const wrapped = error as SupabaseWrappedError;
   const providerCode = String(wrapped?.supabaseCode || "").toUpperCase();
   const text = errorText(error);
-  if (providerCode === "PGRST202" || providerCode === "42601" || /schema cache|could not find the function|function .*gj_sync_mt5_(position|open_batch)|function .*gj_record_mt5_event_failure|column .* does not exist|relation .* does not exist|migration|position_payload|syntax error|insert has more target columns/.test(text)) return "Supabase MT5 RPC migration is invalid or stale; apply migration 0016 and reload the PostgREST schema.";
+  if (providerCode === "PGRST202" || providerCode === "42601" || /schema cache|could not find the function|function .*gj_sync_mt5_(position|open_batch)|function .*gj_record_mt5_event_failure|column .* does not exist|relation .* does not exist|migration|position_payload|syntax error|insert has more target columns/.test(text)) return "Supabase MT5 RPC migration is invalid or stale; apply migration 0016 and reload the PostgREST schema (Supabase dashboard → SQL → 'Reload schema cache' or run NOTIFY pgrst, 'reload schema').";
   if (providerCode === "22P02" || providerCode === "22007" || /invalid input syntax|date\/time field|numeric value out of range/.test(text)) return "MT5 history contains an invalid timestamp or numeric value.";
   if (providerCode === "42501" || /permission denied|account unavailable|not authorized/.test(text)) return "Supabase rejected the MT5 account or service-role operation.";
   if (/supabase database is unavailable|server configuration is unavailable|fetch failed|econnreset|enotfound/.test(text)) return "The server could not reach Supabase or its server configuration is incomplete.";
   if (/deadlock|timeout|timed out|lock not available|temporarily unavailable/.test(text)) return "Supabase was temporarily unavailable or the account row was locked; retry history.";
-  if (providerCode) return `Supabase returned provider code ${providerCode}; inspect the Netlify function log for its redacted details.`;
-  return "Inspect the Netlify function log for the redacted Supabase error metadata.";
+  if (providerCode) return `Supabase returned provider code ${providerCode}; check the API deployment logs (wrangler tail on Cloudflare Workers) for the redacted details.`;
+  return "Check the API deployment logs (wrangler tail on Cloudflare Workers) for the redacted Supabase error metadata.";
 }
 
-function classifySyncFailure(error: unknown): Mt5FailureCode {
+export function classifySyncFailure(error: unknown): Mt5FailureCode {
   if (error instanceof Mt5TimestampError) return error.code;
   const wrapped = error as SupabaseWrappedError;
   const providerCode = String(wrapped?.supabaseCode || "").toUpperCase();
@@ -170,24 +171,65 @@ export async function processMt5Payload(body: unknown) {
 
 export function registerMt5Ingest(app: Express, paths: string[] = ["/api/mt5"]) {
   for (const path of paths) app.post(path, async (req: Request, res: Response) => {
-    try {
-      const outcome = await processMt5Payload(req.body);
-      res.status(outcome.status).json(outcome.body);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        const details = error.issues.slice(0, 4).map(issue => `${issue.path.join(".") || "payload"}: ${issue.message}`);
-        const apiKey = typeof req.body?.api_key === "string" ? req.body.api_key : "";
-        if (req.body?.event === "history_batch" && apiKey) {
-          try { const connection = await getActiveMt5Connection(apiKey); if (connection) await recordMt5HistoryFailure(connection.id, `Invalid history payload — ${details.join("; ")}`); } catch { /* preserve the validation response */ }
-        }
-        res.status(400).json({ ok: false, code: "INVALID_PAYLOAD", details });
-        return;
-      }
-      const code = classifySyncFailure(error);
-      console.error("[MT5] ingest failed", code, syncFailureDiagnostic(error), error instanceof Error ? error.message : "unknown error");
-      res.status(code === "INVALID_SYNC_DATA" || code === "SYNC_PERMISSION_DENIED" || code === "INVALID_MT5_TIMESTAMP" || code === "FUTURE_TRADE" ? 422 : 503).json({ ok: false, code, diagnostic: syncFailureDiagnostic(error) });
-    }
+    const outcome = await mt5PayloadOutcome(req.body);
+    res.status(outcome.status).json(outcome.body);
   });
+}
+
+/**
+ * Single-source outcome builder shared by the Express dev server and the
+ * Cloudflare Worker entry: runs validation + processing and maps every error
+ * (Zod payload errors, timestamp/data rejections, Supabase failures) to the
+ * same HTTP response contract the EA has always received.
+ */
+export async function mt5PayloadOutcome(body: unknown): Promise<Mt5HttpOutcome> {
+  try {
+    const outcome = await processMt5Payload(body);
+    return { status: outcome.status, body: outcome.body as Record<string, unknown> };
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      const details = error.issues.slice(0, 4).map(issue => `${issue.path.join(".") || "payload"}: ${issue.message}`);
+      const apiKey = typeof (body as { api_key?: unknown } | null)?.api_key === "string" ? (body as { api_key: string }).api_key : "";
+      if ((body as { event?: string } | null)?.event === "history_batch" && apiKey) {
+        try { const connection = await getActiveMt5Connection(apiKey); if (connection) await recordMt5HistoryFailure(connection.id, `Invalid history payload — ${details.join("; ")}`); } catch { /* preserve the validation response */ }
+      }
+      return { status: 400, body: { ok: false, code: "INVALID_PAYLOAD", details } };
+    }
+    const code = classifySyncFailure(error);
+    console.error("[MT5] ingest failed", code, syncFailureDiagnostic(error), error instanceof Error ? error.message : "unknown error");
+    const status = code === "INVALID_SYNC_DATA" || code === "SYNC_PERMISSION_DENIED" || code === "INVALID_MT5_TIMESTAMP" || code === "FUTURE_TRADE" ? 422 : 503;
+    return { status, body: { ok: false, code, diagnostic: syncFailureDiagnostic(error) } };
+  }
+}
+
+/**
+ * Raw-text ingestion used by the Cloudflare Worker: mirrors the Express
+ * raw-body adapter (MQL5 StringToCharArray appends a NUL byte) plus the JSON
+ * parser error contract, without requiring Node Buffer or Express.
+ */
+export function parseMt5JsonBodyText(rawText: string): unknown {
+  const normalized = rawText.replace(/\u0000+$/g, "").trim();
+  if (!normalized) return {};
+  return JSON.parse(normalized);
+}
+
+export async function ingestMt5Text(rawText: string): Promise<Mt5HttpOutcome> {
+  let payload: unknown;
+  try {
+    payload = parseMt5JsonBodyText(rawText);
+  } catch {
+    const apiKey = rawText.match(/"api_key"\s*:\s*"([^"\\]{24,96})"/)?.[1];
+    if (apiKey) {
+      try {
+        const connection = await getActiveMt5Connection(apiKey);
+        if (connection) await recordMt5HistoryFailure(connection.id, "Malformed JSON request body.");
+      } catch {
+        /* return the parser response */
+      }
+    }
+    return { status: 400, body: { ok: false, code: "INVALID_JSON", details: ["Malformed JSON request body."] } };
+  }
+  return mt5PayloadOutcome(payload);
 }
 
 export function registerMt5Compatibility(app: Express, path = "/api/mt5/compat") {

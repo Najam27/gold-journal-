@@ -67,10 +67,10 @@ describe("server OpenRouter analysis", () => {
     expect(aiTestHooks.cacheSize()).toBe(0);
   });
 
-  it("defaults to a bounded two-minute shared AI budget and never lets configuration exceed it", () => {
+  it("defaults to a bounded two-minute AI budget and permits longer background overrides", () => {
     expect(DEFAULT_AI_TIMEOUT_MS).toBe(120_000);
     expect(aiTestHooks.resolveAiTimeoutMs(undefined)).toBe(120_000);
-    expect(aiTestHooks.resolveAiTimeoutMs("240000")).toBe(120_000);
+    expect(aiTestHooks.resolveAiTimeoutMs("240000")).toBe(240_000);
     expect(aiTestHooks.resolveAiTimeoutMs("5000")).toBe(5_000);
   });
 

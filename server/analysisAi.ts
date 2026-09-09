@@ -4,6 +4,11 @@ import { compactAnalysisForAi, type AnalysisResult, type Confidence, type Metric
 import { getUserAiCredential, getUserAiProviderStatus } from "./userAiProviderVault";
 
 export const DEFAULT_AI_TIMEOUT_MS = 120_000;
+// Netlify Background Functions may run for up to 15 minutes, so environment
+// overrides are no longer clamped to the old 120 s synchronous budget. A long
+// analysis prompt against a slow provider previously always timed out even
+// though the background worker could keep waiting.
+export const MAX_AI_TIMEOUT_MS = 14 * 60_000;
 const MIN_AI_TIMEOUT_MS = 1_000;
 const AI_CACHE_TTL_MS = 15 * 60_000;
 const AI_CACHE_MAX = 128;
@@ -47,7 +52,7 @@ const systemPrompt = "You are a direct, candid trading-performance and behavior-
 export function resolveAiTimeoutMs(value = process.env.OPENROUTER_TIMEOUT_MS) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return DEFAULT_AI_TIMEOUT_MS;
-  return Math.min(DEFAULT_AI_TIMEOUT_MS, Math.max(MIN_AI_TIMEOUT_MS, Math.floor(parsed)));
+  return Math.min(MAX_AI_TIMEOUT_MS, Math.max(MIN_AI_TIMEOUT_MS, Math.floor(parsed)));
 }
 export async function getOpenRouterStatus(userId: number) { return getUserAiProviderStatus(userId); }
 export type EvidenceObject = { evidenceId: string; dimension: string; context: string; sample: number; wins: number; losses: number; expectancy: number; profitFactor: number | null; averageR: number | null; maxDrawdown: number; confidence: Confidence; evidenceTier: string };
@@ -57,15 +62,31 @@ function cacheKey(userId: number, accountId: number, analysis: AnalysisResult) {
 function extractJson(value: unknown) { const text = String(value ?? "").trim(); const fenced = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i); return JSON.parse(fenced ? fenced[1] : text); }
 function removeExpiredCache() { const now = Date.now(); for (const [key, value] of Array.from(aiCache.entries())) if (value.expiresAt <= now) aiCache.delete(key); while (aiCache.size > AI_CACHE_MAX) aiCache.delete(aiCache.keys().next().value!); }
 
-function allowedNumbers(value: unknown) { const matches = JSON.stringify(value).match(/-?\d+(?:\.\d+)?/g) ?? []; const values = new Set<number>([0]); for (const match of matches) { const number = Number(match); if (Number.isFinite(number)) { values.add(number); values.add(Number(number.toFixed(2))); values.add(Math.round(number)); } } return values; }
-function hasOnlyGroundedNumbers(report: AiReport, compact: unknown) { const allowed = allowedNumbers(compact); const matches = JSON.stringify(report).match(/-?\d+(?:\.\d+)?/g) ?? []; return matches.every(match => allowed.has(Number(match)) || allowed.has(Math.round(Number(match)))); }
+// Grounding is semantic, not character-exact. Strict equality made capable
+// models fail with "ungrounded numerical claim" (and then "AI analysis
+// temporarily unavailable") whenever they wrote a 1-decimal percentage or a
+// truncated average instead of the full double from the evidence manifest.
+const GROUNDING_TOLERANCE_RELATIVE = 0.02; // allow 2% drift (e.g. 62.3 vs 62.345678…)
+const GROUNDING_TOLERANCE_ABSOLUTE = 0.5;  // allow small absolute drift (0.5 $/ticks)
+function allowedNumbers(value: unknown) { const matches = JSON.stringify(value).match(/-?\d+(?:\.\d+)?/g) ?? []; const values = new Set<number>([0]); for (const match of matches) { const number = Number(match); if (Number.isFinite(number)) { values.add(number); values.add(Number(number.toFixed(2))); values.add(Number(number.toFixed(1))); values.add(Math.round(number)); } } return values; }
+function isGroundedValue(match: string, allowed: Set<number>) {
+  const number = Number(match);
+  if (!Number.isFinite(number) || allowed.has(number) || allowed.has(Math.round(number))) return true;
+  for (const candidate of Array.from(allowed)) {
+    if (candidate === 0) continue;
+    if (Math.abs(candidate - number) <= GROUNDING_TOLERANCE_ABSOLUTE) return true;
+    if (Math.abs(candidate - number) <= Math.abs(candidate) * GROUNDING_TOLERANCE_RELATIVE) return true;
+  }
+  return false;
+}
+function hasOnlyGroundedNumbers(report: AiReport, compact: unknown) { const allowed = allowedNumbers(compact); const matches = JSON.stringify(report).match(/-?\d+(?:\.\d+)?/g) ?? []; return matches.every(match => isGroundedValue(match, allowed)); }
 function validateEvidenceReport(report: AiReport, manifest: EvidenceObject[]) { const byId = new Map(manifest.map(item => [item.evidenceId, item])); const rows = [...report.strongestEdges, ...report.weakestContexts, ...report.sessionAnalysis, ...report.timeframeAnalysis, ...report.levelAnalysis, ...report.setupAnalysis]; for (const row of rows) { const source = byId.get(row.evidenceId); if (!source || source.dimension !== row.dimension || source.context !== row.context || source.sample !== row.sample || source.wins !== row.wins || source.losses !== row.losses || Math.abs(source.expectancy - row.expectancy) > 0.0001 || source.profitFactor !== row.profitFactor || source.averageR !== row.averageR || source.maxDrawdown !== row.maxDrawdown || source.evidenceTier !== row.evidenceTier) return false; } for (const hypothesis of report.edgeHypotheses) if (hypothesis.evidenceIds.some(id => !byId.has(id))) return false; const narrative = JSON.stringify(report).toLowerCase(); if (/\b(buy now|sell now|buy signal|sell signal|price target|predict the market|guaranteed return)\b/.test(narrative)) return false; return true; }
 
 async function callModel(model: string, compact: unknown, manifest: EvidenceObject[], key: string, timeoutMs: number) {
   if (timeoutMs <= 0) throw new DOMException("AI analysis timed out", "TimeoutError");
   const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(new DOMException("AI analysis timed out", "TimeoutError")), timeoutMs);
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}`, "HTTP-Referer": process.env.OPENROUTER_APP_URL?.trim() || "https://gold-journal.netlify.app", "X-Title": "Gold Journal Analysis" }, signal: controller.signal, body: JSON.stringify({ model, temperature: 0.1, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: JSON.stringify(compact) }], response_format: { type: "json_schema", json_schema: { name: "gold_journal_analysis", strict: true, schema: responseSchema } } }) });
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}`, "HTTP-Referer": process.env.OPENROUTER_APP_URL?.trim() || "https://github.com/Najam27/gold-journal-", "X-Title": "Gold Journal Analysis" }, signal: controller.signal, body: JSON.stringify({ model, temperature: 0.1, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: JSON.stringify(compact) }], response_format: { type: "json_schema", json_schema: { name: "gold_journal_analysis", strict: true, schema: responseSchema } } }) });
     const body = await response.json().catch(() => null);
     if (!response.ok) throw new Error(`OpenRouter ${response.status}`);
     const parsed = aiReportSchema.safeParse(extractJson(body?.choices?.[0]?.message?.content));
