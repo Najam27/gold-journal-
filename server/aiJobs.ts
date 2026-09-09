@@ -15,6 +15,13 @@ type Dispatch = { id: string; token: string };
 
 const tokenHash = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
 const safeFailure = "AI processing did not complete. Please retry from the journal.";
+// Background workers claim a job immediately, so any job still QUEUED long
+// after dispatch is a worker that never started (missing/misconfigured
+// background-function environment or a host that discarded the request).
+const QUEUED_STALE_AFTER_MS = 2 * 60_000;
+// A RUNNING job that outlives the maximum provider budget plus processing
+// margin is stuck (worker froze or the host terminated it mid-flight).
+const RUNNING_STALE_AFTER_MS = 16 * 60_000;
 
 async function insertJob(userId: number, accountId: number, kind: AiJobKind, payload: Record<string, unknown>): Promise<Dispatch> {
   await getOwnedAccount(userId, accountId);
@@ -37,7 +44,16 @@ function allowInlineWorkerFallback() {
   const explicit = process.env.AI_JOB_INLINE_FALLBACK?.trim().toLowerCase();
   if (explicit === "true") return true;
   if (explicit === "false") return false;
-  return process.env.NODE_ENV !== "production";
+  // Netlify does not set NODE_ENV unless it is configured explicitly, and its
+  // functions freeze after the response, so the old implicit "not production"
+  // fallback silently left every job QUEUED/RUNNING forever on a missing
+  // worker base URL. Inline dispatch is now opt-in (long-running process
+  // servers such as `pnpm dev` set AI_JOB_INLINE_FALLBACK=true) and never
+  // auto-enabled by an unset NODE_ENV. An explicit false wins everywhere,
+  // and an explicit true is honored on any runtime so operators can opt in.
+  if (process.env.AI_JOB_INLINE_FALLBACK === "false") return false;
+  if (process.env.AI_JOB_INLINE_FALLBACK === "true") return true;
+  return process.env.NODE_ENV === "development";
 }
 
 function dispatchInlineAiJob(dispatch: Dispatch) {
@@ -73,7 +89,29 @@ async function loadOwnedJob(userId: number, jobId: string) {
 export async function getAiJobStatus(userId: number, jobId: string) {
   const job = await loadOwnedJob(userId, jobId);
   if (!job) throw new Error("That AI processing request is unavailable.");
+  if (job.status === "QUEUED") {
+    const created = Date.parse(job.createdAt ?? "");
+    const queuedAgeMs = Number.isFinite(created) ? Date.now() - created : 0;
+    if (queuedAgeMs > QUEUED_STALE_AFTER_MS) {
+      await expireQueuedJob(userId, jobId, "AI processing did not start on this deployment. Check the background-function configuration, then retry.");
+      job.status = "FAILED"; job.errorMessage = "AI processing did not start on this deployment. Check the background-function configuration, then retry.";
+    }
+  } else if (job.status === "RUNNING") {
+    const updated = Date.parse(job.updatedAt ?? "");
+    const runningAgeMs = Number.isFinite(updated) ? Date.now() - updated : 0;
+    if (runningAgeMs > RUNNING_STALE_AFTER_MS) {
+      await expireRunningJob(jobId, "AI processing is taking too long and has been stopped. Please retry from the journal.");
+      job.status = "FAILED"; job.errorMessage = "AI processing is taking too long and has been stopped. Please retry from the journal.";
+    }
+  }
   return { id: job.id, kind: job.kind, status: job.status, result: job.result, message: job.status === "FAILED" ? job.errorMessage || safeFailure : null, completedAt: job.completedAt };
+}
+
+async function expireQueuedJob(userId: number, jobId: string, message: string) {
+  await getSupabaseAdmin().from("gj_ai_jobs").update({ status: "FAILED", errorMessage: message, completedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).eq("id", jobId).eq("userId", userId).eq("status", "QUEUED");
+}
+async function expireRunningJob(jobId: string, message: string) {
+  await getSupabaseAdmin().from("gj_ai_jobs").update({ status: "FAILED", errorMessage: message, completedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }).eq("id", jobId).eq("status", "RUNNING");
 }
 
 async function claimJob(jobId: string, token: string) {

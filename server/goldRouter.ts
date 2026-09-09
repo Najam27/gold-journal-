@@ -12,6 +12,7 @@ import { mt5ApiKeyFingerprint, mt5ConnectionReference } from "./mt5Security";
 import { getMt5Integrity } from "./mt5Reliability";
 import { calculateAccountMt5Risk } from "./mt5Risk";
 import { deleteUserAiCredential, getUserAiProviderStatus, saveUserAiCredential, testUserAiCredential } from "./userAiProviderVault";
+import { getUserAiCredential } from "./userAiProviderVault";
 import { dispatchAiJob, failQueuedAiJob, getAiJobStatus, queueAnalysisJob, queueRiskCoachJob } from "./aiJobs";
 import { toSafeAccount, toSafeAccountListItem, toSafeJournalRecord, toSafeTrade } from "./journalPrivacy";
 import { protectedProcedure, router } from "./_core/trpc";
@@ -160,11 +161,25 @@ export const goldRouter = router({
     ai: protectedProcedure.input(analysisInput).mutation(async ({ ctx, input }) => {
       if (!(await consumeRateLimit("analysis-ai", ctx.user.id, 3, 10 * 60_000))) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "AI analysis limit reached. Please retry later." });
       const deterministic = await getAccountAnalysis(ctx.user.id, input.accountId, input.filters);
+      // Validate the saved model before spending queue/quota: a mistyped model
+      // id currently surfaces only as a vague provider failure minutes later.
+      const credential = await getUserAiCredential(ctx.user.id).catch(() => null);
       const config = await getOpenRouterStatus(ctx.user.id);
+      if (credential && credential.model !== config.model) config.model = credential.model;
       if (!config.vaultAvailable) { const ai: AiOutcome = { available: false, cached: false, model: null, report: null, message: "Secure AI key storage is unavailable on this deployment. Deterministic analysis remains available." }; return { ...deterministic, ai }; }
       if (!config.configured) { const ai: AiOutcome = { available: false, cached: false, model: null, report: null, message: "AI is not configured. Add your OpenRouter key in Options; deterministic analysis remains available." }; return { ...deterministic, ai }; }
       const dispatch = await queueAnalysisJob(ctx.user.id, input.accountId, input.filters);
-      try { await dispatchAiJob(dispatch); } catch (error) { await failQueuedAiJob(ctx.user.id, dispatch.id); throw error; }
+      try { await dispatchAiJob(dispatch); }
+      catch (error) {
+        // Keep the queued job and let the client poll it to a terminal state
+        // with a useful FAILED message instead of throwing a vague error and
+        // discarding the only record of what happened. The aiJobs.status lease
+        // marks never-started jobs FAILED after two minutes.
+        await failQueuedAiJob(ctx.user.id, dispatch.id);
+        console.warn("[analysis-ai] dispatch failed", JSON.stringify({ jobId: dispatch.id, reason: error instanceof Error ? error.message : "unknown" }));
+        const ai: AiOutcome = { available: false, cached: false, model: null, report: null, pending: false, jobId: dispatch.id, message: "AI analysis could not be started on this deployment. Verify the background-worker configuration, then retry." };
+        return { ...deterministic, ai };
+      }
       const ai: AiOutcome = { available: false, cached: false, model: config.model, report: null, pending: true, jobId: dispatch.id, message: "AI analysis is processing securely in the background." };
       return { ...deterministic, ai };
     }),
@@ -226,11 +241,19 @@ export const goldRouter = router({
     riskCoach: protectedProcedure.input(riskCalculatorInput).mutation(async ({ ctx, input }) => {
       if (!(await consumeRateLimit("risk-coach", ctx.user.id, 6, 10 * 60_000))) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "AI risk-coach limit reached. Please retry later." });
       const calculation = await calculateAccountMt5Risk(ctx.user.id, input.accountId, input);
+      const credential = await getUserAiCredential(ctx.user.id).catch(() => null);
       const config = await getOpenRouterStatus(ctx.user.id);
+      if (credential && config.configured && credential.model !== config.model) config.model = credential.model;
       if (!config.vaultAvailable) { const coach: RiskCoachOutcome = { available: false, coach: null, message: "Secure AI key storage is unavailable on this deployment." }; return { calculation, coach }; }
       if (!config.configured) { const coach: RiskCoachOutcome = { available: false, coach: null, message: "AI Risk Coach is not configured. Add your OpenRouter key in Options." }; return { calculation, coach }; }
       const dispatch = await queueRiskCoachJob(ctx.user.id, input.accountId, calculation);
-      try { await dispatchAiJob(dispatch); } catch (error) { await failQueuedAiJob(ctx.user.id, dispatch.id); throw error; }
+      try { await dispatchAiJob(dispatch); }
+      catch (error) {
+        await failQueuedAiJob(ctx.user.id, dispatch.id);
+        console.warn("[risk-coach] dispatch failed", JSON.stringify({ jobId: dispatch.id, reason: error instanceof Error ? error.message : "unknown" }));
+        const coach: RiskCoachOutcome = { available: false, coach: null, pending: false, jobId: dispatch.id, message: "AI Risk Coach could not be started on this deployment. Verify the background-worker configuration, then retry." };
+        return { calculation, coach };
+      }
       const coach: RiskCoachOutcome = { available: false, coach: null, pending: true, jobId: dispatch.id, message: "AI Risk Coach is processing securely in the background." };
       return { calculation, coach };
     }),

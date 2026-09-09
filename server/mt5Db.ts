@@ -230,12 +230,6 @@ type LiveBase = { ticket: bigint; symbol: string; direction: "BUY" | "SELL"; lot
 
 type SyncedMt5Position = LiveBase & { pnl: number; result: "WIN" | "LOSS" | "BREAK_EVEN" | "OPEN"; tradeTime: Date; closeTime?: Date | null };
 
-async function upsertTradeRecord(db: any, record: any) {
-  const query = db.insert(trades).values(record) as any;
-  if (typeof query.onConflictDoUpdate === "function") return query.onConflictDoUpdate({ target: [trades.accountId, trades.mt5Ticket], set: { tradeDate: record.tradeDate, session: record.session, direction: record.direction, result: record.result, risk: record.risk, reward: record.reward, pnl: record.pnl, openTime: record.openTime, closeTime: record.closeTime } });
-  return query.onDuplicateKeyUpdate({ set: { tradeDate: record.tradeDate, session: record.session, direction: record.direction, result: record.result, risk: record.risk, reward: record.reward, pnl: record.pnl, openTime: record.openTime, closeTime: record.closeTime } });
-}
-
 async function syncMt5PositionToTradeLog(userId: number, accountId: number, position: SyncedMt5Position, database?: any) {
   const db = database ?? await requireDb();
   const record = {
@@ -268,7 +262,14 @@ async function syncMt5PositionToTradeLog(userId: number, accountId: number, posi
     emotionAfter: "",
     mt5Ticket: position.ticket,
   };
-  await upsertTradeRecord(db, record);
+  // Insert-or-update keeps the RPC-created Trade Log row consistent with the
+  // authoritative terminal row while never overwriting manual journal context.
+  // On Supabase (PostgreSQL) the conflict target is (accountId, mt5Ticket); the
+  // MySQL branch is retained for source-compatible unit harnesses only.
+  const query = db.insert(trades).values(record) as any;
+  const set = { tradeDate: record.tradeDate, session: record.session, direction: record.direction, result: record.result, risk: record.risk, reward: record.reward, pnl: record.pnl, openTime: record.openTime, closeTime: record.closeTime };
+  if (typeof query.onConflictDoUpdate === "function") await query.onConflictDoUpdate({ target: [trades.accountId, trades.mt5Ticket], set });
+  else await query.onDuplicateKeyUpdate({ set });
 }
 
 export async function syncStoredMt5PositionsToTradeLog(userId: number, accountId: number) {
@@ -277,9 +278,23 @@ export async function syncStoredMt5PositionsToTradeLog(userId: number, accountId
     db.select().from(mt5LivePositions).where(eq(mt5LivePositions.accountId, accountId)).orderBy(desc(mt5LivePositions.updatedAt)).limit(500),
     getJournalDataResetAt(db, accountId),
   ]);
+  // Skip journal rows that already reflect the terminal row. The previous
+  // implementation re-upserted every stored position on every journal/trades
+  // poll (every 2.5 s in the Trade Log view), issuing one Supabase HTTP
+  // round-trip per position; with hundreds of MT5 rows that exceeded the
+  // client request timeout and produced the "MT5 pre-sync degraded" storm.
+  const journaled = await db.select({ mt5Ticket: trades.mt5Ticket, result: trades.result, pnl: trades.pnl }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId), ...positions.map(position => eq(trades.mt5Ticket, position.ticket))));
+  const journaledByTicket = new Map(journaled.map(row => [row.mt5Ticket?.toString(), row]));
+  const needsJournal = positions.filter(position => {
+    if (!isMt5PositionAfterJournalReset(resetAt, position as { status: "OPEN" | "CLOSED"; openTime: Date; closeTime?: Date | null })) return false;
+    const existing = journaledByTicket.get(position.ticket.toString());
+    if (!existing) return true;
+    if (existing.result !== position.status) return true;
+    if (position.status === "CLOSED") return Number(existing.pnl ?? 0) !== Number(position.realizedPnl ?? 0);
+    return Number(existing.pnl ?? 0) !== Number(position.floatingPnl ?? 0);
+  });
   let synchronized = 0;
-  for (const position of positions) {
-    if (!isMt5PositionAfterJournalReset(resetAt, position as { status: "OPEN" | "CLOSED"; openTime: Date; closeTime?: Date | null })) continue;
+  for (const position of needsJournal) {
     await syncMt5PositionToTradeLog(userId, accountId, {
       ticket: position.ticket,
       symbol: position.symbol,

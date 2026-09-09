@@ -5,10 +5,14 @@ const source = readFileSync(new URL("../../public/GoldJournal_EA.mq5", import.me
 
 describe("Gold Journal MT5 EA reliability contract", () => {
   it("keeps the three-second cadence while using bounded retry for transient HTTP failures", () => {
-    expect(source).toContain("#property version   \"2.12\"");
+    expect(source).toContain("#property version   \"2.13\"");
     expect(source).toContain("input int SyncSeconds = 3");
     expect(source).toContain("const int MAX_RETRY_BACKOFF_SECONDS = 60");
     expect(source).toContain("bool IsTransientStatus(int status)");
+    // Server-side 4xx payload rejections (422 invalid data/timestamp, 400,
+    // 410) are transient and must never stop the whole bridge; only 401/403
+    // (key) and 404/405 (endpoint) are permanent.
+    expect(source).toContain("status == 422 || status == 429");
     expect(source).toContain("status == 502 || status == 503 || status == 504");
     expect(source).toContain("g_next_retry_at = TimeCurrent() + delay");
     expect(source).toContain("operation=%s; http=-1; mt5_error=%d; endpoint=%s");
@@ -49,8 +53,16 @@ describe("Gold Journal MT5 EA reliability contract", () => {
 
   it("starts a recent incremental history scan when a broker-manual close transaction arrives after full history completed", () => {
     expect(source).toContain("void OnTradeTransaction(const MqlTradeTransaction &transaction");
-    expect(source).toContain("if(entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_OUT_BY || entry == DEAL_ENTRY_INOUT) SendHistory(false);");
+    expect(source).toContain("DEAL_POSITION_ID");
+    expect(source).toContain("SendHistory(false);");
+    // The incremental sweep must reach back to the last successful close sync,
+    // not a fixed one-hour window, so a close that happened while the EA was
+    // offline is still collected instead of re-arming the 24-hour replay gate.
+    expect(source).toContain("QUICK_HISTORY_WINDOW_SECONDS");
+    expect(source).toContain("since_last_success");
+    expect(source).not.toContain("MathMax(3600, SyncSeconds * 4)");
+    // The in-progress guard must not permanently suppress deal-triggered
+    // incremental syncs after a full replay has completed.
     expect(source).not.toContain("if(!fullReplay && g_history_full_replay) return;");
-    expect(source).toContain("datetime from = now - (g_history_full_replay ? HistoryDays * 86400 : MathMax(3600, SyncSeconds * 4));");
   });
 });

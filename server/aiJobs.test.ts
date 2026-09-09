@@ -29,19 +29,34 @@ describe("durable AI job dispatch", () => {
     expect(aiJobTestHooks.workerOrigin()).toBe("https://topgjournal.netlify.app");
   });
 
-  it("allows local inline processing when no background worker URL exists", () => {
+  it("allows inline processing only when explicitly enabled on a long-running process", () => {
     delete process.env.AI_JOB_WORKER_BASE_URL;
     delete process.env.URL;
     delete process.env.DEPLOY_PRIME_URL;
     delete process.env.AI_JOB_INLINE_FALLBACK;
-    process.env.NODE_ENV = "development";
+    delete process.env.NODE_ENV;
+    // Netlify does not define NODE_ENV; an undefined environment must never
+    // silently auto-enable inline dispatch (the functions sandbox freezes
+    // after the response and jobs would stay QUEUED forever).
     expect(aiJobTestHooks.workerOrigin()).toBe("");
-    expect(aiJobTestHooks.allowInlineWorkerFallback()).toBe(true);
+    expect(aiJobTestHooks.allowInlineWorkerFallback()).toBe(false);
 
     process.env.NODE_ENV = "production";
     expect(aiJobTestHooks.allowInlineWorkerFallback()).toBe(false);
 
+    // Explicit opt-in is honored (operators with a long-running process
+    // server can enable inline AI jobs deliberately), including in
+    // production.
     process.env.AI_JOB_INLINE_FALLBACK = "true";
     expect(aiJobTestHooks.allowInlineWorkerFallback()).toBe(true);
+  });
+
+  it("never auto-enables inline dispatch in an undefined Netlify environment", () => {
+    delete process.env.AI_JOB_WORKER_BASE_URL;
+    delete process.env.URL;
+    delete process.env.DEPLOY_PRIME_URL;
+    delete process.env.AI_JOB_INLINE_FALLBACK;
+    delete process.env.NODE_ENV;
+    expect(aiJobTestHooks.allowInlineWorkerFallback()).toBe(false);
   });
 });
