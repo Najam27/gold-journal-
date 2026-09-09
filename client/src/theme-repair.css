@@ -235,6 +235,20 @@
   color: var(--gj-gold);
 }
 
+.pwa-update-banner > button { color: var(--gj-subtext); }
+
+.mt5-import-fab:hover,
+.options-fab:hover,
+.account-rename-fab:hover,
+.notification-fab:hover {
+  border-color: color-mix(in srgb, var(--gj-gold) 38%, var(--gj-line));
+  color: var(--gj-gold);
+}
+
+.notification-history > button.unread { border-color: color-mix(in srgb, var(--gj-gold) 55%, var(--gj-line)); background: color-mix(in srgb, var(--gj-gold) 9%, var(--gj-panel-2)); }
+
+.mt5-import-steps b { background: color-mix(in srgb, var(--gj-gold) 14%, transparent); color: var(--gj-gold); }
+
 .login-lockup span,
 .login-card > .eyebrow { color: var(--gj-gold-text); }
 .login-lockup strong { color: var(--gj-text); }

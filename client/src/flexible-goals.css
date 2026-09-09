@@ -9,12 +9,12 @@
 .control-summary-card > span { color: var(--gj-dim); font: 800 8px "DM Mono", monospace; letter-spacing: .1em; }
 .control-summary-card strong { color: var(--gj-text); font-size: 24px; line-height: 1; }
 .control-summary-card small { overflow: hidden; color: var(--gj-subtext); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.control-summary-card.safe { border-color: color-mix(in srgb, #55c88f 45%, var(--gj-line)); }
-.control-summary-card.safe strong { color: #55c88f; }
+.control-summary-card.safe { border-color: color-mix(in srgb, var(--success) 45%, var(--gj-line)); }
+.control-summary-card.safe strong { color: var(--success); }
 .control-summary-card.risk { border-color: color-mix(in srgb, var(--destructive) 60%, var(--gj-line)); }
 .control-summary-card.risk strong { color: var(--destructive); }
 .control-signal { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 13px 16px; border: 1px solid var(--gj-line); border-radius: 12px; background: var(--gj-panel); }
-.control-signal > div { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; color: #55c88f; background: color-mix(in srgb, #55c88f 12%, transparent); }
+.control-signal > div { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); }
 .control-signal.risk { border-color: color-mix(in srgb, var(--destructive) 58%, var(--gj-line)); }
 .control-signal.risk > div { color: var(--destructive); background: color-mix(in srgb, var(--destructive) 11%, transparent); }
 .control-signal p { display: grid; gap: 3px; margin: 0; }
@@ -46,10 +46,10 @@
 .progress-cell span { color: var(--gj-dim); font-size: 9px; white-space: nowrap; }
 .progress-cell > i { display: block; height: 5px; overflow: hidden; border-radius: 99px; background: var(--gj-panel-2); }
 .progress-cell > i > b { display: block; height: 100%; min-width: 2px; border-radius: inherit; background: var(--gj-gold); }
-.control-table tr.safe .progress-cell > i > b { background: #55c88f; }
+.control-table tr.safe .progress-cell > i > b { background: var(--success); }
 .control-table tr.risk .progress-cell > i > b { background: var(--destructive); }
 .status-chip { display: inline-flex; min-width: 73px; justify-content: center; padding: 5px 7px; border-radius: 99px; color: var(--gj-subtext); background: var(--gj-panel-2); font: 800 8px "DM Mono", monospace; letter-spacing: .06em; white-space: nowrap; }
-.status-chip.safe { color: #2e9c68; background: color-mix(in srgb, #55c88f 13%, transparent); }
+.status-chip.safe { color: var(--success); background: color-mix(in srgb, var(--success) 13%, transparent); }
 .status-chip.risk { color: var(--destructive); background: color-mix(in srgb, var(--destructive) 11%, transparent); }
 .action-cell { max-width: 245px; margin: 0; color: var(--gj-subtext); font-size: 10px; line-height: 1.42; }
 .row-control-actions { display: flex; gap: 4px; justify-content: flex-end; }
