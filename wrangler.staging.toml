@@ -1,0 +1,31 @@
+# Cloudflare Workers STAGING deployment (separate worker name so production on
+# Netlify can keep running untouched while the Cloudflare target is verified).
+#
+#   pnpm build
+#   pnpm dlx wrangler login
+#   pnpm dlx wrangler secret put SUPABASE_SERVICE_ROLE_KEY -c wrangler.staging.toml
+#   pnpm dlx wrangler secret put AI_KEY_ENCRYPTION_SECRET -c wrangler.staging.toml
+#   pnpm dlx wrangler deploy -c wrangler.staging.toml
+#
+# The staging worker gets a <name>.<subdomain>.workers.dev URL. If you build
+# the frontend with VITE_AUTH_REDIRECT_URL / VITE_API_BASE_URL pointed at that
+# URL, add the same origin to Supabase Auth → URL Configuration → Redirect
+# URLs so email/magic-link callbacks return to the staging app.
+#
+# AI jobs: dispatch posts to AI_JOB_WORKER_BASE_URL + /api/ai-job-dispatch.
+# Jobs share the same Supabase project as production, so you may leave this
+# unset (dispatch disabled) or point it at this staging origin to exercise the
+# full flow end to end on staging.
+
+name = "gold-journal-staging"
+main = "dist/worker/worker.js"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+assets = { directory = "./dist/public", not_found_handling = "none" }
+
+[vars]
+NODE_ENV = "production"
+SUPABASE_STORAGE_BUCKET = "trade-screenshots"
+# SUPABASE_URL = "https://<project-ref>.supabase.co"
+# AI_JOB_WORKER_BASE_URL = "https://gold-journal-staging.<subdomain>.workers.dev"

@@ -6,6 +6,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "../routers";
 import { registerMt5Compatibility, registerMt5Ingest } from "../mt5Ingest";
 import { getActiveMt5Connection, recordMt5HistoryFailure } from "../mt5Db";
+import { registerAiJobDispatch } from "../aiJobs";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { validateRuntimeConfiguration } from "./env";
@@ -62,6 +63,7 @@ async function startServer() {
   registerMt5Compatibility(app);
   registerMt5EaDownload(app);
   registerMt5Ingest(app);
+  registerAiJobDispatch(app);
   app.use(
     async (
       error: unknown,
