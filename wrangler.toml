@@ -29,5 +29,5 @@ assets = { directory = "./dist/public", binding = "ASSETS", not_found_handling =
 [vars]
 NODE_ENV = "production"
 SUPABASE_STORAGE_BUCKET = "trade-screenshots"
-# SUPABASE_URL = "https://<project-ref>.supabase.co"
+SUPABASE_URL = "https://wetzvheuwhwcpqlmgnga.supabase.co"
 # AI_JOB_WORKER_BASE_URL = "https://app.yourdomain.com"
