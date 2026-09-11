@@ -228,6 +228,9 @@ export async function recordMt5HistoryFailure(connectionId: number, message: str
 
 type LiveBase = { ticket: bigint; symbol: string; direction: "BUY" | "SELL"; lots: number; openPrice: number; slPrice: number | null; tpPrice: number | null; riskUsd: number; rewardUsd: number; rrRatio: number; openTime: Date };
 
+/** PostgREST filter URLs stay small; 100 numeric tickets per OR chunk is safe. */
+const MT5_TICKET_FILTER_CHUNK = 100;
+
 type SyncedMt5Position = LiveBase & { pnl: number; result: "WIN" | "LOSS" | "BREAK_EVEN" | "OPEN"; tradeTime: Date; closeTime?: Date | null };
 
 async function syncMt5PositionToTradeLog(userId: number, accountId: number, position: SyncedMt5Position, database?: any) {
@@ -283,7 +286,15 @@ export async function syncStoredMt5PositionsToTradeLog(userId: number, accountId
   // poll (every 2.5 s in the Trade Log view), issuing one Supabase HTTP
   // round-trip per position; with hundreds of MT5 rows that exceeded the
   // client request timeout and produced the "MT5 pre-sync degraded" storm.
-  const journaled = await db.select({ mt5Ticket: trades.mt5Ticket, result: trades.result, pnl: trades.pnl }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId), ...positions.map(position => eq(trades.mt5Ticket, position.ticket))));
+  // Match journaled rows by an OR over the stored tickets (chunked to keep the
+  // PostgREST filter URL bounded). This must be OR, not AND: an AND over N ticket
+  // equalities can only ever match when exactly one position is stored, silently
+  // disabling the pre-filter and re-upserting every position on every poll.
+  const tickets = positions.map(position => position.ticket.toString());
+  const ticketChunks: string[][] = [];
+  for (let index = 0; index < tickets.length; index += MT5_TICKET_FILTER_CHUNK) ticketChunks.push(tickets.slice(index, index + MT5_TICKET_FILTER_CHUNK));
+  const journaledRows = await Promise.all(ticketChunks.map(chunk => db.select({ mt5Ticket: trades.mt5Ticket, result: trades.result, pnl: trades.pnl }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId), or(...chunk.map(ticket => eq(trades.mt5Ticket, BigInt(ticket))))))));
+  const journaled = journaledRows.flat();
   const journaledByTicket = new Map(journaled.map(row => [row.mt5Ticket?.toString(), row]));
   const needsJournal = positions.filter(position => {
     if (!isMt5PositionAfterJournalReset(resetAt, position as { status: "OPEN" | "CLOSED"; openTime: Date; closeTime?: Date | null })) return false;

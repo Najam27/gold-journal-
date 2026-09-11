@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/ui/button", () => ({ Button: ({ children, ...props }: any) => <button {...props}>{children}</button> }));
 
@@ -10,6 +10,17 @@ import { PnlCalendarWithWeeks } from "./PnlCalendarWithWeeks";
 afterEach(() => cleanup());
 
 describe("PnlCalendarWithWeeks", () => {
+  // The calendar defaults to the current PKT month, so pin the clock inside
+  // August 2026 (12:30 PKT) instead of letting the tests rot every month.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-03T12:30:00+05:00"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("renders a weekly P&L total after the calendar days", () => {
     render(<PnlCalendarWithWeeks trades={[{ tradeDate: new Date("2026-08-03T12:00:00"), pnl: "100" }, { tradeDate: new Date("2026-08-06T12:00:00"), pnl: "-20" }]} />);
     expect(screen.getAllByText(/ending/).length).toBeGreaterThan(0);
