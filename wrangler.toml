@@ -24,7 +24,7 @@ main = "dist/worker/worker.js"
 compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
 
-assets = { directory = "./dist/public", not_found_handling = "none" }
+assets = { directory = "./dist/public", binding = "ASSETS", not_found_handling = "none" }
 
 [vars]
 NODE_ENV = "production"
