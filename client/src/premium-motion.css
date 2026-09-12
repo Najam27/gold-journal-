@@ -78,16 +78,28 @@ html:not(.dark) {
 .login-card, .splash-content { will-change: transform; }
 
 /* --------------------------------------------------------------- */
-/* Stat cards: themed tinted washes per tone so the dashboard reads more
-   colorful while remaining token-driven and theme-consistent. */
+/* Stat cards: themed values per tone. The decorative corner glow is removed:
+   over the tinted card washes it read as a stain, not a highlight. */
+.stat-card::after { display: none; }
 .stat-card { transition: transform var(--gj-dur-base) var(--gj-ease), box-shadow var(--gj-dur-base) var(--gj-ease), border-color var(--gj-dur-fast) ease; }
 .stat-card:hover { box-shadow: var(--gj-shadow-lg); }
 .stat-card.stat-green strong { color: var(--gj-success); }
 .stat-card.stat-red strong { color: var(--gj-danger); }
-.stat-card.stat-green::after { background: radial-gradient(circle, color-mix(in srgb, var(--gj-success) 16%, transparent), transparent 70%); }
-.stat-card.stat-red::after { background: radial-gradient(circle, color-mix(in srgb, var(--gj-danger) 16%, transparent), transparent 70%); }
-html:not(.dark) .stat-card.stat-green::after { background: radial-gradient(circle, color-mix(in srgb, var(--gj-success) 12%, transparent), transparent 70%); }
-html:not(.dark) .stat-card.stat-red::after { background: radial-gradient(circle, color-mix(in srgb, var(--gj-danger) 10%, transparent), transparent 70%); }
+
+/* AnimatedNumber renders its value in a <span> INSIDE the stat <strong>.
+   The generic `.stat-card span` rule (a 9px gray style meant for the detail
+   line under the value) was also matching that inner span, shrinking and
+   graying animated money values. Force the value span to inherit the strong's
+   size and color in every placement an AnimatedNumber is used. */
+.stat-card strong span,
+.mt5-live-strip article b span,
+.mt5-position-card > header > strong span,
+.trade-table td.pnl span {
+  display: inline;
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+}
 
 /* Win/loss badges: token-based, readable in both themes. */
 .side-badge.buy, .result-badge.win { color: var(--gj-success); background: color-mix(in srgb, var(--gj-success) 13%, transparent); }
