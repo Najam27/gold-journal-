@@ -1,34 +1,56 @@
 #property strict
-#property version   "2.13"
+#property version   "2.14"
 #property description "Gold Journal read-only journal bridge: never places or manages trades; sends account, position, and history facts to Gold Journal."
 
 input string Endpoint = "__GOLD_JOURNAL_MT5_ENDPOINT__";
 input string ApiKey = "PASTE_ONCE_FROM_GOLD_JOURNAL";
 input int BrokerUtcOffsetMinutes = 180;
 input int SyncSeconds = 3;
+input int SummarySeconds = 15;
+input int HeartbeatSeconds = 30;
 input int HistoryDays = 3650;
 input bool SendHistoryOnInit = true;
 input string RiskSymbol = "";
 
-const string EA_VERSION = "2.13.0";
+const string EA_VERSION = "2.14.0";
 const string PAYLOAD_VERSION = "2";
 const int REQUEST_TIMEOUT_MS = 15000;
 const int HISTORY_BATCH_SIZE = 50;
 const int FULL_HISTORY_RETRY_SECONDS = 24 * 60 * 60;
 const int QUICK_HISTORY_WINDOW_SECONDS = 24 * 60 * 60;
 const int MAX_RETRY_BACKOFF_SECONDS = 60;
+// Configuration or credential problems must never become a permanent dead
+// state. They back off further (five minutes) but are always retried, so
+// correcting the key or endpoint recovers the EA without re-attaching it.
+const int MAX_CONFIG_RETRY_SECONDS = 300;
+
+// Connection state machine. A single failed call moves the EA to RECONNECTING;
+// it never destroys its ability to recover.
+enum ENUM_EA_STATE
+{
+   EA_INIT = 0,
+   EA_CONNECTING = 1,
+   EA_CONNECTED = 2,
+   EA_SYNCING = 3,
+   EA_HEALTHY = 4,
+   EA_RECONNECTING = 5,
+   EA_ERROR = 6
+};
 
 datetime g_last_history_sync = 0;
 datetime g_last_history_attempt = 0;
 datetime g_last_close_event_at = 0;
 datetime g_next_retry_at = 0;
+datetime g_next_summary_at = 0;
+datetime g_next_heartbeat_at = 0;
+datetime g_last_contact_ok_at = 0;
 datetime g_last_summary_success = 0;
 datetime g_last_open_success = 0;
 datetime g_last_history_success = 0;
 int g_consecutive_failures = 0;
-bool g_permanent_rejection = false;
-bool g_api_rejected = false;
-bool g_endpoint_rejected = false;
+int g_config_failures = 0;
+bool g_requires_revalidation = false;
+bool g_config_warning_logged = false;
 bool g_compatibility_reported = false;
 bool g_summary_reported = false;
 bool g_open_batch_reported = false;
@@ -39,6 +61,32 @@ int g_history_cursor = 0;
 ulong g_deal_position_id = 0;
 string g_connection_reference = "";
 string g_data_source_reference = "";
+ENUM_EA_STATE g_state = EA_INIT;
+
+string StateLabel(ENUM_EA_STATE state)
+{
+   switch(state)
+   {
+      case EA_INIT:         return "INIT";
+      case EA_CONNECTING:   return "CONNECTING";
+      case EA_CONNECTED:    return "CONNECTED";
+      case EA_SYNCING:      return "SYNCING";
+      case EA_HEALTHY:      return "HEALTHY";
+      case EA_RECONNECTING: return "RECONNECTING";
+      case EA_ERROR:        return "ERROR";
+   }
+   return "UNKNOWN";
+}
+
+void SetState(ENUM_EA_STATE next)
+{
+   if(g_state == next) return;
+   g_state = next;
+   PrintFormat("[MT5 LIVE] state=%s; failures=%d; last_success=%s; next_retry=%s",
+               StateLabel(g_state), g_consecutive_failures,
+               g_last_contact_ok_at > 0 ? TimeToString(g_last_contact_ok_at, TIME_DATE | TIME_SECONDS) : "never",
+               g_next_retry_at > TimeCurrent() ? TimeToString(g_next_retry_at, TIME_DATE | TIME_SECONDS) : "now");
+}
 
 string JsonEscape(string value) {
    StringReplace(value, "\\", "\\\\");
@@ -58,12 +106,21 @@ string Direction(ENUM_POSITION_TYPE type) { return type == POSITION_TYPE_BUY ? "
 string DealDirection(long type) { return type == DEAL_TYPE_BUY ? "BUY" : "SELL"; }
 string OppositeDirection(long type) { return type == DEAL_TYPE_BUY ? "SELL" : "BUY"; }
 
+// Temporarily unhealthy conditions that must always be retried: a network drop,
+// a Worker restart, rate limiting, a Cloudflare gateway error, and the
+// transient 400/410/422 payload conditions the backend reports while it folds a
+// broker snapshot into the journal.
 bool IsTransientStatus(int status) { return status == -1 || status == 400 || status == 408 || status == 410 || status == 422 || status == 429 || status == 500 || status == 502 || status == 503 || status == 504; }
-int RetryDelaySeconds() {
-   int exponent = MathMin(g_consecutive_failures - 1, 4);
-   int base_delay = MathMin(MAX_RETRY_BACKOFF_SECONDS, SyncSeconds * (1 << exponent));
-   return MathMin(MAX_RETRY_BACKOFF_SECONDS, base_delay + (MathRand() % MathMax(1, SyncSeconds)));
+
+int BackoffSeconds(int failures, int ceiling)
+{
+   int exponent = MathMin(MathMax(failures - 1, 0), 5);
+   int base_delay = MathMin(ceiling, MathMax(SyncSeconds, 1) * (1 << exponent));
+   int jitter = MathRand() % MathMax(1, MathMax(SyncSeconds, 1));
+   return MathMax(1, MathMin(ceiling, base_delay + jitter));
 }
+int RetryDelaySeconds() { return BackoffSeconds(g_consecutive_failures, MAX_RETRY_BACKOFF_SECONDS); }
+
 string JsonStringValue(string json, string field) {
    string prefix = "\"" + field + "\":\"";
    int start = StringFind(json, prefix);
@@ -72,6 +129,7 @@ string JsonStringValue(string json, string field) {
    int finish = StringFind(json, "\"", start);
    return finish < start ? "" : StringSubstr(json, start, finish - start);
 }
+
 void MarkEventSuccess(string expectedEvent, string connection_reference, string data_source_reference) {
    datetime now = TimeCurrent();
    if(connection_reference != "" && connection_reference != g_connection_reference) {
@@ -103,17 +161,74 @@ void MarkEventSuccess(string expectedEvent, string connection_reference, string 
    else if(expectedEvent == "history_batch") g_last_history_success = now;
    if(g_consecutive_failures > 0) PrintFormat("[MT5 LIVE] %s recovered after %d transient failure(s)", expectedEvent, g_consecutive_failures);
    g_consecutive_failures = 0;
+   g_config_failures = 0;
    g_next_retry_at = 0;
+   g_last_contact_ok_at = now;
+   if(g_requires_revalidation) {
+      Print("[MT5 LIVE] authentication/config revalidation succeeded; resuming full synchronization.");
+      g_requires_revalidation = false;
+      g_config_warning_logged = false;
+   }
+   g_compatibility_reported = g_compatibility_reported || expectedEvent == "compat";
+   SetState(expectedEvent == "compat" || expectedEvent == "ping" ? EA_CONNECTED : EA_HEALTHY);
 }
+
+// Records a recoverable failure. Every path schedules a retry; none of them can
+// leave the EA permanently dead until the user intervenes.
+void MarkEventFailure(string expectedEvent, int status, string detail) {
+   datetime now = TimeCurrent();
+   if(status == 401 || status == 403) {
+      g_config_failures++;
+      g_requires_revalidation = true;
+      int delay = BackoffSeconds(g_config_failures, MAX_CONFIG_RETRY_SECONDS);
+      g_next_retry_at = now + delay;
+      if(!g_config_warning_logged) {
+         PrintFormat("[MT5 LIVE] API key rejected or retired; operation=%s; http=%d. Issue a replacement key in Gold Journal MT5 Live, paste it into the EA Inputs, and apply. The EA keeps probing and resumes automatically.", expectedEvent, status);
+         g_config_warning_logged = true;
+      } else {
+         PrintFormat("[MT5 LIVE] auth probe still failing; operation=%s; http=%d; failures=%d; retry_in=%ds", expectedEvent, status, g_config_failures, delay);
+      }
+      SetState(EA_ERROR);
+      return;
+   }
+   if(status == 404 || status == 405) {
+      g_config_failures++;
+      g_requires_revalidation = true;
+      int delay = BackoffSeconds(g_config_failures, MAX_CONFIG_RETRY_SECONDS);
+      g_next_retry_at = now + delay;
+      if(!g_config_warning_logged) {
+         PrintFormat("[MT5 LIVE] MT5 endpoint not found; operation=%s; http=%d; endpoint=%s. Download a fresh EA from the same Gold Journal deployment. The EA keeps probing and resumes automatically.", expectedEvent, status, Endpoint);
+         g_config_warning_logged = true;
+      } else {
+         PrintFormat("[MT5 LIVE] endpoint probe still failing; operation=%s; http=%d; retry_in=%ds", expectedEvent, status, delay);
+      }
+      SetState(EA_ERROR);
+      return;
+   }
+   g_consecutive_failures++;
+   int retry_delay = RetryDelaySeconds();
+   g_next_retry_at = now + retry_delay;
+   if(status == -1) {
+      PrintFormat("[MT5 LIVE] WebRequest failed; operation=%s; http=-1; mt5_error=%d; failures=%d; event=%s; endpoint=%s; retry_in=%ds. Check Tools > Options > Expert Advisors > Allow WebRequest for this endpoint origin.", expectedEvent, GetLastError(), g_consecutive_failures, detail, Endpoint, retry_delay);
+   } else {
+      PrintFormat("[MT5 LIVE] server temporarily unavailable; operation=%s; http=%d; server_code=%s; failures=%d; retry_in=%ds", expectedEvent, status, detail == "" ? "-" : detail, g_consecutive_failures, retry_delay);
+   }
+   SetState(EA_RECONNECTING);
+}
+
 bool SendJson(string payload, string expectedEvent) {
    if(StringLen(payload) == 0) return false;
-   if(g_permanent_rejection) return false;
-   if(g_api_rejected && expectedEvent != "compat") return false;
    if(g_next_retry_at > TimeCurrent()) return false;
+   // While the credential or endpoint looks wrong, send only the cheap
+   // compat/ping probes instead of full payloads. The probe is always attempted,
+   // so a corrected configuration recovers without re-attaching the EA.
+   if(g_requires_revalidation && expectedEvent != "compat" && expectedEvent != "ping") return false;
    if(!TerminalInfoInteger(TERMINAL_CONNECTED)) {
+      SetState(EA_RECONNECTING);
       PrintFormat("[MT5 LIVE] %s deferred: terminal is not connected to the broker", expectedEvent);
       return false;
    }
+   if(g_state == EA_INIT) SetState(EA_CONNECTING);
    char data[];
    int data_size = StringToCharArray(payload, data, 0, WHOLE_ARRAY, CP_UTF8);
    if(data_size > 0 && data[data_size - 1] == 0) ArrayResize(data, data_size - 1);
@@ -124,37 +239,11 @@ bool SendJson(string payload, string expectedEvent) {
    int status = WebRequest("POST", Endpoint, headers, REQUEST_TIMEOUT_MS, data, response, response_headers);
    string response_text = CharArrayToString(response, 0, WHOLE_ARRAY, CP_UTF8);
    if(status < 200 || status >= 300) {
-      if(status == -1) {
-         g_consecutive_failures++;
-         int delay = RetryDelaySeconds();
-         g_next_retry_at = TimeCurrent() + delay;
-         PrintFormat("[MT5 LIVE] WebRequest failed; operation=%s; http=-1; mt5_error=%d; endpoint=%s; retry_in=%ds. Check Tools > Options > Expert Advisors > Allow WebRequest for this endpoint origin.", expectedEvent, GetLastError(), Endpoint, delay);
-      } else if(IsTransientStatus(status)) {
-         g_consecutive_failures++;
-         int delay = RetryDelaySeconds();
-         g_next_retry_at = TimeCurrent() + delay;
-         string server_code = JsonStringValue(response_text, "code");
-         if(server_code != "") PrintFormat("[MT5 LIVE] server rejected the %s payload (%s); http=%d; retry_in=%ds. If the code is FUTURE_TRADE or INVALID_MT5_TIMESTAMP, verify BrokerUtcOffsetMinutes and the broker clock in MT5.", expectedEvent, server_code, status, delay);
-         else PrintFormat("[MT5 LIVE] server temporarily unavailable; operation=%s; http=%d; endpoint=%s; retry=%d; retry_in=%ds", expectedEvent, status, Endpoint, g_consecutive_failures, delay);
-      } else {
-         g_permanent_rejection = true;
-         if(status == 401 || status == 403) {
-            g_api_rejected = true;
-            PrintFormat("[MT5 LIVE] API key rejected or retired; operation=%s; http=%d. In Gold Journal MT5 Live, issue a replacement key, paste it into EA Inputs, then restart the EA", expectedEvent, status);
-         }
-         else if(status == 404 || status == 405) {
-            g_endpoint_rejected = true;
-            PrintFormat("[MT5 LIVE] MT5 endpoint not found; operation=%s; http=%d; endpoint=%s. Download a fresh EA from the same Gold Journal deployment, then restart it", expectedEvent, status, Endpoint);
-         }
-         else PrintFormat("[MT5 LIVE] request rejected; operation=%s; http=%d; endpoint=%s. Check the endpoint and payload, then restart the EA", expectedEvent, status, Endpoint);
-      }
+      MarkEventFailure(expectedEvent, status, JsonStringValue(response_text, "code"));
       return false;
    }
    if(StringFind(response_text, "\"ok\":true") < 0) {
-      g_consecutive_failures++;
-      int delay = RetryDelaySeconds();
-      g_next_retry_at = TimeCurrent() + delay;
-      PrintFormat("[MT5 LIVE] %s returned an invalid response retry=%d in %ds", expectedEvent, g_consecutive_failures, delay);
+      MarkEventFailure(expectedEvent, status, "invalid_response");
       return false;
    }
    MarkEventSuccess(expectedEvent, JsonStringValue(response_text, "connectionReference"), JsonStringValue(response_text, "dataSourceReference"));
@@ -185,6 +274,13 @@ string PositionJson(ulong ticket) {
 void SendCompatibility() {
    string payload = "{\"event\":\"compat\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\"}";
    SendJson(payload, "compat");
+}
+
+// Liveness probe. The backend/UI can tell "connected just now" apart from
+// "stale snapshot" only because this keeps arriving on its own cadence.
+void SendHeartbeat() {
+   string payload = "{\"event\":\"ping\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\",\"state\":\"" + StateLabel(g_state) + "\",\"consecutive_failures\":" + IntegerToString(g_consecutive_failures) + "}";
+   SendJson(payload, "ping");
 }
 
 void SendSummary() {
@@ -302,8 +398,10 @@ string ClosedPositionJson(ulong position_id) {
    risk = MathAbs(risk);
    reward = MathAbs(reward);
    double rr = risk > 0.0 ? reward / risk : 0.0;
-   string result = realized > 0.005 ? "WIN" : realized < -0.005 ? "LOSS" : "BREAK_EVEN";
-   return "{\"ticket\":\"" + IntegerToString((long)position_id) + "\",\"symbol\":\"" + JsonEscape(symbol) + "\",\"direction\":\"" + direction + "\",\"lots\":" + Number(lots, 2) + ",\"open_price\":" + Number(open_price, 6) + ",\"sl_price\":" + Number(sl, 6) + ",\"tp_price\":" + Number(tp, 6) + ",\"risk_usd\":" + Number(risk, 2) + ",\"reward_usd\":" + Number(reward, 2) + ",\"rr_ratio\":" + Number(rr, 2) + ",\"close_price\":" + Number(close_price, 6) + ",\"realized_pnl\":" + Number(realized, 2) + ",\"result\":\"" + result + "\",\"open_time\":" + BrokerTimestamp(open_time) + ",\"close_time\":" + BrokerTimestamp(close_time) + "}";
+   string outcome = realized > 0.005 ? "WIN" : realized < -0.005 ? "LOSS" : "BREAK_EVEN";
+   // The position id is the stable identifier: the same closed deal can never
+   // create a second journal record after a reconnect, restart, or replay.
+   return "{\"ticket\":\"" + IntegerToString((long)position_id) + "\",\"symbol\":\"" + JsonEscape(symbol) + "\",\"direction\":\"" + direction + "\",\"lots\":" + Number(lots, 2) + ",\"open_price\":" + Number(open_price, 6) + ",\"sl_price\":" + Number(sl, 6) + ",\"tp_price\":" + Number(tp, 6) + ",\"risk_usd\":" + Number(risk, 2) + ",\"reward_usd\":" + Number(reward, 2) + ",\"rr_ratio\":" + Number(rr, 2) + ",\"close_price\":" + Number(close_price, 6) + ",\"realized_pnl\":" + Number(realized, 2) + ",\"result\":\"" + outcome + "\",\"open_time\":" + BrokerTimestamp(open_time) + ",\"close_time\":" + BrokerTimestamp(close_time) + "}";
 }
 
 void SendHistory(bool fullReplay) {
@@ -320,10 +418,10 @@ void SendHistory(bool fullReplay) {
       from = now - HistoryDays * 86400;
    } else {
       // Always re-scan back to the last successful close sync (bounded by the
-      // configured history window). The previous fixed 1-hour quick sweep could
-      // miss a close that happened while the EA was offline or backing off, and
-      // then the next 1-hour sweep found nothing and re-armed the 24-hour full
-      // replay timer, leaving the position OPEN in the journal for up to a day.
+      // configured history window). A fixed short sweep could miss a close that
+      // happened while the EA was offline or backing off, and then the next
+      // sweep would find nothing and re-arm the full replay timer, leaving the
+      // position OPEN in the journal for up to a day.
       datetime window_start = now - QUICK_HISTORY_WINDOW_SECONDS;
       datetime oldest = now - HistoryDays * 86400;
       // Before the first successful sync the full replay owns the backfill, so
@@ -388,27 +486,60 @@ void SendHistory(bool fullReplay) {
    }
 }
 
+bool HistoryDue(datetime now) {
+   if(!SendHistoryOnInit) return false;
+   if(g_history_in_progress) return true;
+   bool idle_window = (g_last_history_attempt == 0 || now - g_last_history_attempt >= 300);
+   bool full_replay_due = (g_last_history_sync == 0 || now - g_last_history_sync >= FULL_HISTORY_RETRY_SECONDS);
+   return idle_window && full_replay_due;
+}
+
 void Sync() {
-   SendSummary();
+   datetime now = TimeCurrent();
+   if(g_requires_revalidation) {
+      // Authentication probe only; a success clears the gate and resumes sync.
+      SendCompatibility();
+      return;
+   }
+   SetState(EA_SYNCING);
+   if(now >= g_next_heartbeat_at) {
+      SendHeartbeat();
+      g_next_heartbeat_at = now + MathMax(10, HeartbeatSeconds);
+   }
+   // Open positions stay frequent so the Trade Log feels live.
    SendOpenPositions();
-   if(SendHistoryOnInit && (g_history_in_progress || (g_last_history_attempt == 0 || TimeCurrent() - g_last_history_attempt >= 300) && (g_last_history_sync == 0 || TimeCurrent() - g_last_history_sync >= FULL_HISTORY_RETRY_SECONDS))) SendHistory(true);
+   // The account snapshot and full history are heavier, so they run on their
+   // own slower cadence instead of every open-position tick.
+   if(now >= g_next_summary_at) {
+      SendSummary();
+      g_next_summary_at = now + MathMax(5, SummarySeconds);
+   }
+   if(HistoryDue(now)) SendHistory(true);
+   if(g_state == EA_SYNCING) SetState(EA_HEALTHY);
 }
 
 int OnInit() {
    ResetLastError();
+   MathSrand((int)(TimeLocal() % 2147483647));
    if(!HasConfiguredEndpoint()) {
-      Print("[MT5 LIVE] startup blocked: Endpoint must be the exact HTTPS API URL from Gold Journal MT5 Live.");
+      Print("[MT5 LIVE] startup blocked: Endpoint must be the exact HTTPS API URL from Gold Journal MT5 Live. The EA keeps retrying, so correcting the input and applying recovers it.");
       return INIT_PARAMETERS_INCORRECT;
    }
    if(!HasConfiguredApiKey()) {
-      Print("[MT5 LIVE] startup blocked: paste the current API key from Gold Journal MT5 Live into EA Inputs. Do not share that key.");
+      Print("[MT5 LIVE] startup blocked: paste the current API key from Gold Journal MT5 Live into EA Inputs. The EA keeps retrying, so correcting the input and applying recovers it.");
       return INIT_PARAMETERS_INCORRECT;
    }
+   SetState(EA_INIT);
+   g_next_summary_at = 0;
+   g_next_heartbeat_at = 0;
    if(!EventSetTimer(MathMax(3, SyncSeconds))) {
       PrintFormat("[MT5 LIVE] timer could not start; MT5 error=%d", GetLastError());
       return INIT_FAILED;
    }
-   PrintFormat("[MT5 LIVE] STARTUP; EA_VERSION=%s; endpoint=%s; terminal_connected=%s; api_key_present=true; sync_interval=%ds; history=%s.", EA_VERSION, Endpoint, TerminalInfoInteger(TERMINAL_CONNECTED) ? "true" : "false", MathMax(3, SyncSeconds), SendHistoryOnInit ? "enabled" : "disabled");
+   PrintFormat("[MT5 LIVE] STARTUP; EA_VERSION=%s; endpoint=%s; terminal_connected=%s; api_key_present=true; open_sync=%ds; summary_sync=%ds; heartbeat=%ds; history=%s; state=%s.",
+               EA_VERSION, Endpoint, TerminalInfoInteger(TERMINAL_CONNECTED) ? "true" : "false",
+               MathMax(3, SyncSeconds), MathMax(5, SummarySeconds), MathMax(10, HeartbeatSeconds),
+               SendHistoryOnInit ? "enabled" : "disabled", StateLabel(g_state));
    Print("[MT5 LIVE] READ-ONLY MODE; this EA never opens, closes, modifies, or cancels MT5 orders and positions. Auto Trading is not required for Gold Journal synchronization.");
    if(!TerminalInfoInteger(TERMINAL_CONNECTED)) Print("[MT5 LIVE] broker connection is offline; summary, positions, and history will retry after MT5 reconnects.");
    SendCompatibility();
@@ -418,16 +549,16 @@ int OnInit() {
 void OnDeinit(const int reason) { EventKillTimer(); PrintFormat("[MT5 LIVE] EA stopped; deinitialization reason=%d", reason); }
 void OnTimer() { Sync(); }
 
-// MQL5 requires request/result notification parameters for this passive terminal event.
+// MQL5 requires notification parameters for this passive terminal event.
 // They are never read and this EA never calls a trade-execution API.
 void OnTradeTransaction(const MqlTradeTransaction &transaction, const MqlTradeRequest &request, const MqlTradeResult &result) {
    if(transaction.deal == 0) return;
    long entry = HistoryDealGetInteger(transaction.deal, DEAL_ENTRY);
    if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_OUT_BY && entry != DEAL_ENTRY_INOUT) return;
    // MT5 emits one transaction per closing deal. A stop-out/TP/manual close can
-   // produce several deals for the same position (for example a netting
-   // INOUT or multiple partial fills); debounce to a single quick sync so the
-   // first deal is not missed while a later transaction restarts the sweep.
+   // produce several deals for the same position (for example a netting INOUT or
+   // multiple partial fills); debounce to a single quick sync so the first deal
+   // is not missed while a later transaction restarts the sweep.
    ulong position_id = (ulong)HistoryDealGetInteger(transaction.deal, DEAL_POSITION_ID);
    if(position_id != 0 && position_id == g_deal_position_id) {
       if(TimeCurrent() - g_last_close_event_at > 60) g_deal_position_id = 0;

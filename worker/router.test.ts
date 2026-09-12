@@ -1,20 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { handleWorkerRequest, type WorkerAssetBinding, type WorkerEnv } from "./router";
 import { ingestMt5Text } from "../server/mt5Ingest";
-import { runAiJob } from "../server/aiJobs";
 
 vi.mock("../server/mt5Ingest", async importOriginal => {
   const actual = await importOriginal<typeof import("../server/mt5Ingest")>();
   return { ...actual, ingestMt5Text: vi.fn(async () => ({ status: 200, body: { ok: true, event: "ping", source: "mocked-ingest" } })) };
 });
-
-vi.mock("../server/aiJobs", async importOriginal => {
-  const actual = await importOriginal<typeof import("../server/aiJobs")>();
-  return { ...actual, runAiJob: vi.fn(async () => ({ claimed: true })) };
-});
-
-const VALID_TOKEN = "opaque-dispatch-token-not-persisted-123";
-const VALID_JOB_ID = "00000000-0000-0000-0000-000000000001";
 
 function makeEnv(assetResponse?: Response | ((request: Request) => Response)): WorkerEnv {
   const fetchMock = vi.fn(async (request: RequestInfo | URL) => {
@@ -29,7 +20,6 @@ const EA_SOURCE = "EA template\nstring HasConfiguredEndpoint() { return true; }\
 
 beforeEach(() => {
   vi.mocked(ingestMt5Text).mockClear();
-  vi.mocked(runAiJob).mockClear();
 });
 
 afterEach(() => {
@@ -130,23 +120,11 @@ describe("tRPC surface on the Worker", () => {
   });
 });
 
-describe("durable AI job dispatch endpoint", () => {
-  it("executes a valid dispatch to completion and answers 202", async () => {
-    const response = await handleWorkerRequest(new Request("https://app.example.com/api/ai-job-dispatch", { method: "POST", headers: { "X-Gold-Journal-AI-Dispatch": VALID_TOKEN, "content-type": "application/json" }, body: JSON.stringify({ jobId: VALID_JOB_ID }) }), makeEnv(), EA_SOURCE);
-    expect(response.status).toBe(202);
-    expect(vi.mocked(runAiJob)).toHaveBeenCalledWith(VALID_JOB_ID, VALID_TOKEN);
-  });
-
-  it("answers 503 when the job execution throws", async () => {
-    vi.mocked(runAiJob).mockRejectedValueOnce(new Error("provider down"));
-    const response = await handleWorkerRequest(new Request("https://app.example.com/api/ai-job-dispatch", { method: "POST", headers: { "X-Gold-Journal-AI-Dispatch": VALID_TOKEN, "content-type": "application/json" }, body: JSON.stringify({ jobId: VALID_JOB_ID }) }), makeEnv(), EA_SOURCE);
-    expect(response.status).toBe(503);
-  });
-
-  it("rejects invalid dispatch requests without running the job", async () => {
-    const response = await handleWorkerRequest(new Request("https://app.example.com/api/ai-job-dispatch", { method: "POST", headers: { "X-Gold-Journal-AI-Dispatch": "garbage" }, body: JSON.stringify({ jobId: "nope" }) }), makeEnv(), EA_SOURCE);
-    expect(response.status).toBe(400);
-    expect(vi.mocked(runAiJob)).not.toHaveBeenCalled();
+describe("server-side AI execution is retired", () => {
+  it("no longer exposes the durable AI job dispatch route", async () => {
+    const response = await handleWorkerRequest(new Request("https://app.example.com/api/ai-job-dispatch", { method: "POST", headers: { "X-Gold-Journal-AI-Dispatch": "opaque-dispatch-token-not-persisted-123", "content-type": "application/json" }, body: JSON.stringify({ jobId: "00000000-0000-0000-0000-000000000001" }) }), makeEnv(), EA_SOURCE);
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({ ok: false, code: "NOT_FOUND" });
   });
 });
 

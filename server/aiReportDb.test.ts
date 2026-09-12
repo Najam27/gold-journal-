@@ -4,7 +4,7 @@ import { buildAnalysis } from "@shared/analysisEngine";
 const mocks = vi.hoisted(() => ({ getDb: vi.fn() }));
 vi.mock("./db", () => ({ getDb: mocks.getDb }));
 
-import { persistAiOutcome } from "./aiReportDb";
+import { persistAiReport } from "./aiReportDb";
 
 const report = {
   executiveSummary: "No deterministic evidence is available yet.", strongestEdges: [], weakestContexts: [], sessionAnalysis: [], timeframeAnalysis: [], levelAnalysis: [], setupAnalysis: [],
@@ -16,12 +16,11 @@ const report = {
 describe("AI report persistence", () => {
   beforeEach(() => mocks.getDb.mockReset());
 
-  it("does not require a database when AI is unavailable", async () => {
-    const analysis = buildAnalysis([]);
-    const result = await persistAiOutcome(9, 42, analysis, { available: false, cached: false, model: null, report: null });
+  it("degrades safely when no database is configured", async () => {
+    mocks.getDb.mockResolvedValue(null);
+    const result = await persistAiReport(9, 42, buildAnalysis([]), "test-model", report);
     expect(result.persisted).toBe(false);
     expect(result.reportId).toBeNull();
-    expect(mocks.getDb).not.toHaveBeenCalled();
   });
 
   it("persists an immutable account-scoped snapshot with a deterministic fingerprint", async () => {
@@ -33,11 +32,11 @@ describe("AI report persistence", () => {
     };
     const db = { insert: vi.fn(() => insertChain) };
     mocks.getDb.mockResolvedValue(db);
-    const result = await persistAiOutcome(9, 42, buildAnalysis([]), { available: true, cached: false, model: "test-model", report });
+    const result = await persistAiReport(9, 42, buildAnalysis([]), "test-model", report);
     expect(result.persisted).toBe(true);
     expect(result.reportId).toBe(101);
     expect(insertValues[0]).toMatchObject({ userId: 9, accountId: 42, model: "test-model" });
-    expect(insertValues[0].dataFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(insertValues[0].dataFingerprint).toMatch(/^[a-f0-9]{16}$/);
     expect(insertChain.onConflictDoNothing).toHaveBeenCalled();
   });
 });

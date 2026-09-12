@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
@@ -14,6 +14,9 @@ import { Input } from "@/components/ui/input";
 import { formatMoney } from "@/lib/gold";
 import { openJournalView } from "@/lib/journalViewNavigation";
 import { trpc } from "@/lib/trpc";
+import { AI_UI_COPY, analyzeJournal, type AiAnalysisOutcome } from "@/lib/ai/aiService";
+import { uiStateForErrorCode, type AiUiState } from "@/lib/ai/aiTypes";
+import { useAiSettings } from "@/lib/ai/useAiSettings";
 import type {
   AnalysisFilters,
   AnalysisResult,
@@ -273,22 +276,12 @@ export function AnalysisDashboard({ accountId }: Props) {
       refetchOnWindowFocus: false,
     }
   );
-  const aiConfig = trpc.analysis.config.useQuery(undefined, {
-    staleTime: 60_000,
-    refetchOnWindowFocus: false,
-  });
-  const aiMutation = trpc.analysis.ai.useMutation();
-  const [aiJobId, setAiJobId] = useState<string | null>(null);
-  const aiJob = trpc.aiJobs.status.useQuery(
-    { jobId: aiJobId ?? "00000000-0000-0000-0000-000000000000" },
-    {
-      enabled: Boolean(aiJobId),
-      refetchInterval: query => {
-        const status = (query.state.data as any)?.status;
-        return status === "QUEUED" || status === "RUNNING" ? 1_500 : false;
-      },
-    }
-  );
+  const aiSettings = useAiSettings();
+  const [aiOutcome, setAiOutcome] = useState<AiAnalysisOutcome | null>(null);
+  const [aiUiState, setAiUiState] = useState<AiUiState>("ready");
+  const aiRunning = aiUiState === "analyzing";
+  const aiAbortRef = useRef<AbortController | null>(null);
+  const saveAiReport = trpc.analysis.saveAiReport.useMutation();
   const analysis = query.data as AnalysisResult | undefined;
   const comparisonQuery = trpc.analysis.compare.useQuery(
     {
@@ -326,18 +319,42 @@ export function AnalysisDashboard({ accountId }: Props) {
     setCompareEnabled(false);
   };
   const runAi = async () => {
-    if (!accountId) return;
-    const started = await aiMutation.mutateAsync({ accountId, filters });
-    if (started.ai.pending && started.ai.jobId) setAiJobId(started.ai.jobId);
+    if (!accountId || !analysis || aiRunning) return;
+    aiAbortRef.current?.abort();
+    const controller = new AbortController();
+    aiAbortRef.current = controller;
+    setAiOutcome(null);
+    setAiUiState("analyzing");
+    const outcome = await analyzeJournal({
+      analysis,
+      signal: controller.signal,
+      model: aiSettings.model ?? undefined,
+    });
+    if (controller.signal.aborted) {
+      setAiUiState("cancelled");
+      return;
+    }
+    setAiOutcome(outcome);
+    if (outcome.available && outcome.report) {
+      setAiUiState("success");
+      try {
+        await saveAiReport.mutateAsync({
+          accountId,
+          filters,
+          model: outcome.model ?? "unknown",
+          report: outcome.report,
+        });
+      } catch {
+        // Historical persistence is best-effort; the browser report stays visible.
+      }
+    } else {
+      setAiUiState(uiStateForErrorCode(outcome.errorCode));
+    }
   };
-  const aiResult: any =
-    aiJob.data?.status === "COMPLETED" ? aiJob.data.result : aiMutation.data;
-  const aiPending = Boolean(
-    aiResult?.ai?.pending &&
-      (!aiJob.data ||
-        aiJob.data.status === "QUEUED" ||
-        aiJob.data.status === "RUNNING")
-  );
+  const cancelAi = () => {
+    aiAbortRef.current?.abort();
+    setAiUiState("cancelled");
+  };
   if (!accountId)
     return (
       <section className="panel">
@@ -835,14 +852,14 @@ export function AnalysisDashboard({ accountId }: Props) {
           JWTs, screenshots, or raw journal notes, and it cannot produce market
           signals.
         </p>
-        {aiConfig.data && !aiConfig.data.configured && (
+        {!aiSettings.configured && (
           <div className="analysis-ai-empty">
             <Bot size={20} />
             <div>
-              <strong>OpenRouter is not configured.</strong>
+              <strong>OpenRouter is not configured in this browser.</strong>
               <p>
-                Add your personal OpenRouter key in Options to enable secure AI
-                analysis.
+                Add your own OpenRouter key in Options. The key stays in this
+                browser and requests go straight to OpenRouter.
               </p>
               <Button
                 variant="outline"
@@ -854,56 +871,50 @@ export function AnalysisDashboard({ accountId }: Props) {
             </div>
           </div>
         )}
-        {aiConfig.error && (
-          <div className="analysis-ai-empty">
-            <AlertTriangle size={20} />
-            <div>
-              <strong>AI configuration status unavailable.</strong>
-              <p>{aiConfig.error.message}</p>
-            </div>
-          </div>
-        )}
-        <Button
-          size="lg"
-          disabled={
-            aiMutation.isPending ||
-            aiPending ||
-            aiConfig.isLoading ||
-            aiConfig.data?.configured === false
-          }
-          onClick={() => void runAi()}
-        >
-          <Bot size={16} />
-          {aiMutation.isPending
-            ? "Starting secure AI review…"
-            : aiPending
-              ? "Analyzing in background…"
-              : "Analyze my journal"}
-        </Button>
-        {aiPending && (
+        <div className="ai-action-row">
+          <Button
+            size="lg"
+            disabled={aiRunning || !aiSettings.configured}
+            onClick={() => void runAi()}
+          >
+            <Bot size={16} />
+            {aiRunning
+              ? "Analyzing in your browser…"
+              : aiOutcome
+                ? "Re-analyze my journal"
+                : "Analyze my journal"}
+          </Button>
+          {aiRunning && (
+            <Button variant="outline" size="lg" onClick={cancelAi}>
+              Cancel
+            </Button>
+          )}
+        </div>
+        {aiRunning && (
           <div className="analysis-ai-empty">
             <Bot size={20} />
             <p>
-              AI analysis is processing securely in the background. This view
-              will update when it completes.
+              This browser is calling OpenRouter directly. Nothing is sent to
+              Gold Journal servers, and you can cancel at any time.
             </p>
           </div>
         )}
-        {aiJob.data?.status === "FAILED" && (
-          <div className="analysis-ai-empty">
-            <AlertTriangle size={20} />
-            <p>{aiJob.data.message}</p>
-          </div>
-        )}
-        {aiResult && !aiPending && <AiReport result={aiResult} />}
-        {aiMutation.error && (
+        {!aiRunning && aiUiState !== "success" && aiUiState !== "ready" && (
           <div className="analysis-ai-empty">
             <AlertTriangle size={20} />
             <div>
-              <strong>AI analysis temporarily unavailable.</strong>
-              <p>{aiMutation.error.message}</p>
+              <strong>{AI_UI_COPY[aiUiState].title}</strong>
+              <p>{aiOutcome?.message ?? AI_UI_COPY[aiUiState].body}</p>
+              {aiSettings.configured && aiUiState !== "not_configured" && (
+                <Button variant="outline" size="sm" onClick={() => void runAi()}>
+                  Retry
+                </Button>
+              )}
             </div>
           </div>
+        )}
+        {aiOutcome && !aiRunning && aiOutcome.available && (
+          <AiReport result={{ ai: aiOutcome }} />
         )}
       </section>
       <section className="panel">

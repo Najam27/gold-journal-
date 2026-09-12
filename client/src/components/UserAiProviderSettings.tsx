@@ -1,94 +1,100 @@
 import { useState } from "react";
 import { KeyRound, Loader2, ShieldCheck, Trash2 } from "lucide-react";
-import { trpc } from "@/lib/trpc";
+import { AI_MODEL_SUGGESTIONS, DEFAULT_AI_MODEL } from "@shared/aiCore";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { clearAiSettings, saveAiSettings } from "@/lib/ai/aiStorage";
+import { clearAiCache, testAiConnection } from "@/lib/ai/aiService";
+import { useAiSettings } from "@/lib/ai/useAiSettings";
 import { toast } from "sonner";
 
+/**
+ * Private AI provider settings.
+ *
+ * The OpenRouter key is written straight into this browser's local storage and
+ * is never transmitted to Gold Journal, Cloudflare, Supabase, or any backend.
+ * Outbound AI traffic goes directly from this browser to OpenRouter.
+ */
 export function UserAiProviderSettings() {
-  const utils = trpc.useUtils();
-  const status = trpc.aiSettings.status.useQuery();
-  const testKey = trpc.aiSettings.test.useMutation();
-  const saveKey = trpc.aiSettings.save.useMutation();
-  const removeKey = trpc.aiSettings.remove.useMutation();
+  const status = useAiSettings();
   const [key, setKey] = useState("");
-  const [model, setModel] = useState("openai/gpt-4o-mini");
-  const busy = testKey.isPending || saveKey.isPending || removeKey.isPending;
-  const vaultUnavailable = status.data?.vaultAvailable === false;
-  const refresh = () =>
-    Promise.all([
-      utils.aiSettings.status.invalidate(),
-      utils.analysis.config.invalidate(),
-    ]);
+  const [model, setModel] = useState(status.model ?? DEFAULT_AI_MODEL);
+  const [busy, setBusy] = useState<"test" | "save" | "remove" | null>(null);
+
   const validate = async () => {
+    setBusy("test");
     try {
-      const result = await testKey.mutateAsync({ key });
+      const result = await testAiConnection({ apiKey: key });
       toast.success(`OpenRouter key verified: ${result.label}.`);
     } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "OpenRouter could not verify this key."
-      );
+      toast.error(error instanceof Error ? error.message : "OpenRouter could not verify this key.");
+    } finally {
+      setBusy(null);
     }
   };
+
   const save = async () => {
+    setBusy("save");
     try {
-      await saveKey.mutateAsync({ key, model });
+      saveAiSettings({ apiKey: key, model: model || DEFAULT_AI_MODEL });
+      clearAiCache();
       setKey("");
-      await refresh();
-      toast.success("Encrypted AI key saved. It is never shown again.");
+      toast.success("AI key saved in this browser only. It is never sent to the server.");
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to save AI settings."
-      );
+      toast.error(error instanceof Error ? error.message : "Unable to save AI settings.");
+    } finally {
+      setBusy(null);
     }
   };
+
   const remove = async () => {
-    if (
-      !window.confirm(
-        "Remove your saved AI key? AI Analysis, Mentor, and Risk Coach will stay unavailable until you add another key."
-      )
-    )
-      return;
+    if (!window.confirm("Remove your saved AI key from this browser? AI Analysis, AI Mentor, and Risk Coach stay unavailable until you add another key.")) return;
+    setBusy("remove");
     try {
-      await removeKey.mutateAsync({ confirmed: true });
+      clearAiSettings();
+      clearAiCache();
       setKey("");
-      await refresh();
-      toast.success("Saved AI key removed.");
+      toast.success("Local AI key removed from this browser.");
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Unable to remove AI settings."
-      );
+      toast.error(error instanceof Error ? error.message : "Unable to remove AI settings.");
+    } finally {
+      setBusy(null);
     }
   };
+
   return (
     <section className="panel ai-provider-settings">
-      <span className="section-label">PRIVATE AI PROVIDER</span>
+      <span className="section-label">PRIVATE AI PROVIDER · BROWSER ONLY</span>
       <h3>
         <KeyRound size={17} /> OpenRouter key
       </h3>
       <p>
-        Your key is sent only to the authenticated server, encrypted before
-        database storage, and never returned to this browser after save. AI
-        Analysis, AI Mentor, and Risk Coach use this key.
+        Your key is stored in this browser&apos;s local storage and is used to call
+        OpenRouter directly from this device. It is never sent to Gold Journal,
+        Cloudflare, or Supabase. AI Analysis, AI Mentor, and Risk Coach all use
+        this key.
       </p>
-      {vaultUnavailable ? (
+      <p className="ai-key-local-warning" role="note">
+        Local storage is readable by JavaScript running on this site. Only use a
+        key you are willing to keep on this device, and remove it when you are
+        done on a shared computer.
+      </p>
+      {!status.persistenceAvailable && (
         <p className="ai-key-vault-warning" role="alert">
-          Key testing is available, but saving is disabled because this
-          deployment has no server-only encryption material. Configure a server
-          encryption secret and retry.
+          This browser cannot save local AI settings (private mode or blocked
+          storage). Enable site storage to configure AI.
         </p>
-      ) : status.data?.configured ? (
+      )}
+      {status.configured ? (
         <div className="ai-key-status">
           <ShieldCheck size={16} />
           <span>
-            Connected as <b>{status.data.maskedKey}</b> · {status.data.model}
+            Connected as <b>{status.maskedKey}</b> · {status.model}
           </span>
         </div>
       ) : (
         <p className="muted">
-          No AI key connected. Add your personal OpenRouter key to enable AI
+          No AI key configured. Add your personal OpenRouter key to enable AI
           features.
         </p>
       )}
@@ -100,47 +106,36 @@ export function UserAiProviderSettings() {
           onChange={event => setKey(event.target.value)}
           placeholder="sk-or-v1-…"
           aria-label="OpenRouter API key"
-          disabled={busy}
+          disabled={busy !== null}
         />
         <Input
+          list="ai-model-suggestions"
           value={model}
           onChange={event => setModel(event.target.value)}
           placeholder="OpenRouter model"
           aria-label="OpenRouter model"
-          disabled={busy}
+          disabled={busy !== null}
         />
+        <datalist id="ai-model-suggestions">
+          {AI_MODEL_SUGGESTIONS.map(option => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          ))}
+        </datalist>
         <div className="dialog-actions">
-          <Button
-            variant="outline"
-            disabled={busy || key.trim().length < 20}
-            onClick={validate}
-          >
-            {testKey.isPending && (
-              <Loader2 className="animate-spin" size={15} />
-            )}{" "}
-            Test key
+          <Button variant="outline" disabled={busy !== null || key.trim().length < 20} onClick={() => void validate()}>
+            {busy === "test" && <Loader2 className="animate-spin" size={15} />} Test key
           </Button>
           <Button
-            disabled={
-              vaultUnavailable ||
-              busy ||
-              key.trim().length < 20 ||
-              !model.trim()
-            }
-            onClick={save}
+            disabled={!status.persistenceAvailable || busy !== null || key.trim().length < 20 || !model.trim()}
+            onClick={() => void save()}
           >
-            {saveKey.isPending && (
-              <Loader2 className="animate-spin" size={15} />
-            )}{" "}
-            {status.data?.configured ? "Replace key" : "Save key"}
+            {busy === "save" && <Loader2 className="animate-spin" size={15} />}{" "}
+            {status.configured ? "Replace key" : "Save key"}
           </Button>
-          {status.data?.configured && (
-            <Button
-              variant="outline"
-              className="danger-button"
-              disabled={vaultUnavailable || busy}
-              onClick={remove}
-            >
+          {status.configured && (
+            <Button variant="outline" className="danger-button" disabled={busy !== null} onClick={() => void remove()}>
               <Trash2 size={15} /> Delete
             </Button>
           )}

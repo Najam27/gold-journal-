@@ -6,7 +6,6 @@
  *   GET|HEAD /api/mt5/compat      - EA compatibility probe
  *   GET|HEAD /api/mt5/ea          - generated GoldJournal_EA.mq5 for this origin
  *   POST /api/trpc (+ GET queries)- tRPC application API (Supabase bearer auth)
- *   POST /api/ai-job-dispatch     - durable AI job start (runs under waitUntil)
  * Everything else: static assets from the `ASSETS` binding with an SPA
  * index.html fallback, exactly like the Netlify `/*` redirect.
  *
@@ -14,7 +13,6 @@
  * unchanged under Node (Vitest) and workerd.
  */
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
-import { runAiJob, parseAiJobDispatchRequest } from "../server/aiJobs";
 import { buildUserContext, readAuthorizationHeader } from "../server/_core/context";
 import { appRouter } from "../server/routers";
 import { MT5_EA_MIN_VERSION, MT5_PAYLOAD_VERSION, ingestMt5Text } from "../server/mt5Ingest";
@@ -140,30 +138,6 @@ async function handleTrpc(request: Request, env: WorkerEnv): Promise<Response> {
   return decorateResponse(response, apiHeaders(env));
 }
 
-/**
- * Durable AI job execution on the Worker.
- *
- * The job runs inline in this invocation (OpenRouter I/O keeps the invocation
- * alive while the dispatching server-side request stays connected; Cloudflare
- * places no wall-clock limit on an HTTP invocation whose client is connected).
- * The atomic QUEUED->RUNNING claim in runAiJob guarantees a job is never
- * processed twice even if a dispatcher retries after a network cut. Jobs that
- * are still cut off stay RUNNING and the status lease marks them FAILED after
- * sixteen minutes so the UI always reaches a terminal, retryable state.
- */
-async function handleAiJobDispatch(request: Request, env: WorkerEnv): Promise<Response> {
-  const bodyText = request.method === "POST" ? await request.text().catch(() => null) : null;
-  const parsed = parseAiJobDispatchRequest(request.method, request.headers.get("X-Gold-Journal-AI-Dispatch"), bodyText);
-  if (!parsed.ok) return json(parsed.status, { ok: false, message: parsed.message }, apiHeaders(env));
-  try {
-    await runAiJob(parsed.jobId, parsed.token);
-  } catch (error) {
-    console.warn("[ai-job] worker dispatch failed", JSON.stringify({ jobId: parsed.jobId, reason: error instanceof Error ? error.message : "unknown" }));
-    return json(503, { ok: false, message: "AI job execution failed on this deployment." }, apiHeaders(env));
-  }
-  return new Response(null, { status: 202, headers: apiHeaders(env) });
-}
-
 function handleUnknownApiRoute(request: Request, env: WorkerEnv): Response {
   return json(404, { ok: false, code: "NOT_FOUND", route: new URL(request.url).pathname }, apiHeaders(env));
 }
@@ -188,7 +162,6 @@ export async function handleWorkerRequest(request: Request, env: WorkerEnv, eaTe
     if (pathname === "/api/mt5/compat" || pathname === "/mt5/compat") return handleMt5Compatibility(request, env);
     if (pathname === "/api/mt5/ea" || pathname === "/mt5/ea") return handleMt5EaDownload(request, env, eaTemplateSource);
     if (pathname === "/api/trpc" || pathname.startsWith("/api/trpc/")) return await handleTrpc(request, env);
-    if (pathname === "/api/ai-job-dispatch") return await handleAiJobDispatch(request, env);
     if (pathname.startsWith("/api/") || pathname.startsWith("/mt5/")) return handleUnknownApiRoute(request, env);
 
     return await serveStaticAssets(request, env);

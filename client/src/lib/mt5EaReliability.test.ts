@@ -5,22 +5,23 @@ const source = readFileSync(new URL("../../public/GoldJournal_EA.mq5", import.me
 
 describe("Gold Journal MT5 EA reliability contract", () => {
   it("keeps the three-second cadence while using bounded retry for transient HTTP failures", () => {
-    expect(source).toContain("#property version   \"2.13\"");
+    expect(source).toContain('#property version   "2.14"');
     expect(source).toContain("input int SyncSeconds = 3");
     expect(source).toContain("const int MAX_RETRY_BACKOFF_SECONDS = 60");
     expect(source).toContain("bool IsTransientStatus(int status)");
     // Server-side 4xx payload rejections (422 invalid data/timestamp, 400,
     // 410) are transient and must never stop the whole bridge; only 401/403
-    // (key) and 404/405 (endpoint) are permanent.
+    // (key) and 404/405 (endpoint) are configuration problems, and those back
+    // off without ever latching permanently.
     expect(source).toContain("status == 422 || status == 429");
     expect(source).toContain("status == 502 || status == 503 || status == 504");
-    expect(source).toContain("g_next_retry_at = TimeCurrent() + delay");
-    expect(source).toContain("operation=%s; http=-1; mt5_error=%d; endpoint=%s");
+    expect(source).toContain("g_next_retry_at = now + retry_delay;");
+    expect(source).toContain("operation=%s; http=-1; mt5_error=%d; failures=%d");
   });
 
-  it("stops permanent rejections, records per-event recovery, and never logs the API key", () => {
-    expect(source).toContain("bool g_permanent_rejection = false");
-    expect(source).toContain("if(g_permanent_rejection) return false");
+  it("never latches a permanent rejection, records per-event recovery, and never logs the API key", () => {
+    expect(source).not.toContain("g_permanent_rejection");
+    expect(source).toContain("bool g_requires_revalidation = false");
     expect(source).toContain("MarkEventSuccess(expectedEvent, JsonStringValue(response_text, \"connectionReference\"), JsonStringValue(response_text, \"dataSourceReference\"))");
     expect(source).toContain("JsonStringValue(response_text, \"dataSourceReference\")");
     expect(source).toContain("authenticated connection reference=%s");
@@ -31,10 +32,11 @@ describe("Gold Journal MT5 EA reliability contract", () => {
     expect(source).not.toMatch(/Print(?:Format)?\([^\n]*ApiKey/);
   });
 
-  it("prints safe startup state and gives a specific recovery instruction for invalid or retired keys", () => {
+  it("prints safe startup state and gives a recoverable recovery instruction for invalid or retired keys", () => {
     expect(source).toContain("[MT5 LIVE] STARTUP; EA_VERSION=%s; endpoint=%s; terminal_connected=%s; api_key_present=true");
-    expect(source).toContain("[MT5 LIVE] startup blocked: paste the current API key from Gold Journal MT5 Live into EA Inputs. Do not share that key.");
-    expect(source).toContain("API key rejected or retired; operation=%s; http=%d. In Gold Journal MT5 Live, issue a replacement key");
+    expect(source).toContain("correcting the input and applying recovers it");
+    expect(source).toContain("API key rejected or retired; operation=%s; http=%d");
+    expect(source).toContain("The EA keeps probing and resumes automatically.");
     expect(source).toContain('input string Endpoint = "__GOLD_JOURNAL_MT5_ENDPOINT__";');
     expect(source).toContain("MT5 endpoint not found; operation=%s; http=%d; endpoint=%s");
   });
@@ -47,7 +49,7 @@ describe("Gold Journal MT5 EA reliability contract", () => {
     expect(source).toContain("if(!SendJson(payload, \"history_batch\")) return;");
     expect(source).toContain("g_history_cursor = cursor");
     expect(source).toContain("g_history_in_progress = false");
-    expect(source).toContain("g_history_in_progress || (g_last_history_attempt == 0");
+    expect(source).toContain("bool idle_window = (g_last_history_attempt == 0");
     expect(source).toContain("skipped unreconstructable historical position");
   });
 

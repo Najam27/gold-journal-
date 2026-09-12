@@ -1,22 +1,25 @@
-import { createHash } from "node:crypto";
 import { aiEdgeHistory, aiExperimentHistory, aiReports } from "../drizzle/schema";
-import { compactAnalysisForAi, type AnalysisResult } from "@shared/analysisEngine";
-import { buildEvidenceManifest, type AiOutcome } from "./analysisAi";
+import { analysisDataFingerprint, buildEvidenceManifest, type AiReport } from "@shared/aiCore";
+import type { AnalysisResult } from "@shared/analysisEngine";
 import { getDb } from "./db";
 import { and, desc, eq } from "./supabaseQuery";
 
-export function analysisDataFingerprint(analysis: AnalysisResult) {
-  return createHash("sha256").update(JSON.stringify({ version: analysis.version, data: compactAnalysisForAi(analysis) })).digest("hex");
-}
+export { analysisDataFingerprint };
 
-export async function persistAiOutcome(userId: number, accountId: number, analysis: AnalysisResult, outcome: AiOutcome) {
-  if (!outcome.available || !outcome.report || !outcome.model) return { persisted: false as const, reportId: null, dataFingerprint: analysisDataFingerprint(analysis) };
-  const db = await getDb();
-  if (!db) return { persisted: false as const, reportId: null, dataFingerprint: analysisDataFingerprint(analysis) };
+/**
+ * Stores a report that the user's browser produced.
+ *
+ * OpenRouter is never called here: the server receives only the finished,
+ * credential-free report plus the model label, re-derives the deterministic
+ * analysis for the fingerprint, and persists history so past reports remain
+ * viewable.
+ */
+export async function persistAiReport(userId: number, accountId: number, analysis: AnalysisResult, model: string, report: AiReport) {
   const dataFingerprint = analysisDataFingerprint(analysis);
+  const db = await getDb();
+  if (!db) return { persisted: false as const, reportId: null, dataFingerprint };
   const manifest = buildEvidenceManifest(analysis);
-  const report = outcome.report;
-  const inserted = await db.insert(aiReports).values({ userId, accountId, analysisVersion: analysis.version, dataFingerprint, model: outcome.model, report, evidenceManifest: manifest }).onConflictDoNothing({ target: [aiReports.userId, aiReports.accountId, aiReports.dataFingerprint] }).returning({ id: aiReports.id });
+  const inserted = await db.insert(aiReports).values({ userId, accountId, analysisVersion: analysis.version, dataFingerprint, model, report, evidenceManifest: manifest }).onConflictDoNothing({ target: [aiReports.userId, aiReports.accountId, aiReports.dataFingerprint] }).returning({ id: aiReports.id });
   const reportId = inserted[0]?.id ?? (await db.select({ id: aiReports.id }).from(aiReports).where(and(eq(aiReports.userId, userId), eq(aiReports.accountId, accountId), eq(aiReports.dataFingerprint, dataFingerprint))).limit(1))[0]?.id;
   if (!reportId) throw new Error("AI report persistence did not return a report identifier.");
 

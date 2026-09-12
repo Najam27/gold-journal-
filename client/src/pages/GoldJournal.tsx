@@ -47,14 +47,15 @@ import {
   type JournalViewTarget,
 } from "@/lib/journalViewNavigation";
 import { invalidateAccountScopedQueries } from "@/lib/accountScope";
+import { OFFLINE_CASH_REQUEST_EVENT } from "@/lib/offlineMutationQueue";
+import { useLocalJournal } from "@/lib/journal/useLocalJournal";
+import { JOURNAL_LOCAL_EVENT } from "@/lib/journal/journalStore";
 import {
-  enqueueOfflineMutation,
-  newOfflineMutationId,
-  OFFLINE_CASH_REQUEST_EVENT,
-  OFFLINE_QUEUE_EVENT,
-  queuedMutations,
-  replayOfflineMutations,
-} from "@/lib/offlineMutationQueue";
+  isOnline,
+  queuedJournalMutationCount,
+  type JournalMutation,
+  type JournalSyncState,
+} from "@/lib/journal/journalSync";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PlanExecutionEditor } from "@/components/PlanExecutionEditor";
 import { TradeLogWithViewer } from "@/components/TradeLogWithViewer";
@@ -64,6 +65,16 @@ import { FlexibleGoalsView } from "@/components/FlexibleGoalsView";
 import { SessionRecovery } from "@/components/SessionRecovery";
 import { Mt5LiveView } from "@/components/Mt5LiveView";
 import { UserAiProviderSettings } from "@/components/UserAiProviderSettings";
+import { Field, RiskMetric } from "@/components/journalPrimitives";
+import { RiskCalculatorPanel } from "@/components/RiskCalculatorPanel";
+import {
+  AI_UI_COPY,
+  analyzeJournal,
+  type AiAnalysisOutcome,
+} from "@/lib/ai/aiService";
+import { uiStateForErrorCode, type AiUiState } from "@/lib/ai/aiTypes";
+import { useAiSettings } from "@/lib/ai/useAiSettings";
+import type { AnalysisResult } from "@shared/analysisEngine";
 import { MissedTradesView } from "@/components/MissedTradesView";
 import { NotificationCenter } from "@/components/NotificationCenter";
 import { AccountRenameControl } from "@/components/AccountRenameControl";
@@ -182,7 +193,7 @@ const defaultRules = [
   "Take screenshot for every trade. No exceptions.",
 ];
 export const MENTOR_LOCAL_KEY_NOTICE =
-  "OpenRouter credentials are server-only and are never stored in this browser or sent with journal data.";
+  "Your OpenRouter key stays in this browser only, is never sent to Gold Journal servers or stored with journal data, and is read solely to call OpenRouter directly from this device.";
 export function getMentorStorageKeys(_openId?: string | null) {
   return { storageKey: "", reportStorageKey: "" };
 }
@@ -274,20 +285,6 @@ function EmptyState({
       <p>{copy}</p>
       {action}
     </div>
-  );
-}
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      {children}
-    </label>
   );
 }
 function FormSection({
@@ -403,7 +400,6 @@ export default function GoldJournal() {
   const [resultFilter, setResultFilter] = useState("ALL");
   const [tradePage, setTradePage] = useState(1);
   const [missedDialog, setMissedDialog] = useState(false);
-  const [queuedCount, setQueuedCount] = useState(0);
   useEffect(() => {
     const navigate = (event: Event) => {
       const next = (event as CustomEvent<{ view?: JournalViewTarget }>).detail
@@ -483,40 +479,28 @@ export default function GoldJournal() {
   const clearGoals = trpc.goals.clearAll.useMutation();
   const recordGoalAlerts = trpc.notifications.recordGoalAlerts.useMutation();
   const createAccount = trpc.accounts.create.useMutation();
-  const refreshOfflineQueue = React.useCallback(
-    () => setQueuedCount(queuedMutations(authUserId, accountId).length),
-    [accountId, authUserId]
-  );
-  const replayOfflineQueue = React.useCallback(async () => {
-    const result = await replayOfflineMutations(
-      authUserId,
-      accountId,
-      async item => {
-        if (item.kind === "trade.create")
-          await createTrade.mutateAsync(item.payload as any);
-        else if (item.kind === "cash.create")
-          await createCash.mutateAsync(item.payload as any);
-      }
-    );
-    refreshOfflineQueue();
-    if (result.replayed) {
-      toast.success(
-        `${result.replayed} offline ${result.replayed === 1 ? "save" : "saves"} synced.`
-      );
-      void invalidateAccountScopedQueries(utils);
-    }
-    if (result.failed)
-      toast.warning(
-        "An offline save still needs a connection. It will retry when you are online again."
-      );
-  }, [
+  // Local-first journal runtime. The browser writes locally first, updates the
+  // UI immediately, queues the change durably, and syncs with retry/backoff.
+  // The backend is the cloud synchronisation and backup layer.
+  const localJournal = useLocalJournal({
     accountId,
-    authUserId,
-    createCash,
-    createTrade,
-    refreshOfflineQueue,
-    utils,
-  ]);
+    subject: authUserId,
+    journal: journalQuery.data as Record<string, unknown> | undefined,
+    dispatch: async (mutation: JournalMutation) => {
+      const payload = mutation.payload as any;
+      if (mutation.kind === "trade.create")
+        await createTrade.mutateAsync(payload);
+      else if (mutation.kind === "trade.update")
+        await updateTrade.mutateAsync(payload);
+      else if (mutation.kind === "trade.delete")
+        await deleteTrade.mutateAsync(payload);
+      else if (mutation.kind === "cash.create")
+        await createCash.mutateAsync(payload);
+    },
+    onSynced: () => {
+      void invalidateAccountScopedQueries(utils);
+    },
+  });
   useEffect(() => {
     const up = () => setIsOnline(true);
     const down = () => setIsOnline(false);
@@ -528,12 +512,8 @@ export default function GoldJournal() {
     };
   }, []);
   useEffect(() => {
-    const refreshQueue = () => refreshOfflineQueue();
-    refreshQueue();
-    window.addEventListener(OFFLINE_QUEUE_EVENT, refreshQueue);
-    if (isOnline) void replayOfflineQueue();
-    return () => window.removeEventListener(OFFLINE_QUEUE_EVENT, refreshQueue);
-  }, [isOnline, refreshOfflineQueue, replayOfflineQueue]);
+    if (isOnline) void localJournal.flush();
+  }, [isOnline, localJournal.flush]);
   useEffect(() => {
     const queueCash = (event: Event) => {
       const detail = (
@@ -551,11 +531,7 @@ export default function GoldJournal() {
         (detail.amount ?? 0) <= 0
       )
         return;
-      const clientMutationId = newOfflineMutationId();
-      enqueueOfflineMutation({
-        id: clientMutationId,
-        subject: authUserId,
-        accountId,
+      void localJournal.queueMutation({
         kind: "cash.create",
         payload: {
           accountId,
@@ -563,18 +539,17 @@ export default function GoldJournal() {
           type: detail.type,
           amount: detail.amount,
           note: detail.note ?? "",
-          clientMutationId,
         },
       });
       setCashDialog(null);
       setCashAmount("");
       setCashNote("");
-      toast.success("Cash movement saved to the offline queue.");
+      toast.success("Cash movement saved locally and queued for sync.");
     };
     window.addEventListener(OFFLINE_CASH_REQUEST_EVENT, queueCash);
     return () =>
       window.removeEventListener(OFFLINE_CASH_REQUEST_EVENT, queueCash);
-  }, [accountId, authUserId]);
+  }, [accountId, authUserId, localJournal.queueMutation]);
   useEffect(() => {
     const eventHandler = (event: Event) => {
       event.preventDefault();
@@ -633,7 +608,10 @@ export default function GoldJournal() {
     }
     previousAuthUserId.current = authUserId;
   }, [authUserId]);
-  const data = journalQuery.data as any;
+  // Local-first render: fall back to the last local snapshot so a refresh,
+  // a cold start, or a temporary backend outage still shows the user's journal.
+  const data =
+    (journalQuery.data as any) ?? (localJournal.localSnapshot as any) ?? undefined;
   const account =
     data?.activeAccount ?? ownedAccounts.find(item => item.id === accountId);
   const trades = data?.trades ?? [];
@@ -829,25 +807,36 @@ export default function GoldJournal() {
       emotionAfter: tradeForm.emotionAfter,
       mt5Ticket: tradeForm.mt5Ticket || undefined,
     };
-    if (!isOnline && !editing && authUserId) {
-      const clientMutationId = newOfflineMutationId();
-      enqueueOfflineMutation({
-        id: clientMutationId,
-        subject: authUserId,
-        accountId: account.id,
-        kind: "trade.create",
-        payload: { ...payload, clientMutationId },
-      });
-      if (screenshot)
-        toast.warning(
-          "Trade is queued. Re-open it after sync to attach the screenshot."
+    // A new trade with a screenshot while online is saved directly so the image
+    // attaches to a real record id in one step. Every other write is local-first:
+    // it is stored and shown immediately, then synchronized with retry.
+    const needsServerIdForScreenshot = Boolean(screenshot && !editing && isOnline);
+    if (authUserId && !needsServerIdForScreenshot) {
+      try {
+        await localJournal.queueMutation({
+          kind: editing ? "trade.update" : "trade.create",
+          payload: editing
+            ? { ...payload, tradeId: editing.id }
+            : { ...payload, accountId: account.id },
+        });
+        if (screenshot)
+          toast.warning(
+            "Trade saved locally. Re-open it after sync to attach the screenshot."
+          );
+        else
+          toast.success(
+            isOnline
+              ? "Trade saved locally and syncing now."
+              : "Trade saved locally. It will sync automatically when you are online."
+          );
+        setTradeDialog(false);
+        return;
+      } catch {
+        toast.error(
+          "This browser could not store the trade locally. Please retry."
         );
-      else
-        toast.success(
-          "Trade saved to the offline queue and will sync automatically."
-        );
-      setTradeDialog(false);
-      return;
+        return;
+      }
     }
     try {
       const result = editing
@@ -1388,327 +1377,51 @@ function MobileTopbar({ onMenu, onAdd }: any) {
     </header>
   );
 }
-function OfflineQueueIndicator() {
+function JournalSyncIndicator() {
   const { session } = useAuth();
+  const [state, setState] = useState<JournalSyncState>("synced");
   const [count, setCount] = useState(0);
   useEffect(() => {
-    const update = () =>
-      setCount(
-        queuedMutations(session?.user?.id, getSelectedAccountId()).length
+    let cancelled = false;
+    const update = async () => {
+      const subject = session?.user?.id ?? null;
+      const pending = subject ? await queuedJournalMutationCount(subject) : 0;
+      if (cancelled) return;
+      setCount(pending);
+      setState(
+        pending === 0 ? "synced" : isOnline() ? "pending" : "offline"
       );
-    const unsubscribe = subscribeSelectedAccount(update);
-    update();
-    window.addEventListener(OFFLINE_QUEUE_EVENT, update);
+    };
+    const onChange = () => void update();
+    void update();
+    const unsubscribeAccount = subscribeSelectedAccount(onChange);
+    window.addEventListener(JOURNAL_LOCAL_EVENT, onChange);
+    window.addEventListener("online", onChange);
+    window.addEventListener("offline", onChange);
     return () => {
-      unsubscribe();
-      window.removeEventListener(OFFLINE_QUEUE_EVENT, update);
+      cancelled = true;
+      unsubscribeAccount();
+      window.removeEventListener(JOURNAL_LOCAL_EVENT, onChange);
+      window.removeEventListener("online", onChange);
+      window.removeEventListener("offline", onChange);
     };
   }, [session?.user?.id]);
-  return count ? (
+  if (count === 0 && state === "synced") return null;
+  const label =
+    state === "offline"
+      ? "Saved locally — offline"
+      : state === "failed"
+        ? `${count} sync failed — retrying`
+        : state === "syncing"
+          ? `${count} syncing`
+          : `${count} waiting to sync`;
+  return (
     <span
-      className="sync-chip queue-sync-chip"
-      title="These safe manual saves will replay only for this signed-in account."
+      className={`sync-chip queue-sync-chip ${state}`}
+      title="Local journal saves sync automatically for this signed-in account."
     >
-      <RefreshCcw size={14} /> {count} queued
+      <RefreshCcw size={14} /> {label}
     </span>
-  ) : null;
-}
-function RiskMetric({
-  label,
-  value,
-  detail,
-  tone = "neutral",
-}: {
-  label: string;
-  value: string;
-  detail: string;
-  tone?: string;
-}) {
-  return (
-    <article className={`mt5-account-metric ${tone}`}>
-      <span>{label}</span>
-      <strong className="data-text">{value}</strong>
-      <small>{detail}</small>
-    </article>
-  );
-}
-function RiskCalculatorPanel() {
-  const accountId = getSelectedAccountId();
-  const [basis, setBasis] = useState<"EQUITY" | "BALANCE">("EQUITY");
-  const [riskPercent, setRiskPercent] = useState("1");
-  const [entryPrice, setEntryPrice] = useState("");
-  const [stopLoss, setStopLoss] = useState("");
-  const [jobId, setJobId] = useState<string | null>(null);
-  const validInput = Boolean(
-    accountId &&
-      Number(riskPercent) > 0 &&
-      Number(entryPrice) > 0 &&
-      Number(stopLoss) > 0 &&
-      Number(entryPrice) !== Number(stopLoss)
-  );
-  const input = {
-    accountId: accountId || 0,
-    basis,
-    riskPercent: Number(riskPercent),
-    entryPrice: Number(entryPrice),
-    stopLoss: Number(stopLoss),
-  };
-  const calculation = trpc.mt5.risk.useQuery(input, {
-    enabled: validInput,
-    refetchOnWindowFocus: false,
-    staleTime: 2_000,
-  });
-  const aiConfig = trpc.analysis.config.useQuery(undefined, {
-    staleTime: 60_000,
-    refetchOnWindowFocus: false,
-  });
-  const coach = trpc.mt5.riskCoach.useMutation();
-  const job = trpc.aiJobs.status.useQuery(
-    { jobId: jobId ?? "00000000-0000-0000-0000-000000000000" },
-    {
-      enabled: Boolean(jobId),
-      refetchInterval: query => {
-        const status = (query.state.data as any)?.status;
-        return status === "QUEUED" || status === "RUNNING" ? 1_500 : false;
-      },
-    }
-  );
-  const aiUnavailable = aiConfig.data
-    ? !aiConfig.data.vaultAvailable || !aiConfig.data.configured
-    : false;
-  const aiUnavailableCopy =
-    aiConfig.data?.vaultAvailable === false
-      ? "Secure AI key storage is unavailable on this deployment."
-      : "Add your personal OpenRouter key in Options to enable AI risk review.";
-  const startCoach = async () => {
-    if (aiUnavailable) return;
-    const started = await coach.mutateAsync(input);
-    const outcome: any = started.coach;
-    if (outcome?.pending && outcome.jobId) setJobId(outcome.jobId);
-  };
-  const result = calculation.data;
-  const coachOutcome: any =
-    job.data?.status === "COMPLETED"
-      ? (job.data.result as any)?.coach
-      : coach.data?.coach;
-  const pending = Boolean(
-    coachOutcome?.pending &&
-      (!job.data ||
-        job.data.status === "QUEUED" ||
-        job.data.status === "RUNNING")
-  );
-  return (
-    <section className="panel risk-calculator-panel">
-      <div className="mt5-section-head">
-        <div>
-          <span className="eyebrow">LIVE MT5 RISK CALCULATOR</span>
-          <h3>Broker-sized XAUUSD position guide</h3>
-          <p>
-            Uses this account’s latest MT5 balance, equity, free margin,
-            tick-loss value, and volume step. It does not send or place an
-            order.
-          </p>
-        </div>
-        <span className="risk-calculator-badge">
-          <CircleDollarSign size={15} /> No execution
-        </span>
-      </div>
-      <div className="risk-calculator-grid">
-        <Field label="Capital basis">
-          <select
-            value={basis}
-            onChange={event =>
-              setBasis(event.target.value as "EQUITY" | "BALANCE")
-            }
-          >
-            <option value="EQUITY">Live equity</option>
-            <option value="BALANCE">Balance</option>
-          </select>
-        </Field>
-        <Field label="Risk %">
-          <Input
-            type="number"
-            min="0.01"
-            max="10"
-            step="0.01"
-            value={riskPercent}
-            onChange={event => setRiskPercent(event.target.value)}
-          />
-        </Field>
-        <Field label="Entry price">
-          <Input
-            type="number"
-            min="0"
-            step="0.01"
-            placeholder="e.g. 2350.00"
-            value={entryPrice}
-            onChange={event => setEntryPrice(event.target.value)}
-          />
-        </Field>
-        <Field label="Stop loss">
-          <Input
-            type="number"
-            min="0"
-            step="0.01"
-            placeholder="e.g. 2344.00"
-            value={stopLoss}
-            onChange={event => setStopLoss(event.target.value)}
-          />
-        </Field>
-      </div>
-      {!validInput ? (
-        <p className="muted">
-          Select risk %, then enter a different entry and stop-loss price to
-          calculate volume.
-        </p>
-      ) : calculation.isLoading ? (
-        <p className="muted">Checking live broker constraints…</p>
-      ) : result ? (
-        <>
-          <div className="risk-result-grid">
-            <RiskMetric
-              label="Risk amount"
-              value={formatMoney(result.riskAmount)}
-              detail={
-                String(result.riskPercent) +
-                "% of " +
-                result.basis.toLowerCase()
-              }
-              tone="gold"
-            />
-            <RiskMetric
-              label="Suggested lots"
-              value={result.lots ? result.lots.toFixed(2) : "—"}
-              detail={result.symbol || "Broker symbol pending"}
-            />
-            <RiskMetric
-              label="Actual risk"
-              value={result.actualRisk ? formatMoney(result.actualRisk) : "—"}
-              detail={String(result.stopTicks || 0) + " stop ticks"}
-              tone={result.valid ? "profit" : "loss"}
-            />
-            <RiskMetric
-              label="Free margin"
-              value={formatMoney(result.freeMargin)}
-              detail="Verify broker margin before order"
-            />
-            <RiskMetric
-              label="Stop distance"
-              value={String(result.stopDistance || "—")}
-              detail={`${result.stopTicks || 0} broker ticks`}
-            />
-            <RiskMetric
-              label="Loss per lot"
-              value={result.lossPerLot ? formatMoney(result.lossPerLot) : "—"}
-              detail="At the specified stop"
-            />
-            <RiskMetric
-              label="Risk budget used"
-              value={`${result.riskBudgetUtilization.toFixed(1)}%`}
-              detail="Actual risk ÷ requested risk"
-              tone={result.riskBudgetUtilization >= 99 ? "profit" : "gold"}
-            />
-            <RiskMetric
-              label="Risk / free margin"
-              value={result.freeMarginRiskPercent == null ? "—" : `${result.freeMarginRiskPercent.toFixed(2)}%`}
-              detail="Not a broker margin estimate"
-            />
-          </div>
-          {result.warnings.length > 0 && (
-            <div className="analysis-ai-empty">
-              <ShieldAlert size={18} />
-              <p>{result.warnings.join(" ")}</p>
-            </div>
-          )}
-          <div className="risk-verification">
-            <strong>Before you act</strong>
-            {result.verification.map((step: string) => (
-              <p key={step}>{step}</p>
-            ))}
-          </div>
-          {aiUnavailable && (
-            <div className="analysis-ai-empty">
-              <ShieldAlert size={18} />
-              <div>
-                <strong>OpenRouter is not configured.</strong>
-                <p>{aiUnavailableCopy}</p>
-                {aiConfig.data?.vaultAvailable !== false && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => openJournalView("options")}
-                  >
-                    Open Options
-                  </Button>
-                )}
-              </div>
-            </div>
-          )}
-          <div className="dialog-actions">
-            <Button
-              variant="outline"
-              disabled={
-                !result.valid ||
-                coach.isPending ||
-                pending ||
-                aiUnavailable ||
-                aiConfig.isLoading
-              }
-              onClick={() => void startCoach()}
-            >
-              <Bot size={15} />{" "}
-              {coach.isPending
-                ? "Starting risk review…"
-                : pending
-                  ? "Reviewing in background…"
-                  : "AI risk coach review"}
-            </Button>
-          </div>
-          {pending && (
-            <div className="analysis-ai-empty">
-              <Bot size={18} />
-              <p>
-                AI risk review is processing in the background. This panel will
-                update when it completes.
-              </p>
-            </div>
-          )}
-          {job.data?.status === "FAILED" && (
-            <div className="analysis-ai-empty">
-              <ShieldAlert size={18} />
-              <p>{job.data.message}</p>
-            </div>
-          )}
-          {coachOutcome?.available && coachOutcome.coach && (
-            <div className="analysis-ai-report">
-              <span className="section-label">
-                AI RISK PROCESS REVIEW · {coachOutcome.coach.readiness}
-              </span>
-            <p>{coachOutcome.coach.summary}</p>
-              {coachOutcome.coach.cautions.map((item: string) => (
-                <p key={item}>• {item}</p>
-              ))}
-              {coachOutcome.coach.verificationSteps.map((item: string) => (
-                <p key={item}>Verify: {item}</p>
-              ))}
-            </div>
-          )}
-          {coachOutcome && !coachOutcome.available && !coachOutcome.pending && (
-            <div className="analysis-ai-empty">
-              <ShieldAlert size={18} />
-              <p>{coachOutcome.message}</p>
-            </div>
-          )}
-        </>
-      ) : (
-        <div className="analysis-ai-empty">
-          <ShieldAlert size={18} />
-          <p>
-            {calculation.error?.message || "Live MT5 risk data is unavailable."}
-          </p>
-        </div>
-      )}
-    </section>
   );
 }
 function PageHeader({ view, online, onNew }: any) {
@@ -1726,7 +1439,7 @@ function PageHeader({ view, online, onNew }: any) {
           <span className="sync-chip">
             <Cloud size={14} /> {online ? "Live cloud sync" : "Offline"}
           </span>
-          <OfflineQueueIndicator />
+          <JournalSyncIndicator />
           <ThemeToggle />
           <NotificationCenter triggerClassName="icon-button" />
           <Button onClick={onNew}>
@@ -2004,46 +1717,51 @@ function MissedView({ rows, account, refresh }: any) {
 }
 
 function MentorView({ account }: any) {
-  const aiConfig = trpc.analysis.config.useQuery(undefined, {
-    staleTime: 60_000,
-    refetchOnWindowFocus: false,
-  });
+  const aiSettings = useAiSettings();
   const behaviorEvidence = trpc.analysis.get.useQuery(
     { accountId: account?.id ?? 0, filters: {} },
     { enabled: Boolean(account?.id), staleTime: 30_000, refetchOnWindowFocus: false }
   );
-  const analysis = trpc.analysis.ai.useMutation();
-  const [jobId, setJobId] = useState<string | null>(null);
-  const job = trpc.aiJobs.status.useQuery(
-    { jobId: jobId ?? "00000000-0000-0000-0000-000000000000" },
-    {
-      enabled: Boolean(jobId),
-      refetchInterval: query => {
-        const status = (query.state.data as any)?.status;
-        return status === "QUEUED" || status === "RUNNING" ? 1_500 : false;
-      },
-    }
-  );
+  const saveAiReport = trpc.analysis.saveAiReport.useMutation();
+  const [ai, setAi] = useState<AiAnalysisOutcome | null>(null);
+  const [mentorUiState, setMentorUiState] = useState<AiUiState>("ready");
+  const mentorAbortRef = useRef<AbortController | null>(null);
+  const pending = mentorUiState === "analyzing";
   const run = async () => {
-    if (!account?.id) return;
-    const started = await analysis.mutateAsync({
-      accountId: account.id,
-      filters: {},
+    if (!account?.id || !behaviorEvidence.data || pending) return;
+    mentorAbortRef.current?.abort();
+    const controller = new AbortController();
+    mentorAbortRef.current = controller;
+    setAi(null);
+    setMentorUiState("analyzing");
+    const outcome = await analyzeJournal({
+      analysis: behaviorEvidence.data as unknown as AnalysisResult,
+      signal: controller.signal,
+      model: aiSettings.model ?? undefined,
     });
-    if (started.ai.pending && started.ai.jobId) setJobId(started.ai.jobId);
+    if (controller.signal.aborted) {
+      setMentorUiState("cancelled");
+      return;
+    }
+    setAi(outcome);
+    if (outcome.available && outcome.report) {
+      setMentorUiState("success");
+      try {
+        await saveAiReport.mutateAsync({
+          accountId: account.id,
+          filters: {},
+          model: outcome.model ?? "unknown",
+          report: outcome.report,
+        });
+      } catch {
+        // Historical persistence is best-effort; the report stays visible.
+      }
+    } else {
+      setMentorUiState(uiStateForErrorCode(outcome.errorCode));
+    }
   };
-  const ai: any =
-    job.data?.status === "COMPLETED"
-      ? (job.data.result as any)?.ai
-      : analysis.data?.ai;
   const report = ai?.report;
   const behavior: any = (behaviorEvidence.data as any)?.behavior;
-  const pending = Boolean(
-    ai?.pending &&
-      (!job.data ||
-        job.data.status === "QUEUED" ||
-        job.data.status === "RUNNING")
-  );
   return (
     <>
       <section className="section-heading">
@@ -2065,14 +1783,14 @@ function MentorView({ account }: any) {
           AI is optional and never gates deterministic Analysis. It cannot issue
           BUY/SELL signals or invent journal statistics.
         </p>
-        {aiConfig.data && !aiConfig.data.configured && (
+        {!aiSettings.configured && (
           <div className="analysis-ai-empty">
             <Bot size={20} />
             <div>
-              <strong>OpenRouter is not configured.</strong>
+              <strong>OpenRouter is not configured in this browser.</strong>
               <p>
-                Add your personal OpenRouter key in Options to enable secure AI
-                analysis.
+                Add your own OpenRouter key in Options. The key stays in this
+                browser and requests go directly to OpenRouter.
               </p>
               <Button
                 variant="outline"
@@ -2082,12 +1800,6 @@ function MentorView({ account }: any) {
                 Open Options
               </Button>
             </div>
-          </div>
-        )}
-        {aiConfig.error && (
-          <div className="analysis-ai-empty">
-            <ShieldAlert size={20} />
-            <p>{aiConfig.error.message}</p>
           </div>
         )}
         {behavior && (
@@ -2134,48 +1846,45 @@ function MentorView({ account }: any) {
             )}
           </section>
         )}
-        <Button
-          size="lg"
-          disabled={
-            analysis.isPending ||
-            pending ||
-            !account?.id ||
-            aiConfig.isLoading ||
-            aiConfig.data?.configured === false
-          }
-          onClick={() => void run()}
-        >
-          {analysis.isPending
-            ? "Starting secure AI review…"
-            : pending
-              ? "Analyzing in background…"
-              : "Analyze my journal"}
-        </Button>
+        <div className="ai-action-row">
+          <Button
+            size="lg"
+            disabled={pending || !account?.id || !aiSettings.configured}
+            onClick={() => void run()}
+          >
+            {pending ? "Analyzing in your browser…" : "Analyze my journal"}
+          </Button>
+          {pending && (
+            <Button
+              variant="outline"
+              size="lg"
+              onClick={() => mentorAbortRef.current?.abort()}
+            >
+              Cancel
+            </Button>
+          )}
+        </div>
         {pending && (
           <div className="analysis-ai-empty">
             <Bot size={20} />
             <p>
-              AI review is running securely in the background. This screen will
-              update when it completes.
+              This browser is calling OpenRouter directly. Nothing is sent to
+              Gold Journal servers, and you can cancel at any time.
             </p>
           </div>
         )}
-        {job.data?.status === "FAILED" && (
+        {!pending && ai && !ai.available && (
           <div className="analysis-ai-empty">
             <ShieldAlert size={20} />
-            <p>{job.data.message}</p>
-          </div>
-        )}
-        {ai && !ai.available && !ai.pending && (
-          <div className="analysis-ai-empty">
-            <ShieldAlert size={20} />
-            <p>{ai.message ?? "Add your key in Options and retry."}</p>
-          </div>
-        )}
-        {analysis.error && (
-          <div className="analysis-ai-empty">
-            <ShieldAlert size={20} />
-            <p>{analysis.error.message}</p>
+            <div>
+              <strong>{AI_UI_COPY[mentorUiState].title}</strong>
+              <p>{ai.message ?? "Add your key in Options and retry."}</p>
+              {aiSettings.configured && mentorUiState !== "not_configured" && (
+                <Button variant="outline" size="sm" onClick={() => void run()}>
+                  Retry
+                </Button>
+              )}
+            </div>
           </div>
         )}
         {report && (

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AI_REQUEST_TIMEOUT_MS, AI_UNEXPECTED_API_RESPONSE_MESSAGE, API_REQUEST_TIMEOUT_MESSAGE, API_REQUEST_TIMEOUT_MS, fetchTrpcResponse, PREVIEW_API_UNAVAILABLE_MESSAGE, trpcTimeoutMs, UNEXPECTED_API_RESPONSE_MESSAGE } from "./trpcFetch";
+import { API_REQUEST_TIMEOUT_MESSAGE, API_REQUEST_TIMEOUT_MS, fetchTrpcResponse, PREVIEW_API_UNAVAILABLE_MESSAGE, trpcTimeoutMs, UNEXPECTED_API_RESPONSE_MESSAGE } from "./trpcFetch";
 
 const originalFetch = globalThis.fetch;
 
@@ -27,11 +27,10 @@ describe("tRPC response guard", () => {
     vi.useRealTimers();
   });
 
-  it("reserves the selected two-minute request window for all AI mutations while normal APIs stay short", () => {
-    expect(AI_REQUEST_TIMEOUT_MS).toBe(120_000);
-    expect(trpcTimeoutMs("/api/trpc/analysis.ai?batch=1")).toBe(AI_REQUEST_TIMEOUT_MS);
-    expect(trpcTimeoutMs("/api/trpc/mt5.riskCoach?batch=1")).toBe(AI_REQUEST_TIMEOUT_MS);
+  it("keeps every tRPC route on the short budget now that AI runs in the browser", () => {
+    expect(trpcTimeoutMs("/api/trpc/analysis.get?batch=1")).toBe(API_REQUEST_TIMEOUT_MS);
     expect(trpcTimeoutMs("/api/trpc/journal.get?batch=1")).toBe(API_REQUEST_TIMEOUT_MS);
+    expect(trpcTimeoutMs("/api/trpc/trades.list?batch=1")).toBe(API_REQUEST_TIMEOUT_MS);
   });
 
   it("converts terminated-preview HTML responses into a recoverable error", async () => {
@@ -46,9 +45,9 @@ describe("tRPC response guard", () => {
     await expect(fetchTrpcResponse("/api/trpc/journal.get")).rejects.toThrow(UNEXPECTED_API_RESPONSE_MESSAGE);
   });
 
-  it("explains the verified deployed HTML response on AI routes without leaking server details", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(new Response("<!doctype html><title>Unexpected</title>", { status: 502, headers: { "content-type": "text/html" } }));
+  it("reports a terminated preview before any JSON parse on protected routes", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response("<!doctype html><title>Unexpected</title>", { status: 502, headers: { "content-type": "text/html", "x-e2b-error-code": "PROXY_SANDBOX_NOT_FOUND" } }));
 
-    await expect(fetchTrpcResponse("/api/trpc/analysis.ai?batch=1")).rejects.toThrow(AI_UNEXPECTED_API_RESPONSE_MESSAGE);
+    await expect(fetchTrpcResponse("/api/trpc/trades.list?batch=1")).rejects.toThrow(PREVIEW_API_UNAVAILABLE_MESSAGE);
   });
 });

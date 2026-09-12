@@ -12,12 +12,12 @@
 #
 # Required secrets (never commit them; set once per worker name):
 #   pnpm dlx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
-#   pnpm dlx wrangler secret put AI_KEY_ENCRYPTION_SECRET
 #
 # Non-secret server variables. SUPABASE_URL is a public project identifier
-# (not a credential) and is safe in this file; AI_JOB_WORKER_BASE_URL is the
-# canonical public origin used for durable AI job dispatch to
-# /api/ai-job-dispatch — uncomment and set both to real values.
+# (not a credential) and is safe in this file.
+#
+# There is no OpenRouter secret here on purpose: AI inference runs in the
+# user's browser against their own key and never touches this Worker.
 
 name = "gold-journal"
 main = "dist/worker/worker.js"
@@ -30,4 +30,3 @@ assets = { directory = "./dist/public", binding = "ASSETS", not_found_handling =
 NODE_ENV = "production"
 SUPABASE_STORAGE_BUCKET = "trade-screenshots"
 SUPABASE_URL = "https://wetzvheuwhwcpqlmgnga.supabase.co"
-# AI_JOB_WORKER_BASE_URL = "https://app.yourdomain.com"
