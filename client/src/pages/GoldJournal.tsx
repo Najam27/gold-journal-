@@ -76,6 +76,9 @@ import { uiStateForErrorCode, type AiUiState } from "@/lib/ai/aiTypes";
 import { useAiSettings } from "@/lib/ai/useAiSettings";
 import type { AnalysisResult } from "@shared/analysisEngine";
 import { MissedTradesView } from "@/components/MissedTradesView";
+import { GoldCanvas } from "@/components/three/GoldCanvas";
+import { useGsapTimeline } from "@/lib/motion/gsap";
+import { gsap } from "gsap";
 import { NotificationCenter } from "@/components/NotificationCenter";
 import { AccountRenameControl } from "@/components/AccountRenameControl";
 import { OptionListManager } from "@/components/OptionListManager";
@@ -2637,6 +2640,7 @@ function SplashScreen() {
       role="status"
       aria-label="Loading Gold Journal"
     >
+      <GoldCanvas className="splash-gold-canvas" data-testid="splash-gold-canvas" />
       <div className="splash-content">
         <GoldMark size={82} />
         <strong>GOLD JOURNAL</strong>
@@ -2772,10 +2776,23 @@ export function LoginScreen() {
     setBusy(false);
     setMessage(result.error?.message || "Magic link sent. Check your email.");
   };
+  // GSAP owns the login hero choreography: lockup, headline, readout and form
+  // stagger in once per mount. Framer Motion is not attached to these nodes, so
+  // the two libraries never fight over the same properties.
+  const heroRef = useGsapTimeline(root => {
+    const tl = gsap.timeline({ defaults: { ease: "power3.out" } });
+    tl.fromTo(
+      root.querySelectorAll("[data-hero-stage]"),
+      { autoAlpha: 0, y: 22 },
+      { autoAlpha: 1, y: 0, duration: 0.7, stagger: 0.09 }
+    );
+    return tl;
+  });
   return (
-    <div className="login-screen">
+    <div className="login-screen" ref={heroRef}>
+      <GoldCanvas className="login-gold-canvas" data-testid="login-gold-canvas" />
       <div className="login-noise" />
-      <section className="login-card">
+      <section className="login-card" data-hero-stage>
         <div className="login-lockup">
           <GoldMark size={58} />
           <div>

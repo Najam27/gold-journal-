@@ -45,7 +45,7 @@
 .progress-cell strong { color: var(--gj-text); font-size: 14px; white-space: nowrap; }
 .progress-cell span { color: var(--gj-dim); font-size: 9px; white-space: nowrap; }
 .progress-cell > i { display: block; height: 5px; overflow: hidden; border-radius: 99px; background: var(--gj-panel-2); }
-.progress-cell > i > b { display: block; height: 100%; min-width: 2px; border-radius: inherit; background: var(--gj-gold); }
+.progress-cell > i > b { display: block; height: 100%; min-width: 2px; border-radius: inherit; background: var(--gj-gold); transition: width .5s var(--ease-out, cubic-bezier(.23, 1, .32, 1)); }
 .control-table tr.safe .progress-cell > i > b { background: var(--success); }
 .control-table tr.risk .progress-cell > i > b { background: var(--destructive); }
 .status-chip { display: inline-flex; min-width: 73px; justify-content: center; padding: 5px 7px; border-radius: 99px; color: var(--gj-subtext); background: var(--gj-panel-2); font: 800 8px "DM Mono", monospace; letter-spacing: .06em; white-space: nowrap; }

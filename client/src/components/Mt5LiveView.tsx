@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { formatMoney, formatRr, toNumber } from "@/lib/gold";
+import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
 import { toast } from "sonner";
 
 const EA_DOWNLOAD = "/api/mt5/ea";
@@ -725,7 +726,10 @@ export function Mt5LiveView({ account, accounts, onJournalNow, onSwitchAccount }
                   <strong
                     className={`data-text ${toNumber(position.floatingPnl) >= 0 ? "positive" : "negative"}`}
                   >
-                    {formatMoney(position.floatingPnl)}
+                    <AnimatedNumber
+                      value={toNumber(position.floatingPnl)}
+                      format={formatMoney}
+                    />
                   </strong>
                 </header>
                 <div className="mt5-metrics">
