@@ -1,0 +1,283 @@
+/* ============================================================================
+   DESIGN TOKENS SYSTEM
+   ============================================================================
+   
+   Centralized semantic visual tokens for all UI elements. Every component
+   consumes these tokens instead of hardcoded colors. This ensures:
+   - Consistent light/dark mode rendering
+   - No accidental theme breaks
+   - Easy palette updates
+   - Accessibility compliance
+   
+   Token hierarchy:
+   1. Base colors (CSS variables defined per theme)
+   2. Semantic aliases (surface, text, state colors)
+   3. Component tokens (card, button, form, etc.)
+   4. Elevation tokens (depth/shadows)
+   5. Motion tokens (durations, easing)
+*/
+
+:root {
+  /* ========================================================================
+     SURFACE COLORS - Layer & hierarchy
+     ======================================================================== */
+  --ds-surface-app: var(--background);
+  --ds-surface-sidebar: var(--gj-sidebar);
+  --ds-surface-header: var(--gj-panel);
+  --ds-surface-panel: var(--gj-panel);
+  --ds-surface-panel-elevated: var(--card);
+  --ds-surface-card: var(--card);
+  --ds-surface-input: var(--gj-control);
+  --ds-surface-input-hover: var(--gj-control-2);
+  --ds-surface-input-active: var(--gj-control-active);
+  --ds-surface-dropdown: var(--gj-control-option);
+  --ds-surface-modal-bg: var(--gj-panel);
+  --ds-surface-tooltip: var(--gj-popover);
+  --ds-surface-overlay: rgba(0, 0, 0, 0.3);
+
+  /* ========================================================================
+     TEXT COLORS - Semantic hierarchy
+     ======================================================================== */
+  --ds-text-primary: var(--gj-text);
+  --ds-text-secondary: var(--gj-subtext);
+  --ds-text-muted: var(--gj-dim);
+  --ds-text-disabled: var(--gj-control-muted);
+  --ds-text-inverse: var(--card-foreground);
+  --ds-text-heading: var(--gj-text);
+  --ds-text-data-mono: var(--gj-text);
+
+  /* ========================================================================
+     BORDER & OUTLINE COLORS
+     ======================================================================== */
+  --ds-border-default: var(--gj-line);
+  --ds-border-subtle: color-mix(in srgb, var(--gj-line) 50%, transparent);
+  --ds-border-strong: color-mix(in srgb, var(--gj-line) 120%, var(--gj-line));
+  --ds-border-focus: var(--gj-gold);
+  --ds-border-interactive: var(--gj-control-border);
+
+  /* ========================================================================
+     SEMANTIC STATE COLORS
+     ======================================================================== */
+  --ds-state-success: var(--success);
+  --ds-state-success-subtle: color-mix(in srgb, var(--success) 13%, transparent);
+  --ds-state-danger: var(--danger);
+  --ds-state-danger-subtle: color-mix(in srgb, var(--danger) 12%, transparent);
+  --ds-state-warning: var(--warning);
+  --ds-state-warning-subtle: color-mix(in srgb, var(--warning) 13%, transparent);
+  --ds-state-info: var(--open-trade);
+  --ds-state-info-subtle: color-mix(in srgb, var(--open-trade) 13%, transparent);
+  --ds-state-neutral: var(--neutral);
+  --ds-state-neutral-subtle: color-mix(in srgb, var(--neutral) 12%, transparent);
+
+  /* ========================================================================
+     TRADING-SPECIFIC STATES
+     ======================================================================== */
+  --ds-trade-profit: var(--profit);
+  --ds-trade-profit-subtle: color-mix(in srgb, var(--profit) 13%, transparent);
+  --ds-trade-loss: var(--loss);
+  --ds-trade-loss-subtle: color-mix(in srgb, var(--loss) 12%, transparent);
+  --ds-trade-breakeven: var(--break-even);
+  --ds-trade-breakeven-subtle: color-mix(in srgb, var(--break-even) 12%, transparent);
+  --ds-trade-open: var(--open-trade);
+  --ds-trade-open-subtle: color-mix(in srgb, var(--open-trade) 13%, transparent);
+  --ds-trade-closed: var(--closed-trade);
+  --ds-trade-closed-subtle: color-mix(in srgb, var(--closed-trade) 12%, transparent);
+  --ds-trade-buy: var(--profit);
+  --ds-trade-sell: var(--loss);
+
+  /* ========================================================================
+     CONNECTION & MT5 STATES
+     ======================================================================== */
+  --ds-mt5-connected: var(--profit);
+  --ds-mt5-connecting: var(--warning);
+  --ds-mt5-disconnected: var(--loss);
+  --ds-mt5-error: var(--danger);
+
+  /* ========================================================================
+     ACCENT COLORS - Brand & interactive
+     ======================================================================== */
+  --ds-accent-primary: var(--primary);
+  --ds-accent-primary-hover: color-mix(in srgb, var(--primary) 120%, var(--primary));
+  --ds-accent-secondary: var(--secondary);
+  --ds-accent-gold: var(--gj-gold);
+  --ds-accent-cyan: #5da4d0;
+  --ds-accent-emerald: #5bcf91;
+  --ds-accent-violet: #9b7dd9;
+
+  /* ========================================================================
+     ELEVATION & SHADOWS
+     ======================================================================== */
+  --ds-shadow-none: none;
+  --ds-shadow-xs: 0 2px 4px rgba(0, 0, 0, 0.04);
+  --ds-shadow-sm: var(--gj-depth-1, 0 8px 20px rgba(0, 0, 0, 0.12));
+  --ds-shadow-md: 0 16px 32px rgba(0, 0, 0, 0.16);
+  --ds-shadow-lg: var(--gj-depth-2, 0 24px 56px rgba(0, 0, 0, 0.22));
+  --ds-shadow-xl: 0 32px 64px rgba(0, 0, 0, 0.28);
+
+  /* ========================================================================
+     MOTION TOKENS
+     ======================================================================== */
+  --ds-duration-fast: 150ms;
+  --ds-duration-base: 220ms;
+  --ds-duration-normal: 260ms;
+  --ds-duration-slow: 350ms;
+  --ds-duration-slower: 500ms;
+  --ds-easing-premium: cubic-bezier(0.23, 1, 0.32, 1);
+  --ds-easing-smooth: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ds-easing-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ds-easing-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+  /* ========================================================================
+     GRADIENT SYSTEM - Semantic color gradients
+     ======================================================================== */
+  --ds-gradient-gold: linear-gradient(135deg, var(--gj-gold) 0%, #f0c96f 100%);
+  --ds-gradient-success: linear-gradient(135deg, var(--profit) 0%, #5bcf91 100%);
+  --ds-gradient-danger: linear-gradient(135deg, var(--loss) 0%, #f0b6a8 100%);
+  --ds-gradient-info: linear-gradient(135deg, var(--open-trade) 0%, #5da4d0 100%);
+  --ds-gradient-subtle: linear-gradient(135deg, transparent, transparent);
+
+  /* ========================================================================
+     RADIUS - Border radius scale
+     ======================================================================== */
+  --ds-radius-xs: 4px;
+  --ds-radius-sm: 8px;
+  --ds-radius-md: 12px;
+  --ds-radius-lg: 16px;
+  --ds-radius-xl: 20px;
+  --ds-radius-full: 999px;
+
+  /* ========================================================================
+     Z-INDEX SCALE
+     ======================================================================== */
+  --ds-z-base: 0;
+  --ds-z-overlay: 10;
+  --ds-z-modal: 50;
+  --ds-z-tooltip: 40;
+  --ds-z-dropdown: 30;
+  --ds-z-sticky: 20;
+  --ds-z-float: 15;
+}
+
+/* ============================================================================
+   LIGHT MODE OVERRIDES
+   ============================================================================
+   Intentional light mode design - not just inverted dark mode.
+*/
+
+html:not(.dark) {
+  --ds-surface-app: #f6f8fb;
+  --ds-surface-sidebar: #ffffff;
+  --ds-surface-header: #ffffff;
+  --ds-surface-panel: #ffffff;
+  --ds-surface-panel-elevated: #fafbfc;
+  --ds-surface-card: #ffffff;
+  --ds-surface-input: #ffffff;
+  --ds-surface-input-hover: #f8fafc;
+  --ds-surface-input-active: #eef3f7;
+  --ds-surface-dropdown: #ffffff;
+  --ds-surface-modal-bg: #ffffff;
+  --ds-surface-tooltip: #ffffff;
+  --ds-surface-overlay: rgba(31, 49, 68, 0.2);
+
+  --ds-text-primary: #15202b;
+  --ds-text-secondary: #4e5f70;
+  --ds-text-muted: #67788a;
+  --ds-text-disabled: #999;
+
+  --ds-border-default: #c9d3df;
+  --ds-border-subtle: #e0e5eb;
+  --ds-border-strong: #b0bcc9;
+  --ds-border-focus: #a56c13;
+
+  --ds-state-success: #137a4d;
+  --ds-state-success-subtle: #e8f5f0;
+  --ds-state-danger: #b8382f;
+  --ds-state-danger-subtle: #faf2f0;
+  --ds-state-warning: #9c6411;
+  --ds-state-warning-subtle: #fef8f0;
+  --ds-state-info: #1d6da8;
+  --ds-state-info-subtle: #f0f7fc;
+  --ds-state-neutral: #526273;
+  --ds-state-neutral-subtle: #f0f2f5;
+
+  --ds-shadow-xs: 0 2px 4px rgba(31, 49, 68, 0.06);
+  --ds-shadow-sm: 0 10px 24px rgba(31, 49, 68, 0.10);
+  --ds-shadow-md: 0 16px 32px rgba(31, 49, 68, 0.12);
+  --ds-shadow-lg: 0 26px 58px rgba(31, 49, 68, 0.16);
+  --ds-shadow-xl: 0 32px 72px rgba(31, 49, 68, 0.20);
+
+  --ds-accent-primary: #a56c13;
+  --ds-accent-gold: #9b6915;
+  --ds-accent-cyan: #1d6da8;
+  --ds-accent-emerald: #137a4d;
+  --ds-accent-violet: #6b5b95;
+}
+
+/* ============================================================================
+   DARK MODE OVERRIDES
+   ============================================================================
+   Premium fintech terminal aesthetic - not neon cyber.
+*/
+
+.dark {
+  --ds-surface-app: #10141a;
+  --ds-surface-sidebar: #151b22;
+  --ds-surface-header: #171d24;
+  --ds-surface-panel: #171d24;
+  --ds-surface-panel-elevated: #1a202a;
+  --ds-surface-card: #171d24;
+  --ds-surface-input: #141a20;
+  --ds-surface-input-hover: #1a2230;
+  --ds-surface-input-active: #252f3a;
+  --ds-surface-dropdown: #1b222b;
+  --ds-surface-modal-bg: #171d24;
+  --ds-surface-tooltip: #1b222b;
+  --ds-surface-overlay: rgba(0, 0, 0, 0.4);
+
+  --ds-text-primary: #eef1f5;
+  --ds-text-secondary: #9aa6b1;
+  --ds-text-muted: #7e8a96;
+  --ds-text-disabled: #5a6670;
+
+  --ds-border-default: #2c3642;
+  --ds-border-subtle: #1f2937;
+  --ds-border-strong: #3d4a57;
+  --ds-border-focus: #e9b64b;
+
+  --ds-shadow-xs: 0 2px 4px rgba(0, 0, 0, 0.12);
+  --ds-shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.30);
+  --ds-shadow-md: 0 16px 36px rgba(0, 0, 0, 0.36);
+  --ds-shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.44);
+  --ds-shadow-xl: 0 36px 84px rgba(0, 0, 0, 0.50);
+}
+
+/* ============================================================================
+   REDUCED MOTION
+   ============================================================================
+   Ensure animations respect user preference.
+*/
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ds-duration-fast: 0.01ms;
+    --ds-duration-base: 0.01ms;
+    --ds-duration-normal: 0.01ms;
+    --ds-duration-slow: 0.01ms;
+    --ds-duration-slower: 0.01ms;
+  }
+}
+
+/* ============================================================================
+   CONTAINER QUERIES
+   ============================================================================
+   Support modern responsive patterns.
+*/
+
+@supports (container-type: inline-size) {
+  @container (max-width: 640px) {
+    :root {
+      --ds-shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.08);
+      --ds-shadow-md: 0 8px 16px rgba(0, 0, 0, 0.10);
+    }
+  }
+}
