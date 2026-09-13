@@ -1167,7 +1167,9 @@ export default function GoldJournal() {
                 }}
               />
             )}
-            {view === "calendar" && <CalendarView trades={trades} />}
+            {view === "calendar" && (
+              <CalendarView trades={trades} onEdit={openEdit} />
+            )}
             {view === "plan" && (
               <PlanView
                 account={account}
