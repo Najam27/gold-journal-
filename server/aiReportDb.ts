@@ -9,7 +9,7 @@ export { analysisDataFingerprint };
 /**
  * Stores a report that the user's browser produced.
  *
- * OpenRouter is never called here: the server receives only the finished,
+ * Google AI is never called here: the server receives only the finished,
  * credential-free report plus the model label, re-derives the deterministic
  * analysis for the fingerprint, and persists history so past reports remain
  * viewable.

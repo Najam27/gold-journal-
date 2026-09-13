@@ -856,10 +856,10 @@ export function AnalysisDashboard({ accountId }: Props) {
           <div className="analysis-ai-empty">
             <Bot size={20} />
             <div>
-              <strong>OpenRouter is not configured in this browser.</strong>
+              <strong>Google AI is not configured in this browser.</strong>
               <p>
-                Add your own OpenRouter key in Options. The key stays in this
-                browser and requests go straight to OpenRouter.
+                Add your own Google AI Studio key in Options. The key stays in
+                this browser and requests go straight to Google AI.
               </p>
               <Button
                 variant="outline"
@@ -894,7 +894,7 @@ export function AnalysisDashboard({ accountId }: Props) {
           <div className="analysis-ai-empty">
             <Bot size={20} />
             <p>
-              This browser is calling OpenRouter directly. Nothing is sent to
+              This browser is calling Google AI directly. Nothing is sent to
               Gold Journal servers, and you can cancel at any time.
             </p>
           </div>

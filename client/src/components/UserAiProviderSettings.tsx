@@ -11,23 +11,29 @@ import { toast } from "sonner";
 /**
  * Private AI provider settings.
  *
- * The OpenRouter key is written straight into this browser's local storage and
- * is never transmitted to Gold Journal, Cloudflare, Supabase, or any backend.
- * Outbound AI traffic goes directly from this browser to OpenRouter.
+ * The Google AI Studio (Gemini) key is written straight into this browser's
+ * local storage and is never transmitted to Gold Journal, Cloudflare, Supabase,
+ * or any backend. Outbound AI traffic goes directly from this browser to
+ * Google's Generative Language API.
  */
 export function UserAiProviderSettings() {
   const status = useAiSettings();
   const [key, setKey] = useState("");
   const [model, setModel] = useState(status.model ?? DEFAULT_AI_MODEL);
   const [busy, setBusy] = useState<"test" | "save" | "remove" | null>(null);
+  // Models this specific key may call, discovered by the Test key action, so a
+  // retired or unavailable model name is easy to replace with a working one.
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
 
   const validate = async () => {
     setBusy("test");
     try {
       const result = await testAiConnection({ apiKey: key });
-      toast.success(`OpenRouter key verified: ${result.label}.`);
+      setAvailableModels(result.models);
+      const hint = result.models.length > 0 && !result.models.includes(model.trim()) ? " Pick one of the listed models." : "";
+      toast.success(`Google AI key verified: ${result.label}.${hint}`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "OpenRouter could not verify this key.");
+      toast.error(error instanceof Error ? error.message : "Google AI could not verify this key.");
     } finally {
       setBusy(null);
     }
@@ -66,13 +72,17 @@ export function UserAiProviderSettings() {
     <section className="panel ai-provider-settings">
       <span className="section-label">PRIVATE AI PROVIDER · BROWSER ONLY</span>
       <h3>
-        <KeyRound size={17} /> OpenRouter key
+        <KeyRound size={17} /> Google AI Studio key
       </h3>
       <p>
         Your key is stored in this browser&apos;s local storage and is used to call
-        OpenRouter directly from this device. It is never sent to Gold Journal,
-        Cloudflare, or Supabase. AI Analysis, AI Mentor, and Risk Coach all use
-        this key.
+        Google AI (Gemini) directly from this device. It is never sent to Gold
+        Journal, Cloudflare, or Supabase. AI Analysis, AI Mentor, and Risk Coach
+        all use this key. Create a free key at{" "}
+        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
+          aistudio.google.com/apikey
+        </a>
+        .
       </p>
       <p className="ai-key-local-warning" role="note">
         Local storage is readable by JavaScript running on this site. Only use a
@@ -94,8 +104,8 @@ export function UserAiProviderSettings() {
         </div>
       ) : (
         <p className="muted">
-          No AI key configured. Add your personal OpenRouter key to enable AI
-          features.
+          No AI key configured. Add your personal Google AI Studio key to enable
+          AI features.
         </p>
       )}
       <div className="ai-provider-form">
@@ -104,16 +114,16 @@ export function UserAiProviderSettings() {
           autoComplete="off"
           value={key}
           onChange={event => setKey(event.target.value)}
-          placeholder="sk-or-v1-…"
-          aria-label="OpenRouter API key"
+          placeholder="AIza…"
+          aria-label="Google AI Studio API key"
           disabled={busy !== null}
         />
         <Input
           list="ai-model-suggestions"
           value={model}
           onChange={event => setModel(event.target.value)}
-          placeholder="OpenRouter model"
-          aria-label="OpenRouter model"
+          placeholder="Gemini model"
+          aria-label="Google AI model"
           disabled={busy !== null}
         />
         <datalist id="ai-model-suggestions">
@@ -122,6 +132,13 @@ export function UserAiProviderSettings() {
               {option.label}
             </option>
           ))}
+          {availableModels
+            .filter(id => !AI_MODEL_SUGGESTIONS.some(option => option.id === id))
+            .map(id => (
+              <option key={id} value={id}>
+                Available with your key
+              </option>
+            ))}
         </datalist>
         <div className="dialog-actions">
           <Button variant="outline" disabled={busy !== null || key.trim().length < 20} onClick={() => void validate()}>

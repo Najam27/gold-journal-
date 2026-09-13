@@ -14,8 +14,8 @@ import {
 } from "./aiStorage";
 import { analyzeJournal, clearAiCache, coachRisk, isAiConfigured, testAiConnection } from "./aiService";
 
-const KEY = "sk-or-v1-test-only-key-0123456789";
-const MODEL = "openai/gpt-4o-mini";
+const KEY = "AIza-test-only-key-0123456789abcdef";
+const MODEL = "gemini-2.5-flash";
 
 const analysis = buildAnalysis([
   { tradeDate: "2026-01-01", result: "WIN", pnl: 10, risk: 10, session: "London", timeframe: "M5", level: "Support", setupQuality: "A", direction: "BUY", notes: "PRIVATE_NOTE_SHOULD_NOT_REACH_AI" },
@@ -34,7 +34,10 @@ const report = {
 const calculation = { valid: true, basis: "EQUITY" as const, capital: 10_000, freeMargin: 9_900, riskPercent: 1, riskAmount: 100, stopDistance: 5, stopTicks: 50, lossPerLot: 500, rawLots: 0.2, lots: 0.2, actualRisk: 100, riskBudgetUtilization: 100, freeMarginRiskPercent: 1.01, symbol: "XAUUSDm", currency: "USD", warnings: [], verification: ["Confirm broker values."] };
 
 function providerResponse(content: unknown, status = 200) {
-  return new Response(JSON.stringify({ choices: [{ message: { content: typeof content === "string" ? content : JSON.stringify(content) } }] }), { status, headers: { "Content-Type": "application/json" } });
+  return new Response(
+    JSON.stringify({ candidates: [{ content: { parts: [{ text: typeof content === "string" ? content : JSON.stringify(content) }] } }] }),
+    { status, headers: { "Content-Type": "application/json" } },
+  );
 }
 
 function signedReport(overrides: Record<string, unknown> = {}) {
@@ -81,7 +84,7 @@ describe("browser AI settings storage", () => {
   });
 
   it("namespaces local storage so it cannot collide with journal data", () => {
-    expect(AI_SETTINGS_STORAGE_KEY).toBe("gold-journal.ai.openrouter:v1");
+    expect(AI_SETTINGS_STORAGE_KEY).toBe("gold-journal.ai.google:v1");
     expect(AI_SETTINGS_STORAGE_KEY).toContain("gold-journal.");
   });
 
@@ -101,8 +104,24 @@ describe("browser AI settings storage", () => {
   });
 
   it("rejects an obviously invalid key instead of storing it", () => {
-    expect(() => saveAiSettings({ apiKey: "short", model: MODEL })).toThrow(/valid OpenRouter API key/);
+    expect(() => saveAiSettings({ apiKey: "short", model: MODEL })).toThrow(/valid Google AI Studio API key/);
     expect(isAiConfigured()).toBe(false);
+  });
+
+  it("discards a legacy OpenRouter key so it is never mis-used against Google AI", () => {
+    vi.stubGlobal("window", {
+      localStorage: (() => {
+        const map = new Map<string, string>([["gold-journal.ai.openrouter:v1", JSON.stringify({ apiKey: "sk-or-v1-legacy", model: "openai/gpt-4o-mini", updatedAt: 1 })]]);
+        return {
+          getItem: (key: string) => map.get(key) ?? null,
+          setItem: (key: string, value: string) => void map.set(key, value),
+          removeItem: (key: string) => void map.delete(key),
+        };
+      })(),
+    });
+    expect(readAiSettings()).toBeNull();
+    expect(isAiConfigured()).toBe(false);
+    expect(window.localStorage.getItem("gold-journal.ai.openrouter:v1")).toBeNull();
   });
 });
 
@@ -128,12 +147,12 @@ describe("browser analysis", () => {
     expect(outcome.available).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://openrouter.ai/api/v1/chat/completions");
+    expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent");
     const body = JSON.parse(String((init as RequestInit).body));
-    expect(body.model).toBe(MODEL);
-    expect(body.messages[1].content).not.toContain(KEY);
-    expect(body.messages[1].content).not.toContain("PRIVATE_NOTE_SHOULD_NOT_REACH_AI");
-    expect(body.messages[1].content).not.toContain("screenshotKey");
+    expect(body.generationConfig.responseMimeType).toBe("application/json");
+    expect(body.contents[0].parts[0].text).not.toContain(KEY);
+    expect(body.contents[0].parts[0].text).not.toContain("PRIVATE_NOTE_SHOULD_NOT_REACH_AI");
+    expect(body.contents[0].parts[0].text).not.toContain("screenshotKey");
     // No Gold Journal endpoint is ever contacted for inference.
     expect(url).not.toContain("/api/trpc");
     expect(url).not.toContain("/api/ai-job-dispatch");
@@ -152,8 +171,8 @@ describe("browser analysis", () => {
   it("honours an explicit model selection", async () => {
     const fetchMock = vi.fn().mockResolvedValue(providerResponse(signedReport()));
     vi.stubGlobal("fetch", fetchMock);
-    await analyzeJournal({ analysis, model: "anthropic/claude-3.5-sonnet" });
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).model).toBe("anthropic/claude-3.5-sonnet");
+    await analyzeJournal({ analysis, model: "gemini-2.5-pro" });
+    expect(String(fetchMock.mock.calls[0][0])).toContain("models/gemini-2.5-pro:");
   });
 
   it("rejects malformed and ungrounded reports without breaking deterministic analysis", async () => {
@@ -197,12 +216,12 @@ describe("browser analysis", () => {
 });
 
 describe("browser key verification", () => {
-  it("tests the supplied key directly against OpenRouter", async () => {
+  it("tests the supplied key directly against Google AI", async () => {
     const fetchMock = vi.fn().mockResolvedValue(providerResponse({}));
     vi.stubGlobal("fetch", fetchMock);
     saveAiSettings({ apiKey: KEY, model: MODEL });
     await expect(testAiConnection()).resolves.toBeDefined();
-    expect(fetchMock.mock.calls[0][0]).toBe("https://openrouter.ai/api/v1/key");
+    expect(fetchMock.mock.calls[0][0]).toBe("https://generativelanguage.googleapis.com/v1beta/models");
   });
 
   it("refuses to test without a configured key", async () => {

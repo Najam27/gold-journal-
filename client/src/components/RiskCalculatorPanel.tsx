@@ -14,7 +14,7 @@ import { trpc } from "@/lib/trpc";
 /**
  * Live broker-sized position guide. The deterministic calculation runs on the
  * authenticated backend against stored MT5 facts; the optional risk-process
- * review runs in this browser against the user's own OpenRouter key.
+ * review runs in this browser against the user's own Google AI Studio key.
  */
 export function RiskCalculatorPanel() {
   const accountId = getSelectedAccountId();
@@ -198,9 +198,9 @@ export function RiskCalculatorPanel() {
             <div className="analysis-ai-empty">
               <ShieldAlert size={18} />
               <div>
-                <strong>OpenRouter is not configured in this browser.</strong>
+                <strong>Google AI is not configured in this browser.</strong>
                 <p>
-                  Add your own OpenRouter key in Options. The key stays in this
+                  Add your own Google AI Studio key in Options. The key stays in this
                   browser and never reaches Gold Journal servers.
                 </p>
                 <Button
@@ -235,7 +235,7 @@ export function RiskCalculatorPanel() {
             <div className="analysis-ai-empty">
               <Bot size={18} />
               <p>
-                This browser is calling OpenRouter directly. Nothing is sent to
+                This browser is calling Google AI directly. Nothing is sent to
                 Gold Journal servers.
               </p>
             </div>

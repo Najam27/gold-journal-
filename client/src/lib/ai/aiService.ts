@@ -1,11 +1,11 @@
 /**
  * The single browser AI service used by Analyze My Trade, AI Mentor, and Risk
- * Coach. All three callers share one OpenRouter implementation so there is
- * exactly one place that knows how to reach the provider.
+ * Coach. All three callers share one Google AI Studio (Gemini) implementation
+ * so there is exactly one place that knows how to reach the provider.
  *
  * Every call:
  *  1. reads the credential from local browser storage,
- *  2. calls OpenRouter directly over HTTPS,
+ *  2. calls Google AI directly over HTTPS,
  *  3. validates the structured response against the shared schema and grounding
  *     rules, and
  *  4. returns a normalized outcome the UI can render.
@@ -38,7 +38,7 @@ import type { AnalysisResult } from "@shared/analysisEngine";
 import type { RiskCalculation } from "@shared/riskCalculator";
 import { readAiSettings, readAiSettingsView } from "./aiStorage";
 import { AiError, type AiErrorCode, type AiSettingsView, type AiUiState } from "./aiTypes";
-import { requestStructuredCompletion, verifyOpenRouterKey, type KeyVerification } from "./openrouterClient";
+import { requestStructuredCompletion, verifyGoogleApiKey, type KeyVerification } from "./geminiClient";
 
 const AI_CACHE_TTL_MS = 15 * 60_000;
 const AI_CACHE_MAX = 64;
@@ -87,8 +87,8 @@ function failure(error: unknown, model: string | null): AiAnalysisOutcome {
 
 export async function testAiConnection(input: { apiKey?: string; signal?: AbortSignal } = {}): Promise<KeyVerification> {
   const key = input.apiKey?.trim() || readAiSettings()?.apiKey;
-  if (!key) throw new AiError("not_configured", "Add your OpenRouter API key first.");
-  return verifyOpenRouterKey(key, { signal: input.signal });
+  if (!key) throw new AiError("not_configured", "Add your Google AI Studio API key first.");
+  return verifyGoogleApiKey(key, { signal: input.signal });
 }
 
 /**
@@ -99,7 +99,7 @@ export async function testAiConnection(input: { apiKey?: string; signal?: AbortS
  */
 export async function analyzeJournal(input: { analysis: AnalysisResult; signal?: AbortSignal; model?: string; timeoutMs?: number }): Promise<AiAnalysisOutcome> {
   const settings = readAiSettings();
-  if (!settings) return { available: false, cached: false, model: null, report: null, message: "AI is not configured. Add your own OpenRouter key in Options; deterministic analysis remains available.", errorCode: "not_configured" };
+  if (!settings) return { available: false, cached: false, model: null, report: null, message: "AI is not configured. Add your Google AI Studio key in Options; deterministic analysis remains available.", errorCode: "not_configured" };
   const model = (input.model ?? settings.model).trim() || settings.model;
 
   removeExpiredCache();
@@ -122,9 +122,9 @@ export async function analyzeJournal(input: { analysis: AnalysisResult; signal?:
       signal: input.signal,
     });
     const parsed = aiReportSchema.safeParse(raw);
-    if (!parsed.success) throw new AiError("malformed_response", "OpenRouter returned an invalid structured analysis. Please retry.");
-    if (!hasOnlyGroundedNumbers(parsed.data, payload)) throw new AiError("ungrounded_response", "OpenRouter returned an ungrounded numerical claim, so the report was rejected. Please retry.");
-    if (!validateEvidenceReport(parsed.data, manifest)) throw new AiError("ungrounded_response", "OpenRouter returned an evidence claim that does not match the supplied evidence, so the report was rejected. Please retry.");
+    if (!parsed.success) throw new AiError("malformed_response", "Google AI returned an invalid structured analysis. Please retry.");
+    if (!hasOnlyGroundedNumbers(parsed.data, payload)) throw new AiError("ungrounded_response", "Google AI returned an ungrounded numerical claim, so the report was rejected. Please retry.");
+    if (!validateEvidenceReport(parsed.data, manifest)) throw new AiError("ungrounded_response", "Google AI returned an evidence claim that does not match the supplied evidence, so the report was rejected. Please retry.");
     const outcome: AiAnalysisOutcome = { available: true, cached: false, model, report: parsed.data };
     cache.set(cacheKey, { expiresAt: Date.now() + AI_CACHE_TTL_MS, outcome });
     return outcome;
@@ -136,7 +136,7 @@ export async function analyzeJournal(input: { analysis: AnalysisResult; signal?:
 /** Risk-process review over the deterministic calculator output. */
 export async function coachRisk(input: { calculation: RiskCalculation; signal?: AbortSignal; model?: string; timeoutMs?: number }): Promise<AiRiskCoachOutcome> {
   const settings = readAiSettings();
-  if (!settings) return { available: false, coach: null, model: null, message: "AI Risk Coach is not configured. Add your own OpenRouter key in Options; the deterministic calculation remains available.", errorCode: "not_configured" };
+  if (!settings) return { available: false, coach: null, model: null, message: "AI Risk Coach is not configured. Add your Google AI Studio key in Options; the deterministic calculation remains available.", errorCode: "not_configured" };
   const model = (input.model ?? settings.model).trim() || settings.model;
   try {
     const raw = await requestStructuredCompletion({
@@ -151,7 +151,7 @@ export async function coachRisk(input: { calculation: RiskCalculation; signal?: 
       signal: input.signal,
     });
     const parsed = riskCoachSchema.safeParse(raw);
-    if (!parsed.success) throw new AiError("malformed_response", "OpenRouter returned an invalid risk review. Please retry.");
+    if (!parsed.success) throw new AiError("malformed_response", "Google AI returned an invalid risk review. Please retry.");
     if (!isSafeRiskCoachReview(parsed.data)) throw new AiError("ungrounded_response", "The risk review contained trading instructions, so it was rejected. Please retry.");
     return { available: true, coach: parsed.data, model };
   } catch (error) {
@@ -159,17 +159,16 @@ export async function coachRisk(input: { calculation: RiskCalculation; signal?: 
     return { available: false, coach: null, model, message: error instanceof Error ? error.message : "AI Risk Coach is temporarily unavailable.", errorCode: code };
   }
 }
-
 /** Consistent, credential-free copy for each AI UI state. */
 export const AI_UI_COPY: Record<AiUiState, { title: string; body: string }> = {
-  not_configured: { title: "AI is not configured", body: "Add your own OpenRouter API key in Options to enable AI. Deterministic analysis and journaling keep working without it." },
-  ready: { title: "AI is ready", body: "Your key is stored only in this browser and requests go straight to OpenRouter." },
-  analyzing: { title: "Analyzing…", body: "Waiting for OpenRouter to return an evidence-bound response." },
+  not_configured: { title: "AI is not configured", body: "Add your Google AI Studio API key in Options to enable AI. Deterministic analysis and journaling keep working without it." },
+  ready: { title: "AI is ready", body: "Your key is stored only in this browser and requests go straight to Google AI." },
+  analyzing: { title: "Analyzing…", body: "Waiting for Google AI to return an evidence-bound response." },
   success: { title: "Analysis complete", body: "Review the evidence-bound report below." },
-  invalid_key: { title: "OpenRouter rejected this key", body: "Check the API key in AI settings, then retry." },
-  rate_limited: { title: "Rate limited", body: "OpenRouter is throttling this key or it needs credit. Wait a moment and retry." },
-  network_error: { title: "No connection to OpenRouter", body: "Check your internet connection and retry. Your journal data is unaffected." },
-  provider_error: { title: "Provider error", body: "OpenRouter or the selected model failed. Retry, or choose a different model." },
+  invalid_key: { title: "Google AI rejected this key", body: "Check the API key in AI settings, then retry." },
+  rate_limited: { title: "Rate limited", body: "Google AI is throttling this key or its quota is exhausted. Wait a moment and retry." },
+  network_error: { title: "No connection to Google AI", body: "Check your internet connection and retry. Your journal data is unaffected." },
+  provider_error: { title: "Provider error", body: "Google AI or the selected model failed. Retry, or choose a different model." },
   timeout: { title: "AI timed out", body: "The request exceeded its time budget and was cancelled. Retry or pick a faster model." },
   cancelled: { title: "Cancelled", body: "The request was cancelled before completion." },
 };

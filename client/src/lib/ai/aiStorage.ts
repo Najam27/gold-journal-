@@ -1,5 +1,5 @@
 /**
- * Browser-local persistence for the user's own OpenRouter credential.
+ * Browser-local persistence for the user's own Google AI Studio (Gemini) key.
  *
  * The key is stored in `localStorage` under a namespaced key exactly as the
  * product requires, but every read/write goes through this abstraction so the
@@ -14,7 +14,9 @@
 import { DEFAULT_AI_MODEL } from "@shared/aiCore";
 import type { AiSettings, AiSettingsView } from "./aiTypes";
 
-export const AI_SETTINGS_STORAGE_KEY = "gold-journal.ai.openrouter:v1";
+export const AI_SETTINGS_STORAGE_KEY = "gold-journal.ai.google:v1";
+/** Pre-Gemini namespace; read once for migration, then removed. */
+const LEGACY_OPENROUTER_STORAGE_KEY = "gold-journal.ai.openrouter:v1";
 export const AI_SETTINGS_EVENT = "gold-journal:ai-settings";
 
 export interface AiSettingsPersistence {
@@ -87,18 +89,32 @@ export function maskApiKey(key: string): string {
 
 export function assertValidApiKey(key: string): string {
   const clean = key.trim();
-  if (clean.length < 20 || clean.length > 512) throw new Error("Enter a valid OpenRouter API key.");
+  if (clean.length < 20 || clean.length > 512) throw new Error("Enter a valid Google AI Studio API key.");
   return clean;
 }
 
 export function assertValidModel(model: string): string {
   const clean = model.trim();
-  if (!clean || clean.length > 160) throw new Error("Enter a valid OpenRouter model name.");
+  if (!clean || clean.length > 160) throw new Error("Enter a valid Google AI model name.");
   return clean;
 }
 
-/** Read the raw settings including the key. Never render the key. */
+/**
+ * One-time migration: a previously saved OpenRouter key cannot work against
+ * Google's API, so it is discarded rather than mis-used. Its model choice is
+ * also provider-specific and dropped with it.
+ */
+function migrateLegacyOpenRouterSettings() {
+  try {
+    if (persistence.read() !== null) return;
+    if (typeof window === "undefined") return;
+    const legacy = window.localStorage.getItem(LEGACY_OPENROUTER_STORAGE_KEY);
+    if (legacy !== null) window.localStorage.removeItem(LEGACY_OPENROUTER_STORAGE_KEY);
+  } catch { /* migration is best-effort and must never break startup */ }
+}
+
 export function readAiSettings(): AiSettings | null {
+  migrateLegacyOpenRouterSettings();
   const raw = persistence.read();
   if (!raw) return null;
   try {
@@ -135,7 +151,7 @@ export function saveAiSettings(input: { apiKey: string; model: string }): AiSett
 
 export function updateAiModel(model: string): AiSettingsView {
   const current = readAiSettings();
-  if (!current) throw new Error("Add your OpenRouter API key before choosing a model.");
+  if (!current) throw new Error("Add your Google AI Studio API key before choosing a model.");
   return saveAiSettings({ apiKey: current.apiKey, model });
 }
 

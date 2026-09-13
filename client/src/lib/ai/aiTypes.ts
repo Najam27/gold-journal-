@@ -1,8 +1,8 @@
 /**
  * Types for the browser-only AI layer.
  *
- * The OpenRouter credential lives exclusively in this browser. Nothing in this
- * module is ever sent to the Gold Journal backend.
+ * The Google AI Studio credential lives exclusively in this browser. Nothing in
+ * this module is ever sent to the Gold Journal backend.
  */
 
 export type AiErrorCode =
@@ -16,7 +16,7 @@ export type AiErrorCode =
   | "malformed_response"
   | "ungrounded_response";
 
-/** Normalized failure thrown by the OpenRouter client and AI service. */
+/** Normalized failure thrown by the Google AI client and AI service. */
 export class AiError extends Error {
   readonly code: AiErrorCode;
   readonly status: number | null;
@@ -42,7 +42,7 @@ export type AiSettings = { apiKey: string; model: string; updatedAt: number };
 export type AiSettingsView = {
   configured: boolean;
   model: string | null;
-  /** Masked identifier such as `sk-or-v1••••••••abcd`. Never the full key. */
+  /** Masked identifier such as `AIzaSy••••••••abcd`. Never the full key. */
   maskedKey: string | null;
   updatedAt: number | null;
   /** True when this browser cannot persist settings (private mode etc.). */

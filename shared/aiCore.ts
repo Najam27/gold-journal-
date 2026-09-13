@@ -18,14 +18,13 @@ export const DEFAULT_AI_TIMEOUT_MS = 120_000;
 export const MAX_AI_TIMEOUT_MS = 240_000;
 export const MIN_AI_TIMEOUT_MS = 5_000;
 
-export const DEFAULT_AI_MODEL = "openai/gpt-4o-mini";
-/** Short list offered in the UI; any OpenRouter model id can be typed in. */
+export const DEFAULT_AI_MODEL = "gemini-2.5-flash";
+/** Short list offered in the UI; any Google AI Studio model id can be typed in. */
 export const AI_MODEL_SUGGESTIONS: ReadonlyArray<{ id: string; label: string }> = [
-  { id: "openai/gpt-4o-mini", label: "OpenAI GPT-4o mini (fast, inexpensive)" },
-  { id: "openai/gpt-4o", label: "OpenAI GPT-4o" },
-  { id: "anthropic/claude-3.5-sonnet", label: "Anthropic Claude 3.5 Sonnet" },
-  { id: "google/gemini-flash-1.5", label: "Google Gemini Flash 1.5" },
-  { id: "meta-llama/llama-3.1-70b-instruct", label: "Llama 3.1 70B Instruct" },
+  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash (fast, generous free tier)" },
+  { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro (most capable)" },
+  { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+  { id: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash Lite (lowest cost)" },
 ];
 
 /* ------------------------------------------------------------------ *
@@ -61,7 +60,13 @@ export function analysisDataFingerprint(analysis: AnalysisResult): string {
  * ------------------------------------------------------------------ */
 
 const claimType = z.enum(["FACT", "HYPOTHESIS", "RECOMMENDATION FOR TESTING"]);
-const evidenceItem = z.object({ evidenceId: z.string().regex(/^ev-[a-f0-9]{16}$/), dimension: z.string().max(80), context: z.string().max(160), sample: z.number().finite().nonnegative(), wins: z.number().finite().nonnegative(), losses: z.number().finite().nonnegative(), expectancy: z.number().finite(), profitFactor: z.number().finite().nullable(), averageR: z.number().finite().nullable(), maxDrawdown: z.number().finite().nonnegative(), evidenceTier: z.string().max(80), label: z.string().max(160), claim: z.string().max(1_000), metrics: z.record(z.string(), z.number().finite()), evidence: z.string().max(1_000), confidence: z.enum(["HIGH", "MEDIUM", "LOW"]), claimType });
+/**
+ * `metrics` is optional: it was a free-form key/number map that Gemini's strict
+ * `responseSchema` cannot express, so the provider omits it. Every numeric
+ * claim is still grounded through `hasOnlyGroundedNumbers` and the evidence
+ * manifest equality checks, which never read `metrics`.
+ */
+const evidenceItem = z.object({ evidenceId: z.string().regex(/^ev-[a-f0-9]{16}$/), dimension: z.string().max(80), context: z.string().max(160), sample: z.number().finite().nonnegative(), wins: z.number().finite().nonnegative(), losses: z.number().finite().nonnegative(), expectancy: z.number().finite(), profitFactor: z.number().finite().nullable(), averageR: z.number().finite().nullable(), maxDrawdown: z.number().finite().nonnegative(), evidenceTier: z.string().max(80), label: z.string().max(160), claim: z.string().max(1_000), metrics: z.record(z.string(), z.number().finite()).optional(), evidence: z.string().max(1_000), confidence: z.enum(["HIGH", "MEDIUM", "LOW"]), claimType });
 const hypothesis = z.object({ title: z.string().max(160), statement: z.string().max(1_000), evidenceIds: z.array(z.string().regex(/^ev-[a-f0-9]{16}$/)).max(8), confidence: z.enum(["HIGH", "MEDIUM", "LOW"]), nextTest: z.string().max(500), claimType });
 const experiment = z.object({ name: z.string().max(160), compare: z.string().max(500), measure: z.array(z.string().max(120)).max(8), requiredSample: z.number().finite().int().nonnegative(), caution: z.string().max(500) });
 
@@ -115,10 +120,11 @@ export function riskCoachUserPrompt(compact: unknown): string {
 }
 
 /* ------------------------------------------------------------------ *
- * JSON schemas for OpenRouter structured output
+ * JSON schemas for provider structured output (converted for Gemini's
+ * `responseSchema`, which accepts only a strict subset of JSON Schema)
  * ------------------------------------------------------------------ */
 
-const evidenceItemShape = { type: "object", additionalProperties: false, properties: { evidenceId: { type: "string", pattern: "^ev-[a-f0-9]{16}$" }, dimension: { type: "string" }, context: { type: "string" }, sample: { type: "number" }, wins: { type: "number" }, losses: { type: "number" }, expectancy: { type: "number" }, profitFactor: { type: ["number", "null"] }, averageR: { type: ["number", "null"] }, maxDrawdown: { type: "number" }, evidenceTier: { type: "string" }, label: { type: "string" }, claim: { type: "string" }, metrics: { type: "object", additionalProperties: { type: "number" } }, evidence: { type: "string" }, confidence: { type: "string", enum: ["HIGH", "MEDIUM", "LOW"] }, claimType: { type: "string", enum: ["FACT", "HYPOTHESIS", "RECOMMENDATION FOR TESTING"] } }, required: ["evidenceId", "dimension", "context", "sample", "wins", "losses", "expectancy", "profitFactor", "averageR", "maxDrawdown", "evidenceTier", "label", "claim", "metrics", "evidence", "confidence", "claimType"] } as const;
+const evidenceItemShape = { type: "object", additionalProperties: false, properties: { evidenceId: { type: "string", pattern: "^ev-[a-f0-9]{16}$" }, dimension: { type: "string" }, context: { type: "string" }, sample: { type: "number" }, wins: { type: "number" }, losses: { type: "number" }, expectancy: { type: "number" }, profitFactor: { type: ["number", "null"] }, averageR: { type: ["number", "null"] }, maxDrawdown: { type: "number" }, evidenceTier: { type: "string" }, label: { type: "string" }, claim: { type: "string" }, evidence: { type: "string" }, confidence: { type: "string", enum: ["HIGH", "MEDIUM", "LOW"] }, claimType: { type: "string", enum: ["FACT", "HYPOTHESIS", "RECOMMENDATION FOR TESTING"] } }, required: ["evidenceId", "dimension", "context", "sample", "wins", "losses", "expectancy", "profitFactor", "averageR", "maxDrawdown", "evidenceTier", "label", "claim", "evidence", "confidence", "claimType"] } as const;
 
 export const ANALYSIS_RESPONSE_SCHEMA = {
   type: "object",

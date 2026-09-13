@@ -41,7 +41,7 @@ describe("authenticated analysis procedures", () => {
     await expect(anonymous.analysis.get({ accountId: 44, filters: {} })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
-  it("stores a browser-produced report without any server-side OpenRouter call", async () => {
+  it("stores a browser-produced report without any server-side AI call", async () => {
     const caller = goldRouter.createCaller({ user } as any);
     await expect(caller.analysis.saveAiReport({ accountId: 44, filters: {}, model: "openai/gpt-4o-mini", report: emptyReport as never })).resolves.toEqual({ success: true, reportId: 5, persisted: true });
     expect(mocks.persistAiReport).toHaveBeenCalledWith(17, 44, deterministic, "openai/gpt-4o-mini", expect.objectContaining({ executiveSummary: "Evidence is limited." }));
