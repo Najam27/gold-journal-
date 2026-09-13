@@ -1,6 +1,5 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "./design-tokens.css";
 @import "./gold-overrides.css";
 @import "./visual-upgrade.css";
 @import "./recovery-workstation.css";
