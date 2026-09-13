@@ -9,6 +9,29 @@ import { recordMt5EventFailureAtomic, syncMt5HistoryBatchAtomic, syncMt5OpenBatc
 
 async function requireDb() { const db = await getDb(); if (!db) throw new Error("Supabase database is unavailable. Please retry shortly."); return db; }
 
+/** PostgREST filter URLs stay small; 100 numeric tickets per OR chunk is safe. */
+const MT5_TICKET_FILTER_CHUNK = 100;
+
+/**
+ * Splits a ticket list into bounded OR-filter chunks. A single OR filter with
+ * hundreds of tickets (a large open-position snapshot) produced a URL long
+ * enough for the gateway to reject with 414, which broke the whole MT5 Live
+ * workspace poll for large accounts.
+ */
+export function chunkMt5TicketFilters(tickets: string[], chunkSize = MT5_TICKET_FILTER_CHUNK) {
+  const unique = Array.from(new Set(tickets.filter(ticket => /^\d+$/.test(ticket))));
+  const chunks: string[][] = [];
+  for (let index = 0; index < unique.length; index += chunkSize) chunks.push(unique.slice(index, index + chunkSize));
+  return chunks;
+}
+
+async function journaledTicketSet(database: any, userId: number, accountId: number, tickets: string[]) {
+  const chunks = chunkMt5TicketFilters(tickets);
+  if (!chunks.length) return new Set<string>();
+  const rows = await Promise.all(chunks.map(chunk => database.select({ mt5Ticket: trades.mt5Ticket }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId), or(...chunk.map(ticket => eq(trades.mt5Ticket, BigInt(ticket))))))));
+  return new Set(rows.flat().flatMap((row: { mt5Ticket: bigint | null }) => row.mt5Ticket == null ? [] : [row.mt5Ticket.toString()]));
+}
+
 async function canonicalizeMt5ConnectionOwner(database: any, connection: typeof mt5Connections.$inferSelect) {
   const owner = await database.select({ userId: accounts.userId }).from(accounts).where(eq(accounts.id, connection.accountId)).limit(1);
   if (!owner[0]) throw new Error("MT5 connection refers to an unavailable journal account.");
@@ -96,7 +119,19 @@ export async function getMt5Workspace(userId: number, accountId: number) {
     db.select().from(mt5Connections).where(and(eq(mt5Connections.userId, userId), eq(mt5Connections.active, true))).orderBy(desc(mt5Connections.lastContactAt)).limit(100),
     db.select({ id: accounts.id, name: accounts.name }).from(accounts).where(eq(accounts.userId, userId)).limit(1_000),
   ]);
-  const canonicalConnections = await Promise.all(connections.map(connection => canonicalizeMt5ConnectionOwner(db, connection)));
+  // One owner lookup for every visible connection instead of one query per
+  // connection (this workspace poll now runs every 2.5 s from the browser).
+  const connectionAccountIds = Array.from(new Set(connections.map(connection => connection.accountId)));
+  const ownerRows = connectionAccountIds.length
+    ? await db.select({ id: accounts.id, userId: accounts.userId }).from(accounts).where(or(...connectionAccountIds.map(id => eq(accounts.id, id))))
+    : [];
+  const ownerByAccount = new Map(ownerRows.map(row => [row.id, row.userId]));
+  const canonicalConnections = await Promise.all(connections.map(connection => {
+    const ownerUserId = ownerByAccount.get(connection.accountId);
+    if (ownerUserId == null) throw new Error("MT5 connection refers to an unavailable journal account.");
+    if (ownerUserId === connection.userId) return connection;
+    return db.update(mt5Connections).set({ userId: ownerUserId }).where(eq(mt5Connections.id, connection.id)).then(() => ({ ...connection, userId: ownerUserId }));
+  }));
   const accountNames = new Map(ownedAccounts.map(item => [item.id, item.name]));
   const liveElsewhere = liveConnections
     .filter(connection => connection.accountId !== account.id && !connection.retiredAt && (connection.lastContactAt ?? connection.lastPing))
@@ -107,9 +142,7 @@ export async function getMt5Workspace(userId: number, accountId: number) {
       lastContactAt: connection.lastContactAt ?? connection.lastPing,
       lastSummaryAt: connection.lastSummarySuccessAt,
     }));
-  const visibleTickets = [...openPositions, ...closedPositions].map(position => position.ticket);
-  const journalRows = visibleTickets.length ? await db.select({ mt5Ticket: trades.mt5Ticket }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId), or(...visibleTickets.map(ticket => eq(trades.mt5Ticket, ticket))))) : [];
-  const journaledTickets = new Set(journalRows.flatMap(row => row.mt5Ticket == null ? [] : [row.mt5Ticket.toString()]));
+  const journaledTickets = await journaledTicketSet(db, userId, accountId, [...openPositions, ...closedPositions].map(position => position.ticket.toString()));
   return {
     dataSourceReference: supabaseDataSourceReference(),
     liveElsewhere,
@@ -128,9 +161,7 @@ export async function getMt5History(userId: number, accountId: number, page: num
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(Math.max(1, page), pageCount);
   const positions = await db.select().from(mt5LivePositions).where(where).orderBy(desc(mt5LivePositions.closeTime)).limit(pageSize).offset((safePage - 1) * pageSize);
-  const visibleTickets = positions.map(position => position.ticket);
-  const journalRows = visibleTickets.length ? await db.select({ mt5Ticket: trades.mt5Ticket }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId), or(...visibleTickets.map(ticket => eq(trades.mt5Ticket, ticket))))) : [];
-  const journaledTickets = new Set(journalRows.flatMap(row => row.mt5Ticket == null ? [] : [row.mt5Ticket.toString()]));
+  const journaledTickets = await journaledTicketSet(db, userId, accountId, positions.map(position => position.ticket.toString()));
   return { positions: positions.map(position => safePosition(position, journaledTickets)), total, page: safePage, pageSize, pageCount };
 }
 
@@ -154,6 +185,65 @@ export async function touchMt5Connection(connectionId: number) {
     const now = new Date();
     await requireConfirmedMt5ConnectionUpdate(db, connectionId, { lastPing: now, lastContactAt: now });
   }
+}
+
+/**
+ * Every open ticket this account currently believes is live. The EA receives
+ * this list with each heartbeat and reconciles it against its own terminal
+ * state, so a close that MT5 never reported (offline close, missed
+ * transaction event, terminal restart) is still resolved from authoritative
+ * history instead of staying OPEN until the next 24-hour replay.
+ */
+export async function getMt5OpenTickets(accountId: number, limit = 2_000) {
+  const db = await requireDb();
+  const rows = await db
+    .select({ ticket: mt5LivePositions.ticket })
+    .from(mt5LivePositions)
+    .where(and(eq(mt5LivePositions.accountId, accountId), eq(mt5LivePositions.status, "OPEN")))
+    .orderBy(desc(mt5LivePositions.updatedAt))
+    .limit(limit + 1);
+  const truncated = rows.length > limit;
+  const tickets = rows.slice(0, limit).map(row => row.ticket.toString());
+  return { tickets, count: tickets.length, truncated };
+}
+
+/**
+ * Finds the connection that a rejected key belongs to: it either matches the
+ * retired connection's current key hash or the outgoing key hash recorded when
+ * the key was rotated/replaced. This is used only to explain the failure in the
+ * UI; it never grants write access.
+ */
+export async function findRevokedMt5Connection(apiKey: string) {
+  const db = await requireDb();
+  const fingerprint = mt5ApiKeyFingerprint(apiKey);
+  const rows = await db
+    .select()
+    .from(mt5Connections)
+    .where(or(eq(mt5Connections.apiKey, fingerprint), eq(mt5Connections.previousApiKeyHash, fingerprint)))
+    .limit(2);
+  return (
+    rows.find(row => row.previousApiKeyHash === fingerprint) ??
+    rows.find(row => row.active === false || row.retiredAt != null) ??
+    null
+  );
+}
+
+/**
+ * Records a rejected/retired EA key on the owning connection so health reads
+ * "EA key retired" instead of "MT5 offline". Deliberately does NOT advance
+ * lastContactAt: the terminal is not authenticated, so it must not look live.
+ */
+export async function recordMt5AuthFailure(connectionId: number, code: "AUTH_REVOKED" | "AUTH_INVALID", message: string) {
+  const db = await requireDb();
+  const safeMessage = message.replace(/[\r\n]+/g, " ").slice(0, 255);
+  const rows = await db.select({ consecutiveFailures: mt5Connections.consecutiveFailures }).from(mt5Connections).where(eq(mt5Connections.id, connectionId)).limit(1);
+  const previousFailures = Number(rows[0]?.consecutiveFailures ?? 0);
+  await requireConfirmedMt5ConnectionUpdate(db, connectionId, {
+    lastErrorAt: new Date(),
+    lastErrorCode: code.slice(0, 64),
+    lastErrorMessage: safeMessage,
+    consecutiveFailures: Number.isFinite(previousFailures) ? previousFailures + 1 : 1,
+  });
 }
 
 export type Mt5EventOperation = "summary" | "open_batch" | "history_batch";
@@ -226,10 +316,19 @@ export async function recordMt5HistoryFailure(connectionId: number, message: str
   await db.update(mt5Connections).set({ lastHistoryAttempt: new Date(), lastHistoryStatus: "FAILED", lastHistoryMessage: message.slice(0, 255) }).where(eq(mt5Connections.id, connectionId));
 }
 
-type LiveBase = { ticket: bigint; symbol: string; direction: "BUY" | "SELL"; lots: number; openPrice: number; slPrice: number | null; tpPrice: number | null; riskUsd: number; rewardUsd: number; rrRatio: number; openTime: Date };
+/**
+ * Records the individual records the ingest layer rejected. The batch itself
+ * was accepted, so the EA advances its history cursor instead of re-sending a
+ * malformed trade forever (a poison record must not block the whole history).
+ */
+export async function recordMt5HistoryRejections(connectionId: number, rejected: Array<{ ticket: string | null; code: string }>) {
+  const db = await requireDb();
+  const codes = Array.from(new Set(rejected.map(item => item.code))).slice(0, 3).join(", ");
+  const message = `Accepted this batch and skipped ${rejected.length} record${rejected.length === 1 ? "" : "s"} (${codes}). Skipped tickets do not block the remaining history; re-download the current EA if they persist.`;
+  await db.update(mt5Connections).set({ lastHistoryMessage: message.slice(0, 255) }).where(eq(mt5Connections.id, connectionId));
+}
 
-/** PostgREST filter URLs stay small; 100 numeric tickets per OR chunk is safe. */
-const MT5_TICKET_FILTER_CHUNK = 100;
+type LiveBase = { ticket: bigint; symbol: string; direction: "BUY" | "SELL"; lots: number; openPrice: number; slPrice: number | null; tpPrice: number | null; riskUsd: number; rewardUsd: number; rrRatio: number; openTime: Date };
 
 type SyncedMt5Position = LiveBase & { pnl: number; result: "WIN" | "LOSS" | "BREAK_EVEN" | "OPEN"; tradeTime: Date; closeTime?: Date | null };
 
@@ -290,9 +389,7 @@ export async function syncStoredMt5PositionsToTradeLog(userId: number, accountId
   // PostgREST filter URL bounded). This must be OR, not AND: an AND over N ticket
   // equalities can only ever match when exactly one position is stored, silently
   // disabling the pre-filter and re-upserting every position on every poll.
-  const tickets = positions.map(position => position.ticket.toString());
-  const ticketChunks: string[][] = [];
-  for (let index = 0; index < tickets.length; index += MT5_TICKET_FILTER_CHUNK) ticketChunks.push(tickets.slice(index, index + MT5_TICKET_FILTER_CHUNK));
+  const ticketChunks = chunkMt5TicketFilters(positions.map(position => position.ticket.toString()));
   const journaledRows = await Promise.all(ticketChunks.map(chunk => db.select({ mt5Ticket: trades.mt5Ticket, result: trades.result, pnl: trades.pnl }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId), or(...chunk.map(ticket => eq(trades.mt5Ticket, BigInt(ticket))))))));
   const journaled = journaledRows.flat();
   const journaledByTicket = new Map(journaled.map(row => [row.mt5Ticket?.toString(), row]));

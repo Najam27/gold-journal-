@@ -29,8 +29,20 @@ function parseOffsetFreeBrokerTime(value: string, brokerUtcOffsetMinutes: number
   const match = value.match(/^(\d{4})[.-](\d{2})[.-](\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?(?:\.(\d{1,3}))?$/);
   if (!match) throw new Mt5TimestampError("INVALID_MT5_TIMESTAMP");
   const [, year, month, day, hour, minute, second = "0", fractional = "0"] = match;
+  const parts = { year: Number(year), month: Number(month), day: Number(day), hour: Number(hour), minute: Number(minute), second: Number(second) };
+  // Date.UTC silently rolls impossible values over (month 13 becomes January,
+  // 31 February becomes 3 March). Storing that would move a real trade to a
+  // different day and session, so an impossible broker timestamp is rejected
+  // and reported instead of being normalized into wrong data.
+  if (parts.year < 2000 || parts.year > 2100 || parts.month < 1 || parts.month > 12 || parts.day < 1 || parts.day > 31 || parts.hour > 23 || parts.minute > 59 || parts.second > 59) {
+    throw new Mt5TimestampError("INVALID_MT5_TIMESTAMP");
+  }
   const milliseconds = Number(fractional.padEnd(3, "0"));
-  const localAsUtc = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second), milliseconds);
+  const localAsUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second, milliseconds);
+  const brokerLocal = new Date(localAsUtc);
+  if (Number.isNaN(brokerLocal.getTime()) || brokerLocal.getUTCFullYear() !== parts.year || brokerLocal.getUTCMonth() !== parts.month - 1 || brokerLocal.getUTCDate() !== parts.day || brokerLocal.getUTCHours() !== parts.hour || brokerLocal.getUTCMinutes() !== parts.minute || brokerLocal.getUTCSeconds() !== parts.second) {
+    throw new Mt5TimestampError("INVALID_MT5_TIMESTAMP");
+  }
   const parsed = new Date(localAsUtc - brokerUtcOffsetMinutes * 60_000);
   if (Number.isNaN(parsed.getTime())) throw new Mt5TimestampError("INVALID_MT5_TIMESTAMP");
   return parsed;

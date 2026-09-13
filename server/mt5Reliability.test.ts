@@ -154,6 +154,115 @@ describe("MT5 sync health", () => {
     expect(offline.state).toBe("OFFLINE");
     expect(offline.message).toContain("connection record remains active");
   });
+  it("reports a rejected or rotated EA key as an authentication problem instead of an offline terminal", () => {
+    const now = Date.parse("2026-08-20T12:00:00.000Z");
+    const result = classifyMt5SyncHealth({
+      active: true,
+      lastPing: new Date(now - 40_000),
+      lastContactAt: new Date(now - 40_000),
+      lastErrorAt: new Date(now - 5_000),
+      lastErrorCode: "AUTH_REVOKED",
+      lastErrorMessage: "The EA is still sending a rotated MT5 key.",
+      consecutiveFailures: 3,
+      lastHistoryAttempt: new Date(now - 60_000),
+      lastHistorySync: new Date(now - 30_000),
+      lastHistoryStatus: "COMPLETED",
+      lastHistoryMessage: null,
+      historySyncedCount: 12,
+    }, now);
+    expect(result.state).toBe("AUTH_ERROR");
+    expect(result.errorCategory).toBe("AUTH_ERROR");
+    expect(result.label).toBe("MT5 key rejected");
+    expect(result.message).toContain("API key is no longer valid");
+    expect(result.message).toContain("not a network outage");
+  });
+
+  it("reports a payload/version mismatch as a configuration problem", () => {
+    const now = Date.parse("2026-08-20T12:00:00.000Z");
+    const result = classifyMt5SyncHealth({
+      active: true,
+      lastPing: new Date(now - 20_000),
+      lastContactAt: new Date(now - 20_000),
+      lastErrorAt: new Date(now - 1_000),
+      lastErrorCode: "UNSUPPORTED_VERSION",
+      lastErrorMessage: "This EA sends payload version 3.",
+      consecutiveFailures: 1,
+      lastHistoryAttempt: null,
+      lastHistorySync: null,
+      lastHistoryStatus: null,
+      lastHistoryMessage: null,
+      historySyncedCount: 0,
+    }, now);
+    expect(result.state).toBe("CONFIG_ERROR");
+    expect(result.errorCategory).toBe("CONFIG_ERROR");
+    expect(result.label).toBe("MT5 configuration invalid");
+    expect(result.message).toContain("Download the current EA");
+  });
+
+  it("returns to the live/offline ladder as soon as authenticated contact supersedes the rejection", () => {
+    const now = Date.parse("2026-08-20T12:00:00.000Z");
+    const result = classifyMt5SyncHealth({
+      active: true,
+      lastPing: new Date(now - 2_000),
+      lastContactAt: new Date(now - 2_000),
+      lastSummarySuccessAt: new Date(now - 2_000),
+      lastOpenSyncSuccessAt: new Date(now - 2_000),
+      lastErrorAt: new Date(now - 90_000),
+      lastErrorCode: "AUTH_REVOKED",
+      lastErrorMessage: "old key",
+      consecutiveFailures: 0,
+      lastHistoryAttempt: null,
+      lastHistorySync: null,
+      lastHistoryStatus: null,
+      lastHistoryMessage: null,
+      historySyncedCount: 0,
+    }, now);
+    expect(result.state).toBe("CONNECTED");
+    expect(result.errorCategory).toBe("AUTH_ERROR");
+  });
+
+  it("does not treat a transient database failure as a configuration error", () => {
+    const now = Date.parse("2026-08-20T12:00:00.000Z");
+    const result = classifyMt5SyncHealth({
+      active: true,
+      lastPing: new Date(now - 3_000),
+      lastContactAt: new Date(now - 3_000),
+      lastSummarySuccessAt: new Date(now - 25_000),
+      lastSummaryErrorAt: new Date(now - 2_000),
+      lastErrorAt: new Date(now - 2_000),
+      lastErrorCode: "DATABASE_RETRYABLE",
+      lastErrorMessage: "Supabase was temporarily unavailable.",
+      consecutiveFailures: 2,
+      lastHistoryAttempt: null,
+      lastHistorySync: null,
+      lastHistoryStatus: null,
+      lastHistoryMessage: null,
+      historySyncedCount: 0,
+    }, now);
+    expect(result.state).toBe("DEGRADED");
+    expect(result.errorCategory).toBeNull();
+  });
+
+  it("exposes an independent history freshness age alongside heartbeat and live streams", () => {
+    const now = Date.parse("2026-08-20T12:00:00.000Z");
+    const result = classifyMt5SyncHealth({
+      active: true,
+      lastPing: new Date(now - 3_000),
+      lastContactAt: new Date(now - 3_000),
+      lastSummarySuccessAt: new Date(now - 3_000),
+      lastOpenSyncSuccessAt: new Date(now - 3_000),
+      lastHistoryAttempt: new Date(now - 120_000),
+      lastHistorySync: new Date(now - 120_000),
+      lastHistoryStatus: "COMPLETED",
+      lastHistoryMessage: null,
+      historySyncedCount: 5,
+    }, now);
+    expect(result.historyState).toBe("COMPLETE");
+    expect(result.historyAgeSeconds).toBe(120);
+    expect(result.lastContactAgeSeconds).toBe(3);
+    expect(result.lastOpenSyncAgeSeconds).toBe(3);
+  });
+
   it("gives a concrete setup checklist before the first terminal contact", () => {
     const result = classifyMt5SyncHealth({
       active: true,

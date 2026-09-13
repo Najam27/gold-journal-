@@ -10,7 +10,13 @@ describe("MT5 connection owner integrity", () => {
     expect(dbSource).toContain("async function canonicalizeMt5ConnectionOwner");
     expect(dbSource).toContain("from(accounts).where(eq(accounts.id, connection.accountId))");
     expect(dbSource).toContain('set({ userId: owner[0].userId })');
-    expect(dbSource).toContain("canonicalConnections = await Promise.all(connections.map(connection => canonicalizeMt5ConnectionOwner(db, connection)))");
+    // The workspace resolves every visible connection owner in one account
+    // query (no per-connection query on a 2.5s poll) and still repairs a
+    // drifted legacy row before returning it.
+    expect(dbSource).toContain("const ownerRows = connectionAccountIds.length");
+    expect(dbSource).toContain("or(...connectionAccountIds.map(id => eq(accounts.id, id)))");
+    expect(dbSource).toContain("const ownerByAccount = new Map(ownerRows.map(row => [row.id, row.userId]));");
+    expect(dbSource).toContain("set({ userId: ownerUserId })");
     expect(dbSource).toContain("return canonicalizeMt5ConnectionOwner(db, hashed[0])");
     expect(dbSource).toContain("return canonicalizeMt5ConnectionOwner(db, { ...legacy[0], apiKey: fingerprint })");
   });

@@ -5,6 +5,23 @@ import { and, eq } from "./supabaseQuery";
 
 type TimestampValue = Date | string | null | undefined;
 
+/**
+ * Failure codes that describe a configuration/credential problem the terminal
+ * cannot fix by retrying. They are surfaced as AUTH_ERROR/CONFIG_ERROR instead
+ * of being reported as a network outage, because the user has to act.
+ */
+export const MT5_AUTH_ERROR_CODES = ["AUTH_REVOKED", "AUTH_INVALID"] as const;
+export const MT5_CONFIG_ERROR_CODES = ["UNSUPPORTED_VERSION", "ENDPOINT_INVALID", "BATCH_TOO_LARGE", "MIGRATION_REQUIRED_0008"] as const;
+/** A configuration failure keeps the badge authoritative for this long. */
+const MT5_CONFIG_ERROR_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1_000;
+
+export function mt5ErrorCategory(code?: string | null) {
+  const normalized = String(code ?? "").toUpperCase();
+  if ((MT5_AUTH_ERROR_CODES as readonly string[]).includes(normalized)) return "AUTH_ERROR" as const;
+  if ((MT5_CONFIG_ERROR_CODES as readonly string[]).includes(normalized)) return "CONFIG_ERROR" as const;
+  return null;
+}
+
 type SyncConnection = {
   active: boolean;
   lastPing: TimestampValue;
@@ -69,18 +86,27 @@ export function classifyMt5SyncHealth(
   const latestError = connection.lastErrorCode
     ? `${connection.lastErrorCode}${connection.lastErrorMessage ? `: ${connection.lastErrorMessage}` : ""}`
     : null;
+  const errorCategory = mt5ErrorCategory(connection.lastErrorCode);
+  const errorAt = timestampMs(connection.lastErrorAt);
+  const contactMs = timestampMs(connection.lastContactAt ?? connection.lastPing);
+  // A credential/config rejection is only blamed for the current state while no
+  // newer authenticated contact has superseded it; once the user pastes the new
+  // key the normal live/stale/offline ladder applies again immediately.
+  const blockingConfigError = errorCategory != null && errorAt != null && (contactMs == null || errorAt >= contactMs) && now - errorAt <= MT5_CONFIG_ERROR_MAX_AGE_MS;
   const state =
-    contactAge == null
-      ? "WAITING"
-      : contactAge > 300
-        ? "OFFLINE"
-        : contactAge > 60
-          ? "STALE"
-          : !summaryFresh && !openFresh
-            ? "DEGRADED"
-            : summaryFailedAfterSuccess || openFailedAfterSuccess
-            ? "DEGRADED"
-            : "CONNECTED";
+    blockingConfigError
+      ? errorCategory
+      : contactAge == null
+        ? "WAITING"
+        : contactAge > 300
+          ? "OFFLINE"
+          : contactAge > 60
+            ? "STALE"
+            : !summaryFresh && !openFresh
+              ? "DEGRADED"
+              : summaryFailedAfterSuccess || openFailedAfterSuccess
+              ? "DEGRADED"
+              : "CONNECTED";
   const snapshotState = summaryFailedAfterSuccess
     ? "FAILED"
     : summaryAge == null
@@ -103,10 +129,18 @@ export function classifyMt5SyncHealth(
         : connection.lastHistoryAttempt
           ? "IN_PROGRESS"
           : "NOT_STARTED";
+  const historyAgeSeconds = ageOf(connection.lastHistorySync ?? connection.lastHistoryAttempt);
   const waitingMessage =
     "Waiting for the first MT5 terminal contact. In MT5, confirm the read-only EA is attached, the exact server origin is allowed under Tools > Options > Expert Advisors > WebRequest, and the one-time API key was pasted into this connection. Auto Trading may remain off.";
+  const configurationMessage = errorCategory === "AUTH_ERROR"
+    ? `The MT5 terminal is reaching Gold Journal but its API key is no longer valid${latestError ? ` (${latestError})` : ""}. Paste the current key from MT5 Live into the EA inputs and apply — the EA keeps probing and resumes automatically. This is a credential problem, not a network outage.`
+    : errorCategory === "CONFIG_ERROR"
+      ? `The MT5 terminal is reaching Gold Journal but this connection cannot accept its data${latestError ? ` (${latestError})` : ""}. Download the current EA from MT5 Live and replace the copy on the chart. This is a configuration mismatch, not a network outage.`
+      : null;
   const message =
-    state === "CONNECTED"
+    blockingConfigError && configurationMessage
+      ? configurationMessage
+      : state === "CONNECTED"
       ? snapshotState === "CURRENT"
         ? "Live terminal contact and account snapshot are current."
         : "Live terminal contact is current; open-position synchronization is current while the account snapshot is pending."
@@ -120,18 +154,24 @@ export function classifyMt5SyncHealth(
   return {
     state,
     label:
-      state === "CONNECTED"
-        ? "MT5 connected"
-        : state === "DEGRADED"
-          ? "MT5 sync degraded"
-          : state === "STALE"
-            ? "MT5 sync stale"
-            : state === "OFFLINE"
-              ? "MT5 offline"
-              : "Waiting for MT5",
+      blockingConfigError && errorCategory === "AUTH_ERROR"
+        ? "MT5 key rejected"
+        : blockingConfigError && errorCategory === "CONFIG_ERROR"
+          ? "MT5 configuration invalid"
+          : state === "CONNECTED"
+            ? "MT5 connected"
+            : state === "DEGRADED"
+              ? "MT5 sync degraded"
+              : state === "STALE"
+                ? "MT5 sync stale"
+                : state === "OFFLINE"
+                  ? "MT5 offline"
+                  : "Waiting for MT5",
+    errorCategory,
     lastContactAgeSeconds: contactAge,
     lastSummaryAgeSeconds: summaryAge,
     lastOpenSyncAgeSeconds: openAge,
+    historyAgeSeconds,
     snapshotState,
     openSyncState,
     lastErrorCode: connection.lastErrorCode ?? null,
@@ -213,6 +253,24 @@ export async function getMt5Integrity(userId: number, accountId: number) {
           {
             code: health.state === "OFFLINE" ? "MT5_OFFLINE" : "MT5_STALE",
             severity: "warning" as const,
+            message: health.message,
+          },
+        ]
+      : []),
+    ...(health.errorCategory === "AUTH_ERROR"
+      ? [
+          {
+            code: "MT5_AUTH_ERROR",
+            severity: "error" as const,
+            message: health.message,
+          },
+        ]
+      : []),
+    ...(health.errorCategory === "CONFIG_ERROR"
+      ? [
+          {
+            code: "MT5_CONFIG_ERROR",
+            severity: "error" as const,
             message: health.message,
           },
         ]

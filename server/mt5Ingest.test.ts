@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ getActive: vi.fn(), touch: vi.fn(), open: vi.fn(), openBatch: vi.fn(), close: vi.fn(), closeBatch: vi.fn(), summary: vi.fn(), eventSuccess: vi.fn(), eventFailure: vi.fn(), completeHistory: vi.fn(), historyAttempt: vi.fn(), historyAccepted: vi.fn(), historyFailure: vi.fn() }));
-vi.mock("./mt5Db", () => ({ getActiveMt5Connection: mocks.getActive, touchMt5Connection: mocks.touch, upsertMt5OpenPosition: mocks.open, upsertMt5OpenPositionBatch: mocks.openBatch, upsertMt5ClosedPosition: mocks.close, upsertMt5ClosedPositionBatch: mocks.closeBatch, updateMt5AccountSummary: mocks.summary, recordMt5EventSuccess: mocks.eventSuccess, recordMt5EventFailure: mocks.eventFailure, completeMt5HistorySync: mocks.completeHistory, recordMt5HistoryAttempt: mocks.historyAttempt, recordMt5HistoryAccepted: mocks.historyAccepted, recordMt5HistoryFailure: mocks.historyFailure }));
+const mocks = vi.hoisted(() => ({ getActive: vi.fn(), touch: vi.fn(), open: vi.fn(), openBatch: vi.fn(), close: vi.fn(), closeBatch: vi.fn(), summary: vi.fn(), eventSuccess: vi.fn(), eventFailure: vi.fn(), completeHistory: vi.fn(), historyAttempt: vi.fn(), historyAccepted: vi.fn(), historyFailure: vi.fn(), historyRejections: vi.fn(), openTickets: vi.fn(), findRevoked: vi.fn(), authFailure: vi.fn() }));
+vi.mock("./mt5Db", () => ({ getActiveMt5Connection: mocks.getActive, touchMt5Connection: mocks.touch, upsertMt5OpenPosition: mocks.open, upsertMt5OpenPositionBatch: mocks.openBatch, upsertMt5ClosedPosition: mocks.close, upsertMt5ClosedPositionBatch: mocks.closeBatch, updateMt5AccountSummary: mocks.summary, recordMt5EventSuccess: mocks.eventSuccess, recordMt5EventFailure: mocks.eventFailure, completeMt5HistorySync: mocks.completeHistory, recordMt5HistoryAttempt: mocks.historyAttempt, recordMt5HistoryAccepted: mocks.historyAccepted, recordMt5HistoryFailure: mocks.historyFailure, recordMt5HistoryRejections: mocks.historyRejections, getMt5OpenTickets: mocks.openTickets, findRevokedMt5Connection: mocks.findRevoked, recordMt5AuthFailure: mocks.authFailure }));
 
 import { mt5RateLimitTestHooks, processMt5Payload } from "./mt5Ingest";
 
@@ -25,6 +25,10 @@ describe("MT5 EA ingest", () => {
     mocks.historyAttempt.mockResolvedValue(undefined);
     mocks.historyAccepted.mockResolvedValue(undefined);
     mocks.historyFailure.mockResolvedValue(undefined);
+    mocks.historyRejections.mockResolvedValue(undefined);
+    mocks.openTickets.mockResolvedValue({ tickets: [], count: 0, truncated: false });
+    mocks.findRevoked.mockResolvedValue(null);
+    mocks.authFailure.mockResolvedValue(undefined);
   });
 
   it("authorizes by active API key, touches the connection, and upserts an open position under its account", async () => {
@@ -149,6 +153,94 @@ describe("MT5 EA ingest", () => {
     expect(mocks.openBatch).toHaveBeenCalledTimes(1);
     expect(mocks.openBatch).toHaveBeenCalledWith(77, 12, [expect.objectContaining({ ticket: 2001n }), expect.objectContaining({ ticket: 2002n })]);
     expect(mocks.eventSuccess).toHaveBeenCalledWith(44, "open_batch");
+  });
+
+  it("quarantines one malformed history record instead of rejecting the whole batch forever", async () => {
+    const good = { ...openPayload(key("quarantine")), ticket: "3001", close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00" };
+    // ticket 3002 is poisoned: an impossible broker date would previously fail
+    // the entire batch, so the EA retried the same 50 records forever.
+    const poisoned = { ...good, ticket: "3002", close_time: "2026-02-31 11:45:00" };
+    const outcome = await processMt5Payload({ event: "history_batch", api_key: key("quarantine"), positions: [good, poisoned], complete: false });
+    expect(outcome).toMatchObject({ status: 200, body: { ok: true, event: "history_batch", synced: 1, accepted: 1, rejected: 1, complete: false } });
+    expect((outcome.body as { failed: Array<{ ticket: string; code: string; retryable: boolean }> }).failed).toEqual([{ ticket: "3002", code: "INVALID_MT5_TIMESTAMP", retryable: false }]);
+    expect(mocks.closeBatch).toHaveBeenCalledTimes(1);
+    expect(mocks.closeBatch).toHaveBeenCalledWith(77, 12, [expect.objectContaining({ ticket: 3001n })]);
+    expect(mocks.historyRejections).toHaveBeenCalledWith(44, [{ ticket: "3002", code: "INVALID_MT5_TIMESTAMP", retryable: false }]);
+    // The batch was accepted, so the EA advances its cursor past the poison record.
+    expect(mocks.historyAccepted).toHaveBeenCalledWith(44, 1, false);
+  });
+
+  it("quarantines a structurally invalid historical record and reports the ticket", async () => {
+    const good = { ...openPayload(key("structure")), ticket: "4001", close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-07-11 11:45:00" };
+    const malformed = { ticket: "4002", symbol: "", direction: "SIDEWAYS", lots: Number.NaN, open_price: "nope" };
+    const outcome = await processMt5Payload({ event: "history_batch", api_key: key("structure"), positions: [good, malformed], complete: true });
+    expect(outcome).toMatchObject({ status: 200, body: { accepted: 1, rejected: 1 } });
+    expect((outcome.body as { failed: Array<{ ticket: string; code: string }> }).failed[0]).toMatchObject({ ticket: "4002", code: "PAYLOAD_INVALID" });
+    expect(mocks.closeBatch).toHaveBeenCalledWith(77, 12, [expect.objectContaining({ ticket: 4001n })]);
+  });
+
+  it("fails the batch only when every historical record is unusable", async () => {
+    const poisoned = { ...openPayload(key("all-poison")), close_price: 3308, realized_pnl: 168, result: "Win", close_time: "2026-13-45 11:45:00" };
+    await expect(processMt5Payload({ event: "history_batch", api_key: key("all-poison"), positions: [poisoned], complete: false })).resolves.toMatchObject({ status: 422, body: { ok: false, code: "SYNC_PARTIAL", rejected: 1 } });
+    expect(mocks.closeBatch).not.toHaveBeenCalled();
+  });
+
+  it("keeps one bad open position from blocking the remaining live positions", async () => {
+    const good = { ...openPayload(key("open-quarantine")), ticket: "5001" };
+    const bad = { ...good, ticket: "5002", lots: "not-a-number" };
+    const outcome = await processMt5Payload({ event: "open_batch", api_key: key("open-quarantine"), positions: [bad, good], broker_utc_offset_minutes: 180 });
+    expect(outcome).toMatchObject({ status: 200, body: { event: "open_batch", accepted: 1, rejected: 1 } });
+    expect(mocks.openBatch).toHaveBeenCalledWith(77, 12, [expect.objectContaining({ ticket: 5001n })]);
+    expect(mocks.eventSuccess).toHaveBeenCalledWith(44, "open_batch");
+  });
+
+  it("rejects an oversized open batch with an actionable code instead of an opaque validation error", async () => {
+    const positions = Array.from({ length: 201 }, (_, index) => ({ ...openPayload(key("oversized")), ticket: String(6000 + index) }));
+    await expect(processMt5Payload({ event: "open_batch", api_key: key("oversized"), positions, broker_utc_offset_minutes: 180 })).resolves.toMatchObject({ status: 400, body: { ok: false, code: "BATCH_TOO_LARGE", maxPositionsPerBatch: 200 } });
+    expect(mocks.openBatch).not.toHaveBeenCalled();
+    expect(mocks.eventFailure).toHaveBeenCalledWith(44, "open_batch", "BATCH_TOO_LARGE", expect.stringContaining("at most 200"));
+  });
+
+  it("rejects an uninterpretable payload version explicitly so the EA can tell the trader to update", async () => {
+    const outcome = await processMt5Payload({ event: "open_batch", api_key: key("future-payload"), positions: [], broker_utc_offset_minutes: 180, ea_version: "9.0.0", payload_version: "3" });
+    expect(outcome).toMatchObject({ status: 400, body: { ok: false, code: "UNSUPPORTED_VERSION", supportedPayloadVersion: "2" } });
+    expect((outcome.body as { diagnostic: string }).diagnostic).toContain("payload version 3");
+    expect(mocks.openBatch).not.toHaveBeenCalled();
+    expect(mocks.eventFailure).toHaveBeenCalledWith(44, "open_batch", "UNSUPPORTED_VERSION", expect.stringContaining("payload version 3"));
+  });
+
+  it("still answers compat and ping for an uninterpretable payload version so the EA can report the mismatch", async () => {
+    await expect(processMt5Payload({ event: "compat", api_key: key("compat-future"), ea_version: "9.0.0", payload_version: "3" })).resolves.toMatchObject({ status: 200, body: { ok: true, event: "compat", compatible: false, supportedPayloadVersion: "2" } });
+    await expect(processMt5Payload({ event: "ping", api_key: key("ping-future"), ea_version: "9.0.0", payload_version: "3" })).resolves.toMatchObject({ status: 200, body: { ok: true, event: "ping" } });
+  });
+
+  it("publishes the server's open tickets with each heartbeat so the EA can reconcile missed closes", async () => {
+    mocks.openTickets.mockResolvedValue({ tickets: ["7001", "7002"], count: 2, truncated: false });
+    const outcome = await processMt5Payload({ event: "ping", api_key: key("open-feed") });
+    expect(outcome).toMatchObject({ status: 200, body: { ok: true, event: "ping", openTicketFormat: "csv", openTickets: "7001,7002", openTicketCount: 2, openTicketsTruncated: false } });
+    expect(mocks.openTickets).toHaveBeenCalledWith(12);
+  });
+
+  it("omits the reconciliation feed instead of claiming an empty account when the lookup fails", async () => {
+    mocks.openTickets.mockRejectedValue(new Error("database request timed out"));
+    const outcome = await processMt5Payload({ event: "ping", api_key: key("open-feed-failure") });
+    expect(outcome).toMatchObject({ status: 200, body: { ok: true, event: "ping" } });
+    expect(outcome.body).not.toHaveProperty("openTicketFormat");
+    expect(outcome.body).not.toHaveProperty("openTickets");
+  });
+
+  it("attributes a rotated or retired key to its connection so the UI can say the key was rejected", async () => {
+    mocks.getActive.mockResolvedValue(null);
+    mocks.findRevoked.mockResolvedValue({ id: 91, previousApiKeyHash: null, active: false, retiredAt: new Date("2026-08-01T00:00:00Z") });
+    await expect(processMt5Payload({ event: "ping", api_key: key("retired") })).resolves.toEqual({ status: 401, body: { ok: false, code: "UNAUTHORIZED" } });
+    expect(mocks.authFailure).toHaveBeenCalledWith(91, "AUTH_REVOKED", expect.stringContaining("retired MT5 connection"));
+  });
+
+  it("still returns a plain 401 when a rejected key belongs to no known connection", async () => {
+    mocks.getActive.mockResolvedValue(null);
+    mocks.findRevoked.mockResolvedValue(null);
+    await expect(processMt5Payload({ event: "ping", api_key: key("unknown-2") })).resolves.toEqual({ status: 401, body: { ok: false, code: "UNAUTHORIZED" } });
+    expect(mocks.authFailure).not.toHaveBeenCalled();
   });
 
   it("limits a single API key to five events per second", async () => {

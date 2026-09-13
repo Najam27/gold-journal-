@@ -5,7 +5,7 @@ const source = readFileSync(new URL("../../public/GoldJournal_EA.mq5", import.me
 
 describe("Gold Journal MT5 EA reliability contract", () => {
   it("keeps the three-second cadence while using bounded retry for transient HTTP failures", () => {
-    expect(source).toContain('#property version   "2.14"');
+    expect(source).toContain('#property version   "2.15"');
     expect(source).toContain("input int SyncSeconds = 3");
     expect(source).toContain("const int MAX_RETRY_BACKOFF_SECONDS = 60");
     expect(source).toContain("bool IsTransientStatus(int status)");
@@ -53,10 +53,59 @@ describe("Gold Journal MT5 EA reliability contract", () => {
     expect(source).toContain("skipped unreconstructable historical position");
   });
 
+  it("never reports a still-existing position as terminal CLOSED, so a partial close keeps its remaining volume OPEN", () => {
+    // A DEAL_ENTRY_OUT deal is emitted for partial closes and for the closing
+    // leg of a netting INOUT reversal. Only a position that no longer exists in
+    // the terminal may become a terminal Trade Log record.
+    expect(source).toMatch(/string ClosedPositionJson\(ulong position_id\) \{\s*\/\/[\s\S]*?if\(PositionSelectByTicket\(position_id\)\) return "";/);
+    expect(source).toContain("bool IsPositionOpenNow(ulong ticket)");
+    expect(source).toContain("if(IsPositionOpenNow(position_id)) { still_open++; continue; }");
+    expect(source).toContain("bool CanSend(string expectedEvent)");
+  });
+
+  it("splits a large open-position snapshot into independently retryable batches of at most 200 records", () => {
+    expect(source).toContain("const int MAX_OPEN_POSITIONS_PER_BATCH = 200;");
+    expect(source).toContain("bool SendOpenBatch(string &items[], int count, int batch_number, int batch_total)");
+    expect(source).toContain("if(!SendOpenBatch(items, count, batch_number, batch_total)) return;");
+    expect(source).toContain("the remaining batches retry on the next timer");
+  });
+
+  it("reconciles server-tracked open tickets against the terminal and reconstructs a close it never reported", () => {
+    expect(source).toContain("const int MAX_TRACKED_OPEN_TICKETS = 2000;");
+    expect(source).toContain("void ApplyReconciliationFeed(string response_text)");
+    expect(source).toContain("void RefreshReconcileQueue()");
+    expect(source).toContain("void ReconcileNextTicket()");
+    expect(source).toContain('if(format != "csv") return;');
+    expect(source).toContain("ReconcileNextTicket();");
+    expect(source).toContain("recovered from terminal history.");
+    expect(source).toContain("bool SendClosedRecord(string record)");
+  });
+
+  it("classifies payload/version rejections as recoverable configuration problems instead of a network storm", () => {
+    expect(source).toContain("bool IsNonRetryableCode(string code)");
+    expect(source).toContain('code == "UNSUPPORTED_VERSION"');
+    expect(source).toContain('code == "BATCH_TOO_LARGE"');
+    expect(source).toContain("IsNonRetryableCode(detail) || (status >= 400 && !IsTransientStatus(status))");
+    expect(source).toContain("payload/version/configuration mismatch, not a network outage");
+  });
+
+  it("sweeps history incrementally on its own cadence so a missed transaction event cannot leave a trade OPEN", () => {
+    expect(source).toContain("const int HISTORY_SWEEP_SECONDS = 900;");
+    expect(source).toContain("bool sweep_due = (g_last_history_attempt == 0 || now - g_last_history_attempt >= HISTORY_SWEEP_SECONDS);");
+    expect(source).toContain("return (idle_window && full_replay_due) || sweep_due;");
+  });
+
   it("starts a recent incremental history scan when a broker-manual close transaction arrives after full history completed", () => {
     expect(source).toContain("void OnTradeTransaction(const MqlTradeTransaction &transaction");
     expect(source).toContain("DEAL_POSITION_ID");
     expect(source).toContain("SendHistory(false);");
+    // The close notification reads the transaction itself, because the deal may
+    // not be in the terminal history cache yet (HistoryDealGetInteger returned 0
+    // and silently dropped the notification).
+    expect(source).toContain("if(transaction.type != TRADE_TRANSACTION_DEAL_ADD) return;");
+    expect(source).toContain("ENUM_DEAL_ENTRY entry = transaction.entry;");
+    expect(source).toContain("ulong position_id = transaction.position;");
+    expect(source).not.toContain("HistoryDealGetInteger(transaction.deal");
     // The incremental sweep must reach back to the last successful close sync,
     // not a fixed one-hour window, so a close that happened while the EA was
     // offline is still collected instead of re-arming the 24-hour replay gate.

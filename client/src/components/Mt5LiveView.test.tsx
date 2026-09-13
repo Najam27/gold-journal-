@@ -409,6 +409,82 @@ describe("Mt5LiveView", () => {
     expect(mocks.remove).not.toHaveBeenCalled();
   });
 
+  it("shows independent heartbeat, open-position, snapshot, and history freshness instead of one blanket connected badge", () => {
+    mocks.workspaceData = {
+      connections: [{
+        id: 1,
+        accountName: "GFT 10K",
+        label: "GFT Live",
+        active: true,
+        brokerUtcOffsetMinutes: 180,
+        lastPing: new Date(),
+        lastContactAt: new Date(),
+        mt5Login: "90123456",
+        brokerServer: "Broker-Live",
+        currency: "USD",
+        balance: "10000.00",
+        equity: "10042.50",
+        margin: "250.00",
+        freeMargin: "9792.50",
+        floatingPnl: "42.50",
+        syncHealth: {
+          state: "DEGRADED",
+          label: "MT5 sync degraded",
+          message: "MT5 contacted Gold Journal, but open-position synchronization has not updated for 90s.",
+          lastContactAgeSeconds: 4,
+          lastOpenSyncAgeSeconds: 90,
+          lastSummaryAgeSeconds: 20,
+          historyAgeSeconds: 600,
+          snapshotState: "STALE",
+          openSyncState: "STALE",
+          historyState: "COMPLETE",
+        },
+      }],
+      openPositions: [],
+      closedPositions: [],
+    };
+    mocks.historyData = { positions: [], total: 0, page: 1, pageSize: 20, pageCount: 1 };
+
+    render(<Mt5LiveView account={{ id: 12, name: "GFT 10K" }} accounts={[{ id: 12, name: "GFT 10K" }]} onJournalNow={vi.fn()} />);
+
+    const streams = screen.getByRole("list", { name: /MT5 synchronization streams/i });
+    expect(streams.textContent).toContain("EA heartbeat");
+    expect(streams.textContent).toContain("4s ago");
+    expect(streams.textContent).toContain("Open positions");
+    expect(streams.textContent).toContain("stale");
+    expect(streams.textContent).toContain("Trade history");
+    expect(streams.textContent).toContain("synced");
+    expect(streams.textContent).toContain("10m ago");
+  });
+
+  it("reports a rejected EA key as a credential problem rather than an offline terminal", () => {
+    mocks.workspaceData = {
+      connections: [{
+        id: 1,
+        accountName: "GFT 10K",
+        label: "GFT Live",
+        active: true,
+        brokerUtcOffsetMinutes: 180,
+        lastPing: new Date(Date.now() - 40_000),
+        lastContactAt: new Date(Date.now() - 40_000),
+        syncHealth: {
+          state: "AUTH_ERROR",
+          label: "MT5 key rejected",
+          message: "The MT5 terminal is reaching Gold Journal but its API key is no longer valid. This is a credential problem, not a network outage.",
+        },
+      }],
+      openPositions: [],
+      closedPositions: [],
+    };
+    mocks.historyData = { positions: [], total: 0, page: 1, pageSize: 20, pageCount: 1 };
+
+    render(<Mt5LiveView account={{ id: 12, name: "GFT 10K" }} accounts={[{ id: 12, name: "GFT 10K" }]} onJournalNow={vi.fn()} />);
+
+    expect(screen.getByText(/MT5 key rejected · EA not authenticated/i)).toBeTruthy();
+    expect(screen.queryByText(/MT5 configured · terminal offline/i)).toBeNull();
+    expect(screen.getAllByText(/not a network outage/i).length).toBeGreaterThan(0);
+  });
+
   it("retains a retired connection record and offers a replacement key instead of hiding it as missing", async () => {
     mocks.workspaceData = {
       connections: [{ id: 1, accountName: "GFT 10K", label: "GFT Live", active: false, retiredAt: new Date("2026-08-23T00:00:00Z"), retiredReason: "USER_RETIRED", brokerUtcOffsetMinutes: 180, lastPing: null, lastContactAt: null }],

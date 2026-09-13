@@ -51,6 +51,30 @@ const masked = (key: string) =>
   key.length < 10 ? "••••••••" : `${key.slice(0, 4)}••••••••${key.slice(-3)}`;
 const moneyOrDash = (value: string | number | null | undefined) =>
   value == null ? "—" : formatMoney(value);
+const ageLabel = (seconds?: number | null) => {
+  if (seconds == null || !Number.isFinite(seconds)) return "never";
+  if (seconds < 60) return `${Math.round(seconds)}s ago`;
+  if (seconds < 3_600) return `${Math.round(seconds / 60)}m ago`;
+  return `${Math.round(seconds / 3_600)}h ago`;
+};
+const streamLabel = (state?: string) => {
+  switch (state) {
+    case "CURRENT":
+      return "live";
+    case "COMPLETE":
+      return "synced";
+    case "IN_PROGRESS":
+      return "syncing";
+    case "FAILED":
+      return "failed";
+    case "STALE":
+      return "stale";
+    case "PENDING":
+      return "pending";
+    default:
+      return "not started";
+  }
+};
 function connectionState(connection: {
   active?: boolean;
   retiredAt?: string | Date | null;
@@ -72,18 +96,25 @@ function connectionState(connection: {
   const health = connection.syncHealth;
   if (health?.state)
     return {
+      // A rejected key or an incompatible EA build is a configuration fact, not
+      // a network outage: saying "terminal offline" here sent traders hunting
+      // for connection problems they did not have.
       label:
-        health.state === "STALE"
-          ? "MT5 configured · terminal stale"
-          : health.state === "OFFLINE"
-            ? "MT5 configured · terminal offline"
-            : health.label || health.state,
+        health.state === "AUTH_ERROR"
+          ? "MT5 key rejected · EA not authenticated"
+          : health.state === "CONFIG_ERROR"
+            ? "MT5 configuration invalid · update the EA"
+            : health.state === "STALE"
+              ? "MT5 configured · terminal stale"
+              : health.state === "OFFLINE"
+                ? "MT5 configured · terminal offline"
+                : health.label || health.state,
       tone:
         health.state === "CONNECTED"
           ? "live"
           : health.state === "DEGRADED"
             ? "warning"
-            : health.state === "STALE" || health.state === "OFFLINE"
+            : health.state === "STALE" || health.state === "OFFLINE" || health.state === "AUTH_ERROR" || health.state === "CONFIG_ERROR"
               ? "offline"
               : "neutral",
       message: health.message || "",
@@ -406,6 +437,29 @@ export function Mt5LiveView({ account, accounts, onJournalNow, onSwitchAccount }
               {pkt(activeConnection.lastContactAt || activeConnection.lastPing)}{" "}
               PKT
             </p>
+            {/* Three independent streams: a heartbeat does not prove that live
+                positions or historical closes are still arriving. */}
+            <ul className="mt5-stream-freshness" aria-label="MT5 synchronization streams">
+              <li>
+                <span>EA heartbeat</span>
+                <strong>{ageLabel(activeConnection.syncHealth?.lastContactAgeSeconds)}</strong>
+              </li>
+              <li>
+                <span>Open positions</span>
+                <strong>{streamLabel(activeConnection.syncHealth?.openSyncState)}</strong>
+                <small>{ageLabel(activeConnection.syncHealth?.lastOpenSyncAgeSeconds)}</small>
+              </li>
+              <li>
+                <span>Account snapshot</span>
+                <strong>{streamLabel(activeConnection.syncHealth?.snapshotState)}</strong>
+                <small>{ageLabel(activeConnection.syncHealth?.lastSummaryAgeSeconds)}</small>
+              </li>
+              <li>
+                <span>Trade history</span>
+                <strong>{streamLabel(activeConnection.syncHealth?.historyState)}</strong>
+                <small>{ageLabel(activeConnection.syncHealth?.historyAgeSeconds)}</small>
+              </li>
+            </ul>
             {activeConnection.syncHealth?.state !== "CONNECTED" && (
               <p className="mt5-health-detail" role="status">
                 {activeConnection.syncHealth?.message}

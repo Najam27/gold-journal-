@@ -93,7 +93,7 @@ async function ownMt5Connection(userId: number, accountId: number, connectionId:
 async function issueMt5ConnectionKey(input: { userId: number; accountId: number; label: string; brokerUtcOffsetMinutes: number; replace: boolean }) {
   const account = await getOwnedAccount(input.userId, input.accountId);
   const db = await dbOrThrow();
-  const existing = await db.select({ id: mt5Connections.id, userId: mt5Connections.userId }).from(mt5Connections).where(eq(mt5Connections.accountId, account.id)).limit(1);
+  const existing = await db.select({ id: mt5Connections.id, userId: mt5Connections.userId, apiKey: mt5Connections.apiKey }).from(mt5Connections).where(eq(mt5Connections.accountId, account.id)).limit(1);
   if (existing[0] && !input.replace) throw new Error("This Gold Journal account already has an MT5 connection. Edit or replace it from MT5 Live.");
 
   const apiKey = randomBytes(32).toString("base64url");
@@ -101,6 +101,10 @@ async function issueMt5ConnectionKey(input: { userId: number; accountId: number;
     userId: input.userId,
     accountId: account.id,
     label: input.label,
+    // Keep the outgoing key fingerprint so a terminal still running the old key
+    // can be attributed as AUTH_REVOKED instead of reported as offline.
+    previousApiKeyHash: existing[0]?.apiKey ?? null,
+    previousApiKeyAt: existing[0] ? new Date() : null,
     apiKey: mt5ApiKeyFingerprint(apiKey),
     brokerUtcOffsetMinutes: input.brokerUtcOffsetMinutes,
     active: true,
@@ -227,7 +231,10 @@ export const goldRouter = router({
       const db = await dbOrThrow();
       const apiKey = randomBytes(32).toString("base64url");
       await db.update(mt5Connections).set({
-        apiKey: mt5ApiKeyFingerprint(apiKey), active: true,
+        apiKey: mt5ApiKeyFingerprint(apiKey),
+        previousApiKeyHash: connection.apiKey,
+        previousApiKeyAt: new Date(),
+        active: true,
         lastPing: null, lastContactAt: null, lastSummaryAt: null, lastSummarySuccessAt: null, lastSummaryErrorAt: null,
         lastOpenSyncAt: null, lastOpenSyncSuccessAt: null, lastOpenSyncErrorAt: null,
         lastErrorAt: null, lastErrorCode: null, lastErrorMessage: null, consecutiveFailures: 0,
