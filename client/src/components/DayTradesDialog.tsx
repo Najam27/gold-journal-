@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowDownRight, ArrowUpRight, Minus, Pencil, Rows3 } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Brain, ClipboardCheck, Minus, Pencil, Rows3, Target } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TradeDetailDialog } from "@/components/TradeDetailDialog";
 import { formatActualR, formatMoney, toNumber } from "@/lib/gold";
 import type { DayTradeSummary } from "@/lib/performanceSummary";
 import { PKT_TIME_ZONE, pktDateToTimestamp } from "@shared/pktDate";
+import { buildDayBehaviorReview, TRADE_CLASSIFICATION_LABELS, type BehaviorConfig } from "@/lib/psychology";
 
 /**
  * Daily performance drill-down.
@@ -39,15 +40,21 @@ function tradeTone(result: string, pnl: number) {
   return pnl > 0 ? "positive" : pnl < 0 ? "negative" : "neutral";
 }
 
-export function DayTradesDialog({ day, summary, onOpenChange, onEdit }: { day: string | null; summary: DayTradeSummary<any> | null; onOpenChange: (open: boolean) => void; onEdit?: (trade: any) => void }) {
+export function DayTradesDialog({ day, summary, plans, behaviorConfig, onOpenChange, onEdit }: { day: string | null; summary: DayTradeSummary<any> | null; plans?: any[]; behaviorConfig?: BehaviorConfig; onOpenChange: (open: boolean) => void; onEdit?: (trade: any) => void }) {
   const [viewedTrade, setViewedTrade] = useState<any>(null);
   const open = Boolean(day && summary && summary.count > 0);
   useEffect(() => { if (!open) setViewedTrade(null); }, [open]);
   // Chronological order keeps a day readable even when the journal arrives newest-first.
   const rows = useMemo(() => [...(summary?.trades ?? [])].sort((a: DayTrade, b: DayTrade) => new Date(a.tradeDate).getTime() - new Date(b.tradeDate).getTime()), [summary]);
+  // Read-only behavioural review of the same day: execution, psychology, and classification.
+  // Every figure comes from the trades already loaded in the browser plus the saved plan.
+  const review = useMemo(() => (day ? buildDayBehaviorReview(day, summary?.trades ?? [], plans, behaviorConfig) : null), [day, summary, plans, behaviorConfig]);
   if (!day || !summary) return null;
   const { tone, pnl, count, wins, losses, breakEven, open: openCount, openPnl, winRate, totalRisk, totalReward, riskTrades, rewardTrades, averagePnl, averageR } = summary;
   const trend = tone === "positive" ? <ArrowUpRight size={16} /> : tone === "negative" ? <ArrowDownRight size={16} /> : <Minus size={16} />;
+  // Average patience score for this day, when the trader rated it.
+  const patienceValues = rows.map((trade: DayTrade) => Number(trade.patienceScore)).filter((value: number) => Number.isFinite(value) && value > 0);
+  const patienceAverage = patienceValues.length ? patienceValues.reduce((sum: number, value: number) => sum + value, 0) / patienceValues.length : null;
   return <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={`day-trades-dialog ${tone}`}>
@@ -72,6 +79,40 @@ export function DayTradesDialog({ day, summary, onOpenChange, onEdit }: { day: s
           <span>Average trade <b className={`data-text ${averagePnl >= 0 ? "positive" : "negative"}`}>{formatMoney(averagePnl)}</b></span>
           {openCount > 0 && <span>Unrealized <b className={`data-text ${openPnl >= 0 ? "positive" : "negative"}`}>{formatMoney(openPnl)}</b></span>}
         </section>
+        {review && <section className="day-behavior">
+          <div className="day-behavior-grid">
+            <div className={`day-behavior-card ${review.session.planAdherence.adherence != null && review.session.planAdherence.adherence >= 80 ? "safe" : "risk"}`}>
+              <header><span>EXECUTION RESULT</span><Target size={14} /></header>
+              <ul>
+                <li><span>Plan adherence</span><b>{review.session.planAdherence.adherence == null ? "Not evaluated" : `${review.session.planAdherence.adherence.toFixed(0)}%`}</b></li>
+                <li><span>Discipline score</span><b>{review.session.discipline == null ? "Not evaluated" : `${review.session.discipline.toFixed(0)} / 100`}</b></li>
+                <li><span>Rule violations</span><b>{review.violations.length}</b></li>
+                <li><span>Unplanned trades</span><b>{review.unplannedTrades}</b></li>
+                <li><span>Pre-trade gate</span><b>{review.gateAverage == null ? "Not evaluated" : `${review.gateAverage}%`}</b></li>
+              </ul>
+            </div>
+            <div className="day-behavior-card">
+              <header><span>PSYCHOLOGY</span><Brain size={14} /></header>
+              <ul>
+                <li><span>Dominant emotion</span><b>{review.dominantEmotion ?? "Not recorded"}</b></li>
+                <li><span>Pre-session state</span><b>{review.emotionalState ?? "Not recorded"}</b></li>
+                <li><span>Behavioural objective</span><b>{review.behavioralFocus ?? "Not set"}</b></li>
+                <li><span>FOMO</span><b>{review.tags.includes("FOMO") ? "Tagged" : "None tagged"}</b></li>
+                <li><span>Revenge</span><b>{review.tags.includes("REVENGE") ? "Tagged" : "None tagged"}</b></li>
+                <li><span>Overconfidence</span><b>{review.tags.includes("OVERCONFIDENCE") ? "Tagged" : "None tagged"}</b></li>
+                <li><span>Patience average</span><b>{patienceAverage == null ? "Not rated" : `${patienceAverage.toFixed(1)} / 5`}</b></li>
+              </ul>
+            </div>
+            <div className="day-behavior-card">
+              <header><span>TRADE CLASSIFICATION</span><ClipboardCheck size={14} /></header>
+              <ul>
+                {(Object.keys(review.classifications) as (keyof typeof review.classifications)[]).filter(key => (review.classifications[key] ?? 0) > 0).map(key => <li key={key}><span><span className={`day-class-chip ${key === "GOOD_WIN" || key === "GOOD_LOSS" ? "safe" : "risk"}`}>{TRADE_CLASSIFICATION_LABELS[key]}</span></span><b className="data-text">{review.classifications[key]}</b></li>)}
+              </ul>
+            </div>
+          </div>
+          <p className="day-behavior-lesson"><b>Lesson: </b>{review.lesson || review.reviewed ? review.lesson || "No written lesson was saved for this session." : "No session review was saved for this day, so this is an execution-only read."}</p>
+          {review.duplicateWarnings.length > 0 && <p className="day-behavior-lesson">{review.duplicateWarnings.join(" ")}</p>}
+        </section>}
         <section className="day-dialog-trades">
           <header><span>TRADES ON THIS DAY</span><small>{trend} {tone === "positive" ? "Profitable day" : tone === "negative" ? "Losing day" : "Flat day"}</small></header>
           <ul className="day-trade-list">

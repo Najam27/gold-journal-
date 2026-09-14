@@ -1,5 +1,5 @@
 import { and, desc, eq, gte } from "./supabaseQuery";
-import { accounts, cashMovements, dailyPlans, goals, skippedTrades, trades } from "../drizzle/schema";
+import { accounts, cashMovements, dailyPlans, goals, skippedTrades, traderProfiles, trades } from "../drizzle/schema";
 import { storageGetSignedUrl } from "./storage";
 import { getSupabaseAdmin } from "./supabaseAdmin";
 import { getDb } from "./db";
@@ -53,7 +53,7 @@ export async function getJournal(userId: number, accountId?: number) {
   const db = await requireDb();
   const activeAccount = await getOwnedAccount(userId, accountId);
   const goalWindowStart = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000);
-  const [accountList, tradeList, goalTradeList, movementList, goalList, skippedList, planList] = await Promise.all([
+  const [accountList, tradeList, goalTradeList, movementList, goalList, skippedList, planList, profileList] = await Promise.all([
     db.select().from(accounts).where(eq(accounts.userId, userId)).orderBy(desc(accounts.createdAt)).limit(1_000),
     db.select().from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, activeAccount.id))).orderBy(desc(trades.tradeDate)).limit(500),
     db.select().from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, activeAccount.id), gte(trades.tradeDate, goalWindowStart))).orderBy(desc(trades.tradeDate)).limit(10_000),
@@ -61,7 +61,9 @@ export async function getJournal(userId: number, accountId?: number) {
     db.select().from(goals).where(and(eq(goals.userId, userId), eq(goals.accountId, activeAccount.id), eq(goals.isCustom, true))).orderBy(goals.period, goals.createdAt).limit(200),
     db.select().from(skippedTrades).where(and(eq(skippedTrades.userId, userId), eq(skippedTrades.accountId, activeAccount.id))).orderBy(desc(skippedTrades.tradeDate)).limit(500),
     db.select().from(dailyPlans).where(and(eq(dailyPlans.userId, userId), eq(dailyPlans.accountId, activeAccount.id))).orderBy(desc(dailyPlans.planDate)).limit(500),
+    db.select().from(traderProfiles).where(eq(traderProfiles.userId, userId)).limit(1),
   ]);
+  const profileRow = profileList[0] as { identityStatement?: string | null; disciplineWeights?: unknown; behaviorConfig?: unknown } | undefined;
   const [cashResult, tradeSummaryResult] = await Promise.allSettled([getAccountCashNet(userId, activeAccount.id), getAccountTradeSummary(userId, activeAccount.id)]);
   const cashNet = resolveDerivedCashNet(cashResult);
   const cashNetValue = cashNet.source === "rpc" ? cashNet.value : movementList.reduce((total, movement) => total + (movement.type === "DEPOSIT" ? Number(movement.amount ?? 0) : -Number(movement.amount ?? 0)), 0);
@@ -84,6 +86,13 @@ export async function getJournal(userId: number, accountId?: number) {
     goals: goalList.map(toSafeJournalRecord),
     skippedTrades: skippedList.map(toSafeJournalRecord),
     dailyPlans: planList.map(toSafeJournalRecord),
+    // Behavioural configuration travels with the journal so the behavioural
+    // scoring, focus, and cooldown model needs no extra network round trip.
+    traderProfile: {
+      identityStatement: profileRow?.identityStatement ?? "",
+      disciplineWeights: (profileRow?.disciplineWeights ?? null) as Record<string, number> | null,
+      behaviorConfig: (profileRow?.behaviorConfig ?? null) as Record<string, number | null> | null,
+    },
   };
 }
 

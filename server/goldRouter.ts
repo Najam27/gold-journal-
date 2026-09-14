@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { accounts, cashMovements, dailyPlans, goals, mt5Connections, mt5LivePositions, notificationHistory, notificationSettings, optionLists, skippedTrades, trades } from "../drizzle/schema";
+import { accounts, cashMovements, dailyPlans, goals, mt5Connections, mt5LivePositions, notificationHistory, notificationSettings, optionLists, skippedTrades, traderProfiles, trades } from "../drizzle/schema";
 import { ensureAccount, getJournal, getOwnedAccount, ownsTrade } from "./goldDb";
 import { getDb } from "./db";
 import { normalizeAccountName } from "./accountIdentity";
@@ -42,6 +42,13 @@ const goalInput = z.object({ accountId: z.number().int().positive(), name: z.str
   if (!lossFloorMetrics.has(value.metric) && value.target < 0) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["target"], message: "Only loss-floor controls can use a negative threshold." });
 });
 
+// Behavioural evidence saved with a trade. Both fields stay optional so a
+// manual entry, a queued offline write, and an untouched MT5 import all work.
+const planChecklistInput = z.array(z.object({ id: z.string().trim().min(1).max(80), label: z.string().trim().max(160).optional(), checked: z.boolean() })).max(20).nullable().optional().default(null);
+const planStatusInput = z.enum(["PLANNED", "UNPLANNED", "NOT_EVALUATED"]).nullable().optional().default(null);
+const disciplineWeightsInput = z.object({ risk: z.number().min(0).max(100), plan: z.number().min(0).max(100), setup: z.number().min(0).max(100), execution: z.number().min(0).max(100), overtrading: z.number().min(0).max(100), journal: z.number().min(0).max(100), psychology: z.number().min(0).max(100) }).strict();
+const behaviorConfigInput = z.object({ maxTradesPerDay: z.number().int().min(1).max(99).nullable(), maxRiskPerTrade: z.number().finite().min(0).max(MAX_MONEY).nullable(), maxDailyLoss: z.number().finite().min(0).max(MAX_MONEY).nullable(), cooldownAfterLosses: z.number().int().min(1).max(10), planAdherenceTarget: z.number().min(0).max(100), focusTarget: z.number().min(0).max(100) }).strict();
+
 const tradeInput = z.object({
   accountId: z.number().int().positive(),
   tradeDate: timestampInput,
@@ -67,6 +74,8 @@ const tradeInput = z.object({
   emotionBefore: optionalText(2000),
   emotionDuring: optionalText(2000),
   emotionAfter: optionalText(2000),
+  planStatus: planStatusInput,
+  planChecklist: planChecklistInput,
   mt5Ticket: mt5TicketInput,
   clientMutationId: clientMutationIdInput,
 });
@@ -295,6 +304,7 @@ export const goldRouter = router({
         tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality, patienceScore: input.patienceScore,
         risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null, pnl: input.pnl.toFixed(2),
         notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
+        planStatus: input.planStatus, planChecklist: input.planChecklist,
         mt5Ticket: input.mt5Ticket ? BigInt(input.mt5Ticket) : null, clientMutationId: input.clientMutationId ?? null,
       }).returning({ id: trades.id });
       return { id: inserted[0].id, replayed: false };
@@ -318,6 +328,7 @@ export const goldRouter = router({
         slPlacement: input.slPlacement, tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality,
         patienceScore: input.patienceScore, risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null,
         pnl: input.pnl.toFixed(2), notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
+        planStatus: input.planStatus, planChecklist: input.planChecklist,
         mt5Ticket: nextTicket,
       }).where(and(eq(trades.id, current.id), eq(trades.userId, ctx.user.id)));
       return { success: true };
@@ -384,6 +395,26 @@ export const goldRouter = router({
       await getOwnedAccount(ctx.user.id, input.accountId);
       const db = await dbOrThrow();
       await db.delete(goals).where(and(eq(goals.userId, ctx.user.id), eq(goals.accountId, input.accountId)));
+      return { success: true };
+    }),
+  }),
+  // Behavioural configuration: one row per user holding the identity statement,
+  // the configurable discipline-score weights, and the cooldown thresholds.
+  profile: router({
+    get: protectedProcedure.query(async ({ ctx }) => {
+      const db = await dbOrThrow();
+      const rows = await db.select().from(traderProfiles).where(eq(traderProfiles.userId, ctx.user.id)).limit(1);
+      const row = rows[0] as { identityStatement?: string | null; disciplineWeights?: unknown; behaviorConfig?: unknown } | undefined;
+      return {
+        identityStatement: row?.identityStatement ?? "",
+        disciplineWeights: (row?.disciplineWeights ?? null) as Record<string, number> | null,
+        behaviorConfig: (row?.behaviorConfig ?? null) as Record<string, number | null> | null,
+      };
+    }),
+    save: protectedProcedure.input(z.object({ identityStatement: optionalText(400), disciplineWeights: disciplineWeightsInput.nullable().optional().default(null), behaviorConfig: behaviorConfigInput.nullable().optional().default(null) })).mutation(async ({ ctx, input }) => {
+      const db = await dbOrThrow();
+      const values = { userId: ctx.user.id, identityStatement: input.identityStatement, disciplineWeights: input.disciplineWeights, behaviorConfig: input.behaviorConfig };
+      await db.insert(traderProfiles).values(values).onConflictDoUpdate({ target: traderProfiles.userId, set: { identityStatement: input.identityStatement, disciplineWeights: input.disciplineWeights, behaviorConfig: input.behaviorConfig, updatedAt: new Date() } });
       return { success: true };
     }),
   }),
@@ -454,10 +485,10 @@ export const goldRouter = router({
     }),
   }),
   plans: router({
-    save: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), planDate: timestampInput, preBias: optionalText(40), marketContext: optionalText(3000), keyLevels: optionalText(3000), sessionFocus: z.array(z.string().trim().max(120)).max(9), eventRisk: optionalText(1500), longScenario: optionalText(3000), shortScenario: optionalText(3000), noTradeCondition: optionalText(2000), invalidationLevel: optionalText(1000), riskLimit: optionalText(40), maxTrades: z.number().int().min(1).max(99).nullable(), sizingPlan: optionalText(2000), planNotes: optionalText(5000), rulesPlanned: z.array(z.object({ id: z.string().trim().min(1).max(80), text: z.string().trim().max(500), checked: z.boolean() })).max(30), emotionStart: z.array(z.string().trim().max(80)).max(20), emotionEnd: z.array(z.string().trim().max(80)).max(20), executionScore: z.number().int().min(1).max(5).nullable(), rulesFollowed: z.array(z.object({ id: z.string().trim().min(1).max(80), yes: z.boolean() })).max(30), whatWentWell: optionalText(5000), whatWentWrong: optionalText(5000), executionNotes: optionalText(5000), planDeviation: optionalText(5000), lessons: optionalText(2000), tomorrowFocus: optionalText(2000), overallRating: z.number().int().min(1).max(5).nullable() })).mutation(async ({ ctx, input }) => {
+    save: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), planDate: timestampInput, preBias: optionalText(40), marketContext: optionalText(3000), keyLevels: optionalText(3000), sessionFocus: z.array(z.string().trim().max(120)).max(9), eventRisk: optionalText(1500), longScenario: optionalText(3000), shortScenario: optionalText(3000), noTradeCondition: optionalText(2000), invalidationLevel: optionalText(1000), riskLimit: optionalText(40), maxTrades: z.number().int().min(1).max(99).nullable(), sizingPlan: optionalText(2000), planNotes: optionalText(5000), rulesPlanned: z.array(z.object({ id: z.string().trim().min(1).max(80), text: z.string().trim().max(500), checked: z.boolean() })).max(30), emotionalState: z.enum(["", "Calm", "Neutral", "Anxious", "Frustrated", "Overconfident", "Tired"]).optional().default(""), energyLevel: z.number().int().min(1).max(5).nullable().optional().default(null), focusLevel: z.number().int().min(1).max(5).nullable().optional().default(null), confidenceLevel: z.number().int().min(1).max(5).nullable().optional().default(null), stressLevel: z.number().int().min(1).max(5).nullable().optional().default(null), behavioralFocus: optionalText(80), psychologyRisk: optionalText(1000), emotionStart: z.array(z.string().trim().max(80)).max(20), emotionEnd: z.array(z.string().trim().max(80)).max(20), executionScore: z.number().int().min(1).max(5).nullable(), rulesFollowed: z.array(z.object({ id: z.string().trim().min(1).max(80), yes: z.boolean() })).max(30), whatWentWell: optionalText(5000), whatWentWrong: optionalText(5000), executionNotes: optionalText(5000), planDeviation: optionalText(5000), lessons: optionalText(2000), tomorrowFocus: optionalText(2000), overallRating: z.number().int().min(1).max(5).nullable() })).mutation(async ({ ctx, input }) => {
       await getOwnedAccount(ctx.user.id, input.accountId);
       const db = await dbOrThrow();
-      const record = { userId: ctx.user.id, accountId: input.accountId, planDate: canonicalPktPlanDate(input.planDate), preBias: input.preBias, marketContext: input.marketContext, keyLevels: input.keyLevels, sessionFocus: input.sessionFocus, eventRisk: input.eventRisk, longScenario: input.longScenario, shortScenario: input.shortScenario, noTradeCondition: input.noTradeCondition, invalidationLevel: input.invalidationLevel, riskLimit: input.riskLimit, maxTrades: input.maxTrades, sizingPlan: input.sizingPlan, planNotes: input.planNotes, rulesPlanned: input.rulesPlanned, emotionStart: input.emotionStart.join("|"), emotionEnd: input.emotionEnd.join("|"), executionScore: input.executionScore, rulesFollowed: input.rulesFollowed, whatWentWell: input.whatWentWell, whatWentWrong: input.whatWentWrong, executionNotes: input.executionNotes, planDeviation: input.planDeviation, lessons: input.lessons, tomorrowFocus: input.tomorrowFocus, overallRating: input.overallRating };
+      const record = { userId: ctx.user.id, accountId: input.accountId, planDate: canonicalPktPlanDate(input.planDate), preBias: input.preBias, marketContext: input.marketContext, keyLevels: input.keyLevels, sessionFocus: input.sessionFocus, eventRisk: input.eventRisk, longScenario: input.longScenario, shortScenario: input.shortScenario, noTradeCondition: input.noTradeCondition, invalidationLevel: input.invalidationLevel, riskLimit: input.riskLimit, maxTrades: input.maxTrades, sizingPlan: input.sizingPlan, planNotes: input.planNotes, rulesPlanned: input.rulesPlanned, emotionalState: input.emotionalState || null, energyLevel: input.energyLevel, focusLevel: input.focusLevel, confidenceLevel: input.confidenceLevel, stressLevel: input.stressLevel, behavioralFocus: input.behavioralFocus, psychologyRisk: input.psychologyRisk, emotionStart: input.emotionStart.join("|"), emotionEnd: input.emotionEnd.join("|"), executionScore: input.executionScore, rulesFollowed: input.rulesFollowed, whatWentWell: input.whatWentWell, whatWentWrong: input.whatWentWrong, executionNotes: input.executionNotes, planDeviation: input.planDeviation, lessons: input.lessons, tomorrowFocus: input.tomorrowFocus, overallRating: input.overallRating };
       await db.insert(dailyPlans).values(record).onConflictDoUpdate({ target: [dailyPlans.userId, dailyPlans.accountId, dailyPlans.planDate], set: record });
       return { success: true };
     }),

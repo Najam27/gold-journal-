@@ -84,6 +84,7 @@ import { AccountRenameControl } from "@/components/AccountRenameControl";
 import { OptionListManager } from "@/components/OptionListManager";
 import { BulkPdfExporter } from "@/components/BulkPdfExporter";
 import { assessTraderGoal } from "@/lib/traderGoals";
+import { behaviorConfigFromProfile, buildTraderDevelopment, PRE_TRADE_GATE_ITEMS } from "@/lib/psychology";
 import { toast } from "sonner";
 import {
   Activity,
@@ -158,6 +159,10 @@ type TradeForm = {
   emotionBefore: string;
   emotionDuring: string;
   emotionAfter: string;
+  /** "" records "not evaluated" for MT5 imports and untouched entries. */
+  planStatus: "" | "PLANNED" | "UNPLANNED";
+  /** Pipe-separated ids of the confirmed pre-trade checklist items. */
+  planChecklist: string;
   mt5Ticket: string;
 };
 
@@ -227,6 +232,8 @@ export function defaultTrade(): TradeForm {
     emotionBefore: "",
     emotionDuring: "",
     emotionAfter: "",
+    planStatus: "",
+    planChecklist: "",
     mt5Ticket: "",
   };
 }
@@ -630,6 +637,20 @@ export default function GoldJournal() {
   const activeMt5Connection = mt5Workspace.data?.connections?.find(
     (connection: any) => connection.active
   );
+  // Behavioural layer. One memoised development report is shared by the Goals
+  // page, the calendar drill-down, and the cooldown banner, so the expensive
+  // pass over the journal never runs during a render.
+  const behaviorConfig = useMemo(() => behaviorConfigFromProfile((data as any)?.traderProfile), [(data as any)?.traderProfile]);
+  const development = useMemo(
+    () =>
+      buildTraderDevelopment({
+        trades: goalTrades,
+        plans: (data as any)?.dailyPlans,
+        traderProfile: (data as any)?.traderProfile,
+      }),
+    [goalTrades, (data as any)?.dailyPlans, (data as any)?.traderProfile]
+  );
+  const saveProfile = trpc.profile.save.useMutation();
   const goalEntries = useMemo(
     () =>
       (data?.goals ?? []).map((goal: any) =>
@@ -760,6 +781,8 @@ export default function GoldJournal() {
       emotionBefore: trade.emotionBefore || "",
       emotionDuring: trade.emotionDuring || "",
       emotionAfter: trade.emotionAfter || "",
+      planStatus: trade.planStatus === "PLANNED" || trade.planStatus === "UNPLANNED" ? trade.planStatus : "",
+      planChecklist: Array.isArray(trade.planChecklist) ? (trade.planChecklist as { id?: string; checked?: boolean }[]).filter(item => item?.checked && item.id).map(item => String(item.id)).join("|") : "",
       mt5Ticket: trade.mt5Ticket ? String(trade.mt5Ticket) : "",
     });
     setScreenshot(undefined);
@@ -808,6 +831,12 @@ export default function GoldJournal() {
       emotionBefore: tradeForm.emotionBefore,
       emotionDuring: tradeForm.emotionDuring,
       emotionAfter: tradeForm.emotionAfter,
+      // "Not evaluated" is only recorded as such; a confirmed checklist is saved with its labels
+      // so the engine and the calendar can re-read the same evidence later.
+      planStatus: tradeForm.planStatus === "PLANNED" || tradeForm.planStatus === "UNPLANNED" ? tradeForm.planStatus : null,
+      planChecklist: tradeForm.planChecklist
+        ? PRE_TRADE_GATE_ITEMS.map(item => ({ id: item.id, label: item.label, checked: tradeForm.planChecklist.split("|").includes(item.id) }))
+        : null,
       mt5Ticket: tradeForm.mt5Ticket || undefined,
     };
     // A new trade with a screenshot while online is saved directly so the image
@@ -1051,6 +1080,16 @@ export default function GoldJournal() {
           <QueryError error={journalError} onRetry={retryJournal} />
         ) : (
           <div className="view-wrap">
+            {development.cooldown.status !== "CLEAR" && (view === "trades" || view === "goals" || view === "plan") && (
+              <section className={`behavior-banner ${development.cooldown.status === "SESSION_COMPLETE" ? "complete" : ""}`} role="status">
+                <ShieldAlert size={17} />
+                <p>
+                  <strong>{development.cooldown.status === "SESSION_COMPLETE" ? "SESSION COMPLETE" : "COOLDOWN"}</strong>
+                  <span>{development.cooldown.message} {development.cooldown.actions[0] ?? ""}</span>
+                </p>
+                <button type="button" onClick={() => setView("goals")}>Review development</button>
+              </section>
+            )}
             {view === "trades" && (
               <TradeLog
                 stats={stats}
@@ -1127,6 +1166,18 @@ export default function GoldJournal() {
                 goals={data?.goals ?? []}
                 trades={goalTrades}
                 plans={data?.dailyPlans ?? []}
+                report={development}
+                identityStatement={(data as any)?.traderProfile?.identityStatement ?? ""}
+                profilePending={saveProfile.isPending}
+                onSaveIdentity={async (statement: string) => {
+                  try {
+                    await saveProfile.mutateAsync({ identityStatement: statement });
+                    toast.success("Trading identity saved.");
+                    refresh();
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : "The identity statement could not be saved.");
+                  }
+                }}
                 pending={
                   createGoal.isPending ||
                   updateGoal.isPending ||
@@ -1168,7 +1219,12 @@ export default function GoldJournal() {
               />
             )}
             {view === "calendar" && (
-              <CalendarView trades={trades} onEdit={openEdit} />
+              <CalendarView
+                trades={trades}
+                plans={data?.dailyPlans ?? []}
+                behaviorConfig={behaviorConfig}
+                onEdit={openEdit}
+              />
             )}
             {view === "plan" && (
               <PlanView
@@ -1224,6 +1280,9 @@ export default function GoldJournal() {
         screenshot={screenshot}
         setScreenshot={setScreenshot}
         progress={uploadProgress}
+        plans={data?.dailyPlans ?? []}
+        dayTrades={(trades as any[]).filter((trade: any) => dateInput(new Date(trade.tradeDate)) === tradeForm.tradeDate)}
+        behaviorConfig={behaviorConfig}
       />
       <CashDialog
         type={cashDialog}

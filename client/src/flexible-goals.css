@@ -28,6 +28,11 @@
 .period-filter { display: inline-flex; align-items: center; gap: 3px; padding: 3px; border: 1px solid var(--gj-line); border-radius: 8px; background: var(--gj-panel); }
 .period-filter button { height: 29px; padding: 0 9px; border-radius: 5px; color: var(--gj-subtext); font-size: 10px; background: transparent; }
 .period-filter button.active { color: var(--gj-gold-text); background: color-mix(in srgb, var(--gj-gold) 16%, transparent); }
+.domain-filter { border-style: dashed; }
+.control-library button em { color: var(--gj-dim); font: 800 7px "DM Mono", monospace; letter-spacing: .1em; font-style: normal; }
+.control-library button.selected em { color: var(--gj-gold); }
+.control-table-header { flex-wrap: wrap; }
+.goals-workspace-header b { color: var(--gj-gold-text); font-weight: 700; }
 .control-table-wrap { overflow-x: auto; }
 .control-table { width: 100%; min-width: 1000px; border-collapse: collapse; }
 .control-table th { padding: 10px 14px; color: var(--gj-dim); border-bottom: 1px solid var(--gj-line); font: 800 8px "DM Mono", monospace; letter-spacing: .09em; text-align: left; background: var(--gj-panel-2); }
