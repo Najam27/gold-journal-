@@ -313,6 +313,13 @@ void MarkEventSuccess(string expectedEvent, string connection_reference, string 
 void MarkEventFailure(string expectedEvent, int status, string detail, int retry_after_seconds = 0) {
    datetime now = TimeCurrent();
    if(status == 401 || status == 403) {
+      if(status != g_config_last_auth_status) {
+         g_config_last_auth_status = status;
+         g_config_auth_streak = 0;
+      } else {
+         g_config_auth_streak++;
+      }
+
       g_config_failures++;
       g_requires_revalidation = true;
       int delay = BackoffSeconds(g_config_failures, MAX_CONFIG_RETRY_SECONDS);
@@ -327,6 +334,13 @@ void MarkEventFailure(string expectedEvent, int status, string detail, int retry
       return;
    }
    if(status == 404 || status == 405) {
+      if(status != g_config_last_endpoint_status) {
+         g_config_last_endpoint_status = status;
+         g_config_endpoint_streak = 0;
+      } else {
+         g_config_endpoint_streak++;
+      }
+
       g_config_failures++;
       g_requires_revalidation = true;
       int delay = BackoffSeconds(g_config_failures, MAX_CONFIG_RETRY_SECONDS);
@@ -348,10 +362,9 @@ void MarkEventFailure(string expectedEvent, int status, string detail, int retry
          PrintFormat("[MT5 LIVE] server rejected this payload; operation=%s; http=%d; code=%s; retry_in=%ds. This is a payload/version/configuration mismatch, not a network outage: re-download the EA from Gold Journal MT5 Live and replace the copy on the chart. The EA keeps probing and resumes automatically.", expectedEvent, status, detail == "" ? "-" : detail, delay);
          g_payload_warning_logged = true;
       } else {
-         PrintFormat("[MT5 LIVE] payload still rejected; operation=%s; http=%d; code=%s; failures=%d; retry_in=%ds", expectedEvent, status, detail == "" ? "-" : detail, g_config_failures, delay);
-      }
-      SetState(EA_CONFIG_ERROR);
-      return;
+         PrintFormat("[MT5 LIVE] payload still rejected; operation=%s; http=%d; code=%s; failures=%d; retry_in=%ds", expectedEvent, status, detail == "" ? "-" : detail, g_config_failures, delay);       }
+       SetState(EA_CONFIG_ERROR);
+       return;
    }
    g_consecutive_failures++;
    // A 429 response may carry Retry-After; honoring it backs off exactly as
@@ -364,6 +377,7 @@ void MarkEventFailure(string expectedEvent, int status, string detail, int retry
       PrintFormat("[MT5 LIVE] server temporarily unavailable; operation=%s; http=%d; server_code=%s; failures=%d; retry_in=%ds", expectedEvent, status, detail == "" ? "-" : detail, g_consecutive_failures, retry_delay);
    }
    SetState(EA_RECONNECTING);
+   return;
 }
 
 // A request is only attempted when the retry gate is open, the credential or
@@ -947,6 +961,15 @@ void SendHistory(bool fullReplay) {
       added++;
       DequeuePendingTicket(position_id);
    }
+
+   // One batch arrives at the server per timer cycle during a multi-batch
+   // backfill. A still-open snapshot is therefore harmless because the start of
+   // the next batch is capped at HISTORY_BATCH_COOLDOWN_SECONDS; but a heartbeat
+   // or revalidation probe can arrive sooner than that, and the dashboard already
+   // knows this account is OPEN, so SendHeartbeat/Compat is allowed through while
+   // a history batch is in progress.
+   g_history_batch_cooldown_until = now + HISTORY_BATCH_COOLDOWN_SECONDS;
+
    positions += "]";
    bool complete = cursor >= position_count;
    string payload = "{\"event\":\"history_batch\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\",\"broker_utc_offset_minutes\":" + IntegerToString(BrokerUtcOffsetMinutes) + ",\"positions\":" + positions + ",\"complete\":" + (complete ? "true" : "false") + "}";
