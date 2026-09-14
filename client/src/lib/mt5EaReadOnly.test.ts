@@ -16,7 +16,8 @@ describe("Gold Journal MT5 EA read-only contract", () => {
   it("uses the trade-transaction event only as a passive close-notification listener", () => {
     expect(source).toContain("void OnTradeTransaction(const MqlTradeTransaction &transaction, const MqlTradeRequest &request, const MqlTradeResult &result)");
     expect(source).toContain("if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_OUT_BY && entry != DEAL_ENTRY_INOUT) return;");
-    expect(source).toContain("SendHistory(false);");
+    expect(source).toContain("RequestIncrementalHistory();");
+    // The notification parameters are never dereferenced anywhere in the EA.
     expect(source).not.toMatch(/\b(request|result)\s*\./);
   });
 

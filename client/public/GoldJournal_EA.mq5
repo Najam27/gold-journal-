@@ -1,5 +1,5 @@
 #property strict
-#property version   "2.15"
+#property version   "2.16"
 #property description "Gold Journal read-only journal bridge: never places or manages trades; sends account, position, and history facts to Gold Journal."
 
 input string Endpoint = "__GOLD_JOURNAL_MT5_ENDPOINT__";
@@ -11,8 +11,14 @@ input int HeartbeatSeconds = 30;
 input int HistoryDays = 3650;
 input bool SendHistoryOnInit = true;
 input string RiskSymbol = "";
+// Ceiling for the transient-failure backoff (1,2,4,8,15,30,60 by default).
+// Configurable so a flaky network can trade speed against request volume.
+input int MaxRetrySeconds = 60;
+// Maximum size of one open-position request (the backend rejects larger
+// batches), so this must never exceed its 200-position cap.
+input int MaxOpenPositionsPerBatch = 200;
 
-const string EA_VERSION = "2.15.0";
+const string EA_VERSION = "2.16.0";
 const string PAYLOAD_VERSION = "2";
 const int REQUEST_TIMEOUT_MS = 15000;
 const int HISTORY_BATCH_SIZE = 50;
@@ -31,18 +37,43 @@ const int RECONCILE_MAX_RETRY_SECONDS = 3600;
 const int RECONCILE_HISTORY_ESCALATION_DAYS = 730;
 const int WIDE_HISTORY_SELECT_MIN_INTERVAL_SECONDS = 300;
 const int FULL_HISTORY_RETRY_SECONDS = 24 * 60 * 60;
+// One close batch per timer cycle while a multi-batch backfill walks its
+// cursor: two heavy batches back to back would fight the open-position stream
+// for the same WebRequest slot every three seconds.
+const int HISTORY_BATCH_COOLDOWN_SECONDS = 12;
 const int QUICK_HISTORY_WINDOW_SECONDS = 24 * 60 * 60;
 // Even with no close event at all, a bounded incremental sweep runs this often
 // so a missed OnTradeTransaction can never leave a closed trade OPEN for a day.
 const int HISTORY_SWEEP_SECONDS = 900;
+// Default ceiling for the transient backoff when the MaxRetrySeconds input is
+// not overridden.
 const int MAX_RETRY_BACKOFF_SECONDS = 60;
 // Configuration or credential problems must never become a permanent dead
 // state. They back off further (five minutes) but are always retried, so
 // correcting the key or endpoint recovers the EA without re-attaching it.
 const int MAX_CONFIG_RETRY_SECONDS = 300;
+// Backoff ceiling as a clamped input (<=0 input falls back to the default).
+const int DEFAULT_OPEN_BATCH_SIZE = 200;
+// Absolute upper bound for the configurable transient-backoff ceiling, so an
+// unusual input can never silence the EA for hours.
+const int MAX_RETRY_CEILING_SECONDS = 900;
+// After this many seconds a position that failed reconstruction goes back in
+// the pending queue, so "skipped" never becomes "forgotten".
+const int PENDING_HISTORY_RETRY_SECONDS = 60;
+// Hard bound for the pending-history queue: keeps memory and retries bounded
+// even if a broker's history cache stays empty for a long stretch.
+const int MAX_PENDING_HISTORY_TICKETS = 500;
+// A 429 Retry-After value is honored up to this bound (rate-limit windows can
+// legitimately be minutes long; longer values are clamped to keep the EA live).
+const int MAX_RETRY_AFTER_HONOR_SECONDS = 900;
+// A price above this absolute bound is treated as malformed data instead of
+// being forwarded as-is (guards against garbage numeric values).
+const double MAX_PLAUSIBLE_PRICE = 1000000.0;
 
 // Connection state machine. A single failed call moves the EA to RECONNECTING;
-// it never destroys its ability to recover.
+// it never destroys its ability to recover. AUTH_ERROR and CONFIG_ERROR are
+// distinct latched-but-recoverable states: they tell the trader exactly which
+// knob is wrong (key vs endpoint) instead of showing a generic offline.
 enum ENUM_EA_STATE
 {
    EA_INIT = 0,
@@ -51,7 +82,9 @@ enum ENUM_EA_STATE
    EA_SYNCING = 3,
    EA_HEALTHY = 4,
    EA_RECONNECTING = 5,
-   EA_ERROR = 6
+   EA_AUTH_ERROR = 6,
+   EA_CONFIG_ERROR = 7,
+   EA_ERROR = 8
 };
 
 datetime g_last_history_sync = 0;
@@ -76,6 +109,30 @@ bool g_history_in_progress = false;
 bool g_history_full_replay = true;
 int g_history_cursor = 0;
 bool g_payload_warning_logged = false;
+// Set when the EA is loaded with missing/invalid inputs. The EA stays on the
+// chart in CONFIG_ERROR, prints one actionable line, and re-evaluates the
+// inputs on every timer so a corrected key/endpoint recovers without removal.
+bool g_config_invalid = false;
+// Pending-history retry queue: positions whose closing deals exist but could
+// not be reconstructed yet, or whose batch failed transiently. They are
+// retried until they send successfully, so "skipped" never becomes data loss.
+ulong g_pending_tickets[];
+datetime g_pending_next_at[];
+int g_pending_count = 0;
+// Working set of the current history job, kept between timer cycles so the
+// batch cursor walks one stable snapshot instead of re-selecting history
+// (which would shift indexes under the cursor mid-run).
+ulong g_history_position_ids[];
+int g_history_position_count = 0;
+// Set when a close transaction arrives while a history job is already
+// running; Sync() then reruns the sweep instead of silently dropping it.
+bool g_history_retry_requested = false;
+// Before this time, one history batch per cycle: a multi-batch backfill must
+// spread out instead of hammering the API every 3 seconds.
+datetime g_history_batch_cooldown_until = 0;
+// Detects a backwards clock jump (VPS/VM time resync) so schedules computed
+// from an earlier TimeCurrent() cannot silently extend into the future.
+datetime g_last_timer_now = 0;
 ulong g_deal_position_id = 0;
 string g_connection_reference = "";
 string g_data_source_reference = "";
@@ -102,6 +159,8 @@ string StateLabel(ENUM_EA_STATE state)
       case EA_SYNCING:      return "SYNCING";
       case EA_HEALTHY:      return "HEALTHY";
       case EA_RECONNECTING: return "RECONNECTING";
+      case EA_AUTH_ERROR:   return "AUTH_ERROR";
+      case EA_CONFIG_ERROR: return "CONFIG_ERROR";
       case EA_ERROR:        return "ERROR";
    }
    return "UNKNOWN";
@@ -165,7 +224,17 @@ int BackoffSeconds(int failures, int ceiling)
    int jitter = MathRand() % MathMax(1, MathMax(SyncSeconds, 1));
    return MathMax(1, MathMin(ceiling, base_delay + jitter));
 }
-int RetryDelaySeconds() { return BackoffSeconds(g_consecutive_failures, MAX_RETRY_BACKOFF_SECONDS); }
+
+// Transient-failure ceiling comes from the clamped MaxRetrySeconds input so a
+// network with longer outages can wait longer between attempts.
+int EffectiveMaxRetrySeconds() { return MaxRetrySeconds > 0 ? MathMin(MaxRetrySeconds, MAX_RETRY_CEILING_SECONDS) : MAX_RETRY_BACKOFF_SECONDS; }
+int RetryDelaySeconds() { return BackoffSeconds(g_consecutive_failures, EffectiveMaxRetrySeconds()); }
+// Open-batch size comes from the clamped input and can never exceed the
+// backend's 200-position atomic-RPC cap.
+int OpenBatchSize() {
+   int requested = MaxOpenPositionsPerBatch > 0 ? MaxOpenPositionsPerBatch : DEFAULT_OPEN_BATCH_SIZE;
+   return MathMin(requested, MAX_OPEN_POSITIONS_PER_BATCH);
+}
 
 string JsonStringValue(string json, string field) {
    string prefix = "\"" + field + "\":\"";
@@ -227,6 +296,7 @@ void MarkEventSuccess(string expectedEvent, string connection_reference, string 
    g_consecutive_failures = 0;
    g_config_failures = 0;
    g_next_retry_at = 0;
+   g_history_batch_cooldown_until = 0;
    g_last_contact_ok_at = now;
    if(g_requires_revalidation) {
       Print("[MT5 LIVE] authentication/config revalidation succeeded; resuming full synchronization.");
@@ -240,7 +310,7 @@ void MarkEventSuccess(string expectedEvent, string connection_reference, string 
 
 // Records a recoverable failure. Every path schedules a retry; none of them can
 // leave the EA permanently dead until the user intervenes.
-void MarkEventFailure(string expectedEvent, int status, string detail) {
+void MarkEventFailure(string expectedEvent, int status, string detail, int retry_after_seconds = 0) {
    datetime now = TimeCurrent();
    if(status == 401 || status == 403) {
       g_config_failures++;
@@ -253,7 +323,7 @@ void MarkEventFailure(string expectedEvent, int status, string detail) {
       } else {
          PrintFormat("[MT5 LIVE] auth probe still failing; operation=%s; http=%d; failures=%d; retry_in=%ds", expectedEvent, status, g_config_failures, delay);
       }
-      SetState(EA_ERROR);
+      SetState(EA_AUTH_ERROR);
       return;
    }
    if(status == 404 || status == 405) {
@@ -267,7 +337,7 @@ void MarkEventFailure(string expectedEvent, int status, string detail) {
       } else {
          PrintFormat("[MT5 LIVE] endpoint probe still failing; operation=%s; http=%d; retry_in=%ds", expectedEvent, status, delay);
       }
-      SetState(EA_ERROR);
+      SetState(EA_CONFIG_ERROR);
       return;
    }
    if(IsNonRetryableCode(detail) || (status >= 400 && !IsTransientStatus(status))) {
@@ -280,11 +350,13 @@ void MarkEventFailure(string expectedEvent, int status, string detail) {
       } else {
          PrintFormat("[MT5 LIVE] payload still rejected; operation=%s; http=%d; code=%s; failures=%d; retry_in=%ds", expectedEvent, status, detail == "" ? "-" : detail, g_config_failures, delay);
       }
-      SetState(EA_ERROR);
+      SetState(EA_CONFIG_ERROR);
       return;
    }
    g_consecutive_failures++;
-   int retry_delay = RetryDelaySeconds();
+   // A 429 response may carry Retry-After; honoring it backs off exactly as
+   // long as the server asks (bounded) instead of hammering the rate limiter.
+   int retry_delay = retry_after_seconds > 0 ? MathMin(retry_after_seconds, MAX_RETRY_AFTER_HONOR_SECONDS) : RetryDelaySeconds();
    g_next_retry_at = now + retry_delay;
    if(status == -1) {
       PrintFormat("[MT5 LIVE] WebRequest failed; operation=%s; http=-1; mt5_error=%d; failures=%d; event=%s; endpoint=%s; retry_in=%ds. Check Tools > Options > Expert Advisors > Allow WebRequest for this endpoint origin.", expectedEvent, GetLastError(), g_consecutive_failures, detail, Endpoint, retry_delay);
@@ -329,6 +401,26 @@ bool SendJson(string payload, string expectedEvent) {
    ResetLastError();
    int status = WebRequest("POST", Endpoint, headers, REQUEST_TIMEOUT_MS, data, response, response_headers);
    string response_text = CharArrayToString(response, 0, WHOLE_ARRAY, CP_UTF8);
+   if(status == 429) {
+      // Honor the server's Retry-After header when present (seconds form), so
+      // a rate-limited EA backs off exactly as long as it was asked to.
+      int retry_after = 0;
+      int header_index = StringFind(response_headers, "Retry-After:");
+      if(header_index < 0) header_index = StringFind(response_headers, "retry-after:");
+      if(header_index >= 0) {
+         int value_start = header_index + StringLen("Retry-After:");
+         while(value_start < StringLen(response_headers) && StringGetCharacter(response_headers, value_start) == ' ') value_start++;
+         string value = "";
+         for(int i = value_start; i < StringLen(response_headers); i++) {
+            ushort character = StringGetCharacter(response_headers, i);
+            if(character < '0' || character > '9') break;
+            value += ShortToString(character);
+         }
+         if(value != "") retry_after = (int)StringToInteger(value);
+      }
+      MarkEventFailure(expectedEvent, status, JsonStringValue(response_text, "code"), retry_after);
+      return false;
+   }
    if(status < 200 || status >= 300) {
       MarkEventFailure(expectedEvent, status, JsonStringValue(response_text, "code"));
       return false;
@@ -345,22 +437,31 @@ bool SendJson(string payload, string expectedEvent) {
    return true;
 }
 
+// Guards against NaN/Infinity/garbage from the terminal: an invalid number
+// must never reach the JSON payload (MQL5 DoubleToString would print "nan" or
+// "inf", which is invalid JSON and would reject the whole batch server-side).
+bool IsValidNumber(double value) { return !MathIsValidNumber(value) ? false : MathAbs(value) <= MAX_PLAUSIBLE_PRICE * 1000.0; }
+double SafeNumber(double value, double fallback) { return IsValidNumber(value) ? value : fallback; }
+
 string PositionJson(ulong ticket) {
    if(!PositionSelectByTicket(ticket)) return "";
    string symbol = PositionGetString(POSITION_SYMBOL);
    ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-   double volume = PositionGetDouble(POSITION_VOLUME);
-   double open_price = PositionGetDouble(POSITION_PRICE_OPEN);
-   double sl = PositionGetDouble(POSITION_SL);
-   double tp = PositionGetDouble(POSITION_TP);
-   double floating = PositionGetDouble(POSITION_PROFIT);
+   double volume = SafeNumber(PositionGetDouble(POSITION_VOLUME), 0.0);
+   double open_price = SafeNumber(PositionGetDouble(POSITION_PRICE_OPEN), 0.0);
+   double sl = SafeNumber(PositionGetDouble(POSITION_SL), 0.0);
+   double tp = SafeNumber(PositionGetDouble(POSITION_TP), 0.0);
+   double floating = SafeNumber(PositionGetDouble(POSITION_PROFIT), 0.0);
+   // A zero-volume or non-positive-price snapshot is malformed data; sending it
+   // would poison the live table, so the record is dropped this cycle.
+   if(volume <= 0.0 || open_price <= 0.0) return "";
    double risk = 0.0;
    double reward = 0.0;
    ENUM_ORDER_TYPE order_type = type == POSITION_TYPE_BUY ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
    if(sl > 0.0) OrderCalcProfit(order_type, symbol, volume, open_price, sl, risk);
    if(tp > 0.0) OrderCalcProfit(order_type, symbol, volume, open_price, tp, reward);
-   risk = MathAbs(risk);
-   reward = MathAbs(reward);
+   risk = MathAbs(SafeNumber(risk, 0.0));
+   reward = MathAbs(SafeNumber(reward, 0.0));
    double rr = risk > 0.0 ? reward / risk : 0.0;
    datetime open_time = (datetime)PositionGetInteger(POSITION_TIME);
    return "{\"ticket\":\"" + IntegerToString((long)ticket) + "\",\"symbol\":\"" + JsonEscape(symbol) + "\",\"direction\":\"" + Direction(type) + "\",\"lots\":" + Number(volume, 2) + ",\"open_price\":" + Number(open_price, 6) + ",\"sl_price\":" + Number(sl, 6) + ",\"tp_price\":" + Number(tp, 6) + ",\"risk_usd\":" + Number(risk, 2) + ",\"reward_usd\":" + Number(reward, 2) + ",\"rr_ratio\":" + Number(rr, 2) + ",\"floating_pnl\":" + Number(floating, 2) + ",\"open_time\":" + BrokerTimestamp(open_time) + "}";
@@ -391,9 +492,9 @@ void SendSummary() {
    SendJson(payload, "summary");
 }
 
-// One open-position batch (at most MAX_OPEN_POSITIONS_PER_BATCH records). Each
-// batch is an independent idempotent request: a batch that fails is retried on
-// the next timer, and it never invalidates the batches that already succeeded.
+// One open-position batch (at most OpenBatchSize() records). Each batch is an
+// independent idempotent request: a batch that fails is retried on the next
+// timer, and it never invalidates the batches that already succeeded.
 bool SendOpenBatch(string &items[], int count, int batch_number, int batch_total) {
    string positions = "[";
    for(int i = 0; i < count; i++) {
@@ -403,36 +504,46 @@ bool SendOpenBatch(string &items[], int count, int batch_number, int batch_total
    positions += "]";
    string payload = "{\"event\":\"open_batch\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\",\"broker_utc_offset_minutes\":" + IntegerToString(BrokerUtcOffsetMinutes) + ",\"positions\":" + positions + "}";
    bool sent = SendJson(payload, "open_batch");
-   if(!sent && batch_total > 1) PrintFormat("[MT5 LIVE] open batch %d/%d deferred; the remaining batches retry on the next timer.", batch_number, batch_total);
+   if(!sent && batch_total > 1) PrintFormat("[MT5 LIVE] open batch %d/%d deferred; it and later batches retry on the next timer.", batch_number, batch_total);
    return sent;
 }
 
 void SendOpenPositions() {
    int total = PositionsTotal();
-   int batch_total = (total + MAX_OPEN_POSITIONS_PER_BATCH - 1) / MAX_OPEN_POSITIONS_PER_BATCH;
+   int batch_size = OpenBatchSize();
+   int batch_total = (total + batch_size - 1) / batch_size;
    if(batch_total < 1) batch_total = 1;
    string items[];
-   ArrayResize(items, MAX_OPEN_POSITIONS_PER_BATCH);
+   ArrayResize(items, batch_size);
    int count = 0;
    int batch_number = 0;
    bool sent_any = false;
+   int deferred_batches = 0;
    for(int i = 0; i < total; i++) {
       ulong ticket = PositionGetTicket(i);
       string item = PositionJson(ticket);
       if(item == "") continue;
       items[count++] = item;
-      if(count >= MAX_OPEN_POSITIONS_PER_BATCH) {
+      if(count >= batch_size) {
          batch_number++;
-         if(!SendOpenBatch(items, count, batch_number, batch_total)) return;
-         sent_any = true;
+         // One failed batch must not block the others: the rest of the snapshot
+         // still goes out; only the failed batch repeats on the next timer.
+         if(!SendOpenBatch(items, count, batch_number, batch_total)) deferred_batches++;
+         else sent_any = true;
          count = 0;
       }
    }
    // A trailing partial batch, or a single empty snapshot so an account with no
    // open positions still proves its live stream is healthy.
-   if(count > 0 || !sent_any) {
+   if(count > 0 || (!sent_any && deferred_batches == 0)) {
       batch_number++;
-      SendOpenBatch(items, count, batch_number, batch_total);
+      if(!SendOpenBatch(items, count, batch_number, batch_total)) deferred_batches++;
+      else sent_any = true;
+   }
+   if(deferred_batches > 0) {
+      PrintFormat("[MT5 LIVE] %d open batch(es) deferred this cycle; only they repeat on the next timer.", deferred_batches);
+      g_consecutive_failures++;
+      if(g_next_retry_at == 0) g_next_retry_at = TimeCurrent() + RetryDelaySeconds();
    }
 }
 
@@ -563,6 +674,69 @@ void ReconcileNextTicket() {
    }
 }
 
+// Pending-history queue: tickets whose closing deals could not be
+// reconstructed yet. Entries are retried on their own schedule until they send
+// successfully, so a temporary history-cache gap can never become permanent
+// data loss. Bounded at MAX_PENDING_HISTORY_TICKETS.
+void EnqueuePendingTicket(ulong position_id) {
+   for(int i = 0; i < g_pending_count; i++) {
+      if(g_pending_tickets[i] == position_id) {
+         // Already queued: push the next attempt out by one retry interval so
+         // the queue cannot hammer the history API every timer tick.
+         g_pending_next_at[i] = TimeCurrent() + PENDING_HISTORY_RETRY_SECONDS;
+         return;
+      }
+   }
+   if(g_pending_count >= MAX_PENDING_HISTORY_TICKETS) {
+      // Drop the OLDEST entry (FIFO) so a sustained cache gap cannot grow the
+      // queue unbounded; the periodic sweep will re-enqueue anything still
+      // unreconstructed.
+      for(int i = 1; i < g_pending_count; i++) {
+         g_pending_tickets[i - 1] = g_pending_tickets[i];
+         g_pending_next_at[i - 1] = g_pending_next_at[i];
+      }
+      g_pending_count--;
+   }
+   ArrayResize(g_pending_tickets, g_pending_count + 1);
+   ArrayResize(g_pending_next_at, g_pending_count + 1);
+   g_pending_tickets[g_pending_count] = position_id;
+   g_pending_next_at[g_pending_count] = TimeCurrent() + PENDING_HISTORY_RETRY_SECONDS;
+   g_pending_count++;
+}
+
+void DequeuePendingTicket(ulong position_id) {
+   int found = -1;
+   for(int i = 0; i < g_pending_count; i++) {
+      if(g_pending_tickets[i] == position_id) { found = i; break; }
+   }
+   if(found < 0) return;
+   for(int j = found; j < g_pending_count - 1; j++) {
+      g_pending_tickets[j] = g_pending_tickets[j + 1];
+      g_pending_next_at[j] = g_pending_next_at[j + 1];
+   }
+   g_pending_count--;
+   ArrayResize(g_pending_tickets, g_pending_count);
+   ArrayResize(g_pending_next_at, g_pending_count);
+}
+
+// Merges pending tickets into the working set at the start of a history job.
+// ClosedPositionJson() selects a position's deals with HistorySelectByPosition
+// (its own selection context), so a pending ticket is reconstructable even when
+// it lies outside the sweep's time window.
+void MergePendingIntoHistory() {
+   if(g_pending_count == 0) return;
+   for(int i = 0; i < g_pending_count; i++) {
+      ulong ticket = g_pending_tickets[i];
+      if(ContainsPositionId(g_history_position_ids, g_history_position_count, ticket)) continue;
+      ArrayResize(g_history_position_ids, g_history_position_count + 1);
+      g_history_position_ids[g_history_position_count++] = ticket;
+   }
+   // The working set now owns the retry for every queued ticket.
+   g_pending_count = 0;
+   ArrayResize(g_pending_tickets, 0);
+   ArrayResize(g_pending_next_at, 0);
+}
+
 bool ContainsPositionId(ulong &ids[], int count, ulong position_id) {
    for(int i = 0; i < count; i++) if(ids[i] == position_id) return true;
    return false;
@@ -603,6 +777,8 @@ string ClosedPositionJson(ulong position_id) {
    datetime close_time = 0;
    double open_price = 0.0;
    double open_volume = 0.0;
+   double entry_price_volume = 0.0;
+   int entry_count = 0;
    double close_volume = 0.0;
    double close_price_volume = 0.0;
    double realized = 0.0;
@@ -622,16 +798,21 @@ string ClosedPositionJson(ulong position_id) {
       datetime deal_time = (datetime)HistoryDealGetInteger(deal, DEAL_TIME);
       double deal_volume = HistoryDealGetDouble(deal, DEAL_VOLUME);
       double deal_price = HistoryDealGetDouble(deal, DEAL_PRICE);
+      // A position can be built from many entry deals (0.5 @ 4000, 0.5 @ 4010,
+      // 1.0 @ 4020 ...). The lifecycle record must reflect ALL of them: total
+      // entry volume and the weighted-average entry price, not just the first
+      // deal's volume and price.
       if(entry == DEAL_ENTRY_IN || entry == DEAL_ENTRY_INOUT) {
          if(!found_entry || deal_time < open_time) {
             found_entry = true;
             open_time = deal_time;
-            open_price = deal_price;
-            open_volume = deal_volume;
             direction = entry == DEAL_ENTRY_INOUT ? OppositeDirection(deal_type) : DealDirection(deal_type);
             sl = HistoryDealGetDouble(deal, DEAL_SL);
             tp = HistoryDealGetDouble(deal, DEAL_TP);
          }
+         entry_count++;
+         entry_price_volume += deal_price * deal_volume;
+         open_volume += deal_volume;
       }
       if(entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_OUT_BY || entry == DEAL_ENTRY_INOUT) {
          found_close = true;
@@ -646,8 +827,13 @@ string ClosedPositionJson(ulong position_id) {
       }
    }
    if(!found_entry || !found_close || symbol == "" || direction == "" || open_time == 0 || close_time == 0) return "";
+   // Weighted-average entry price across every entry deal; falls back to the
+   // close price when entry deals carry zero prices (degenerate broker data).
+   open_price = open_volume > 0.0 ? entry_price_volume / open_volume : close_price_volume / MathMax(close_volume, 0.0000001);
+   open_price = SafeNumber(open_price, 0.0);
    double close_price = close_volume > 0.0 ? close_price_volume / close_volume : open_price;
    double lots = open_volume > 0.0 ? open_volume : close_volume;
+   if(lots <= 0.0 || open_price <= 0.0 || close_price <= 0.0) return "";
    double risk = 0.0;
    double reward = 0.0;
    ENUM_ORDER_TYPE order_type = direction == "BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
@@ -662,43 +848,67 @@ string ClosedPositionJson(ulong position_id) {
    return "{\"ticket\":\"" + IntegerToString((long)position_id) + "\",\"symbol\":\"" + JsonEscape(symbol) + "\",\"direction\":\"" + direction + "\",\"lots\":" + Number(lots, 2) + ",\"open_price\":" + Number(open_price, 6) + ",\"sl_price\":" + Number(sl, 6) + ",\"tp_price\":" + Number(tp, 6) + ",\"risk_usd\":" + Number(risk, 2) + ",\"reward_usd\":" + Number(reward, 2) + ",\"rr_ratio\":" + Number(rr, 2) + ",\"close_price\":" + Number(close_price, 6) + ",\"realized_pnl\":" + Number(realized, 2) + ",\"result\":\"" + outcome + "\",\"open_time\":" + BrokerTimestamp(open_time) + ",\"close_time\":" + BrokerTimestamp(close_time) + "}";
 }
 
+// Event-triggered close sweep. When a history job is already running (a
+// multi-batch cursor walk), the trigger is queued, not discarded: Sync() runs
+// one more incremental sweep after the current job completes.
+void RequestIncrementalHistory() {
+   if(g_history_in_progress) {
+      g_history_retry_requested = true;
+      return;
+   }
+   SendHistory(false);
+}
+
 void SendHistory(bool fullReplay) {
    datetime now = TimeCurrent();
-   if(g_history_in_progress && !fullReplay) return;
-   g_last_history_attempt = now;
-   if(!g_history_in_progress) {
+   // A running multi-batch job is CONTINUED here on the next timer tick; a new
+   // job is only started when none is in progress. Never nest or fork a second
+   // job.
+   bool continue_job = g_history_in_progress;
+   if(g_history_batch_cooldown_until > now) return;
+   // Defer (new jobs and continuations alike) while the transient backoff gate
+   // is closed, so an outage never burns CPU rebuilding batches it cannot send.
+   if(!CanSend("history_batch")) return;
+   if(!continue_job) {
+      g_last_history_attempt = now;
       g_history_cursor = 0;
       g_history_in_progress = true;
       g_history_full_replay = fullReplay;
+      datetime from;
+      if(g_history_full_replay) {
+         from = now - HistoryDays * 86400;
+      } else {
+         // Always re-scan back to the last successful close sync (bounded by the
+         // configured history window). A fixed short sweep could miss a close that
+         // happened while the EA was offline or backing off, and then the next
+         // sweep would find nothing and re-arm the full replay timer, leaving the
+         // position OPEN in the journal for up to a day.
+         datetime window_start = now - QUICK_HISTORY_WINDOW_SECONDS;
+         datetime oldest = now - HistoryDays * 86400;
+         // Before the first successful sync the full replay owns the backfill, so
+         // an incremental sweep simply covers the configured history window.
+         datetime since_last_success = (g_last_history_sync > 0 ? g_last_history_sync : oldest);
+         if(since_last_success < window_start) window_start = since_last_success;
+         if(window_start < oldest) window_start = oldest;
+         from = window_start;
+      }
+      if(!HistorySelect(from, now)) {
+         PrintFormat("Gold Journal HistorySelect failed: %d", GetLastError());
+         g_history_in_progress = false;
+         return;
+      }
+      // The working set is captured ONCE at the start of a multi-batch run and
+      // reused until it completes: re-selecting every cycle would shift array
+      // indexes under the cursor (a new close can appear mid-run) and could skip
+      // or resend records. New closes land in the next job instead.
+      if(!CollectClosedPositionIds(g_history_position_ids, g_history_position_count)) {
+         Print("Gold Journal could not allocate historical position IDs");
+         g_history_in_progress = false;
+         return;
+      }
+      MergePendingIntoHistory();
    }
-   datetime from;
-   if(g_history_full_replay) {
-      from = now - HistoryDays * 86400;
-   } else {
-      // Always re-scan back to the last successful close sync (bounded by the
-      // configured history window). A fixed short sweep could miss a close that
-      // happened while the EA was offline or backing off, and then the next
-      // sweep would find nothing and re-arm the full replay timer, leaving the
-      // position OPEN in the journal for up to a day.
-      datetime window_start = now - QUICK_HISTORY_WINDOW_SECONDS;
-      datetime oldest = now - HistoryDays * 86400;
-      // Before the first successful sync the full replay owns the backfill, so
-      // an incremental sweep simply covers the configured history window.
-      datetime since_last_success = (g_last_history_sync > 0 ? g_last_history_sync : oldest);
-      if(since_last_success < window_start) window_start = since_last_success;
-      if(window_start < oldest) window_start = oldest;
-      from = window_start;
-   }
-   if(!HistorySelect(from, now)) {
-      PrintFormat("Gold Journal HistorySelect failed: %d", GetLastError());
-      return;
-   }
-   ulong position_ids[];
-   int position_count = 0;
-   if(!CollectClosedPositionIds(position_ids, position_count)) {
-      Print("Gold Journal could not allocate historical position IDs");
-      return;
-   }
+   int position_count = g_history_position_count;
    if(position_count == 0) {
       string empty_payload = "{\"event\":\"history_batch\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\",\"broker_utc_offset_minutes\":" + IntegerToString(BrokerUtcOffsetMinutes) + ",\"positions\":[],\"complete\":true}";
       if(SendJson(empty_payload, "history_batch")) {
@@ -706,6 +916,7 @@ void SendHistory(bool fullReplay) {
          g_history_in_progress = false;
          g_history_full_replay = true;
          g_history_cursor = 0;
+         g_history_batch_cooldown_until = 0;
          Print("[MT5 LIVE] history sync completed; no closed positions found in the selected period.");
       }
       return;
@@ -713,37 +924,55 @@ void SendHistory(bool fullReplay) {
    int cursor = MathMin(g_history_cursor, position_count);
    string positions = "[";
    int added = 0;
-   int skipped = 0;
+   int pending = 0;
    int still_open = 0;
    bool first = true;
    while(cursor < position_count && added < HISTORY_BATCH_SIZE) {
-      ulong position_id = position_ids[cursor++];
+      ulong position_id = g_history_position_ids[cursor++];
       // A partially closed position still exists: the live open stream owns it.
       if(IsPositionOpenNow(position_id)) { still_open++; continue; }
       string item = ClosedPositionJson(position_id);
       if(item == "") {
-         skipped++;
-         PrintFormat("[MT5 LIVE] skipped unreconstructable historical position %I64u; continuing batch.", position_id);
+         // A ticket that cannot be reconstructed yet is NOT forgotten: it goes
+         // into the pending queue for retry, and the batch continues without
+         // it so one cache gap cannot block the other 49 trades.
+         pending++;
+         EnqueuePendingTicket(position_id);
+         PrintFormat("[MT5 LIVE] close reconstruction pending for position %I64u; continuing batch.", position_id);
          continue;
       }
       if(!first) positions += ",";
       positions += item;
       first = false;
       added++;
+      DequeuePendingTicket(position_id);
    }
    positions += "]";
    bool complete = cursor >= position_count;
    string payload = "{\"event\":\"history_batch\",\"api_key\":\"" + JsonEscape(ApiKey) + "\",\"ea_version\":\"" + EA_VERSION + "\",\"payload_version\":\"" + PAYLOAD_VERSION + "\",\"broker_utc_offset_minutes\":" + IntegerToString(BrokerUtcOffsetMinutes) + ",\"positions\":" + positions + ",\"complete\":" + (complete ? "true" : "false") + "}";
-   if(!SendJson(payload, "history_batch")) return;
+   if(!SendJson(payload, "history_batch")) {
+      // The batch was NOT accepted: the cursor stays where it was, so nothing
+      // is skipped. A cooldown also prevents the next timer tick (3 s) from
+      // resending the identical batch during an outage.
+      g_history_cursor = MathMin(cursor - added, position_count);
+      g_history_batch_cooldown_until = now + HISTORY_BATCH_COOLDOWN_SECONDS;
+      g_history_in_progress = true;
+      return;
+   }
+   // The server accepted this batch: only now may the cursor advance past it.
    if(complete) {
       g_last_history_sync = now;
       g_history_in_progress = false;
-      g_history_full_replay = true;
       g_history_cursor = 0;
-      PrintFormat("[MT5 LIVE] history sync completed; processed=%d; closed_batches=%d; still_open=%d; skipped=%d.", position_count, added, still_open, skipped);
+      g_history_full_replay = true;
+      PrintFormat("[MT5 LIVE] history sync completed; processed=%d; closed_batches=%d; still_open=%d; pending=%d.", position_count, added, still_open, pending);
    } else {
+      // Cursor advances only past ACCEPTED records; the next batch continues
+      // on the next timer tick after a short cooldown, so a multi-year
+      // backfill spreads out instead of hammering the API every 3 seconds.
       g_history_cursor = cursor;
-      PrintFormat("[MT5 LIVE] history batch accepted; sent=%d; skipped=%d; remaining=%d; continuing on next timer.", added, skipped, position_count - cursor);
+      g_history_batch_cooldown_until = now + HISTORY_BATCH_COOLDOWN_SECONDS;
+      PrintFormat("[MT5 LIVE] history batch accepted; sent=%d; pending=%d; remaining=%d; continuing on next timer.", added, pending, position_count - cursor);
    }
 }
 
@@ -758,8 +987,44 @@ bool HistoryDue(datetime now) {
    return (idle_window && full_replay_due) || sweep_due;
 }
 
+// Chooses which history job the scheduler should run when one is due: a full
+// 10-year replay only when it is genuinely owed (first backfill or the daily
+// reconciliation gate); every other due case is a bounded incremental sweep.
+// Before this split, every 15-minute sweep ran the FULL replay window, so a
+// quiet account re-scanned 3650 days of deals every 15 minutes forever.
+bool FullHistoryReplayDue(datetime now) {
+   // A never-completed history sync (fresh attach, EA restart, terminal
+   // restart) owes the one-time full backfill; afterwards the daily
+   // reconciliation gate is the only full replay.
+   if(g_last_history_sync == 0) return true;
+   return now - g_last_history_sync >= FULL_HISTORY_RETRY_SECONDS;
+}
+
+// A position that failed reconstruction gets its next try on its own schedule
+// (PENDING_HISTORY_RETRY_SECONDS after it was queued), without waiting for the
+// full 15-minute sweep. One cheap flag check per timer tick, so an empty queue
+// costs nothing.
+bool PendingHistoryRetryDue(datetime now) {
+   for(int i = 0; i < g_pending_count; i++) {
+      if(g_pending_next_at[i] <= now) return true;
+   }
+   return false;
+}
+
 void Sync() {
    datetime now = TimeCurrent();
+   // Missing/invalid inputs: stay loaded in CONFIG_ERROR and re-evaluate the
+   // inputs on every tick so a corrected key/endpoint recovers without
+   // removing and re-attaching the EA.
+   if(g_config_invalid) {
+      SetState(EA_CONFIG_ERROR);
+      if(HasConfiguredEndpoint() && HasConfiguredApiKey()) {
+         Print("[MT5 LIVE] configuration now valid; resuming synchronization.");
+         g_config_invalid = false;
+      } else {
+         return;
+      }
+   }
    if(g_requires_revalidation) {
       // Authentication probe only; a success clears the gate and resumes sync.
       SendCompatibility();
@@ -781,20 +1046,39 @@ void Sync() {
       SendSummary();
       g_next_summary_at = now + MathMax(5, SummarySeconds);
    }
-   if(HistoryDue(now)) SendHistory(true);
+   // ONE history scheduler: full replay only when genuinely owed (first
+   // backfill, daily reconciliation, or an explicit recovery request);
+   // otherwise the bounded incremental sweep. Close events merely flag a
+   // rerun, which is honored here after the current job completes.
+   if(HistoryDue(now)) SendHistory(FullHistoryReplayDue(now));
+   else if(g_history_retry_requested && !g_history_in_progress) {
+      // A close event was queued while a job was running; run one incremental
+      // sweep for it now. The flag is cleared first so the sweep cannot re-flag
+      // itself (no recursive or duplicate retry loops).
+      g_history_retry_requested = false;
+      SendHistory(false);
+   }
+   else if(PendingHistoryRetryDue(now)) {
+      // Unreconstructed positions get their scheduled retry inside a normal
+      // incremental sweep.
+      SendHistory(false);
+   }
    if(g_state == EA_SYNCING) SetState(EA_HEALTHY);
 }
 
 int OnInit() {
    ResetLastError();
    MathSrand((int)(TimeLocal() % 2147483647));
-   if(!HasConfiguredEndpoint()) {
-      Print("[MT5 LIVE] startup blocked: Endpoint must be the exact HTTPS API URL from Gold Journal MT5 Live. The EA keeps retrying, so correcting the input and applying recovers it.");
-      return INIT_PARAMETERS_INCORRECT;
-   }
-   if(!HasConfiguredApiKey()) {
-      Print("[MT5 LIVE] startup blocked: paste the current API key from Gold Journal MT5 Live into EA Inputs. The EA keeps retrying, so correcting the input and applying recovers it.");
-      return INIT_PARAMETERS_INCORRECT;
+   g_last_timer_now = TimeCurrent();
+   // A missing/invalid endpoint or key is a PERMANENT CONFIGURATION problem,
+   // but removing the EA from the chart is worse than keeping it: the trader
+   // may not notice for days. The EA therefore stays loaded in CONFIG_ERROR,
+   // prints one actionable line, and re-evaluates the inputs every timer tick
+   // so a corrected input recovers without re-attaching (INIT_PARAMETERS_
+   // INCORRECT would have unloaded the EA and silently ended recovery).
+   g_config_invalid = !HasConfiguredEndpoint() || !HasConfiguredApiKey();
+   if(g_config_invalid) {
+      Print("[MT5 LIVE] CONFIGURATION REQUIRED: set the Endpoint to the exact HTTPS API URL from Gold Journal MT5 Live and paste the current API key into EA Inputs, then press OK. The EA stays loaded and recovers automatically once the inputs are valid.");
    }
    SetState(EA_INIT);
    g_next_summary_at = 0;
@@ -803,18 +1087,38 @@ int OnInit() {
       PrintFormat("[MT5 LIVE] timer could not start; MT5 error=%d", GetLastError());
       return INIT_FAILED;
    }
-   PrintFormat("[MT5 LIVE] STARTUP; EA_VERSION=%s; endpoint=%s; terminal_connected=%s; api_key_present=true; open_sync=%ds; summary_sync=%ds; heartbeat=%ds; history=%s; state=%s.",
+   PrintFormat("[MT5 LIVE] STARTUP; EA_VERSION=%s; endpoint=%s; terminal_connected=%s; api_key_present=%s; open_sync=%ds; summary_sync=%ds; heartbeat=%ds; history=%s; state=%s.",
                EA_VERSION, Endpoint, TerminalInfoInteger(TERMINAL_CONNECTED) ? "true" : "false",
+               HasConfiguredApiKey() ? "true" : "invalid",
                MathMax(3, SyncSeconds), MathMax(5, SummarySeconds), MathMax(10, HeartbeatSeconds),
                SendHistoryOnInit ? "enabled" : "disabled", StateLabel(g_state));
    Print("[MT5 LIVE] READ-ONLY MODE; this EA never opens, closes, modifies, or cancels MT5 orders and positions. Auto Trading is not required for Gold Journal synchronization.");
    if(!TerminalInfoInteger(TERMINAL_CONNECTED)) Print("[MT5 LIVE] broker connection is offline; summary, positions, and history will retry after MT5 reconnects.");
-   SendCompatibility();
+   // With invalid inputs, skip the doomed compat probe and let Sync() hold the
+   // CONFIG_ERROR state until the trader corrects the inputs.
+   if(!g_config_invalid) SendCompatibility();
    Sync();
    return INIT_SUCCEEDED;
 }
 void OnDeinit(const int reason) { EventKillTimer(); PrintFormat("[MT5 LIVE] EA stopped; deinitialization reason=%d", reason); }
-void OnTimer() { Sync(); }
+void OnTimer() {
+   datetime now = TimeCurrent();
+   // Clock-jump guard: a VM/VPS time resync that moves the clock backwards
+   // would otherwise extend every scheduled retry/cooldown into the future and
+   // silence the EA until those timestamps elapse naturally. On a backwards
+   // jump, clear the schedules so recovery is immediate.
+   if(g_last_timer_now > 0 && now < g_last_timer_now - 1) {
+      PrintFormat("[MT5 LIVE] terminal clock moved backwards by %d second(s); clearing scheduled retries so recovery is immediate.", (int)(g_last_timer_now - now));
+      g_next_retry_at = 0;
+      g_next_summary_at = 0;
+      g_next_heartbeat_at = 0;
+      g_history_batch_cooldown_until = 0;
+      for(int i = 0; i < g_reconcile_count; i++) g_reconcile_next_at[i] = 0;
+      for(int i = 0; i < g_pending_count; i++) g_pending_next_at[i] = 0;
+   }
+   g_last_timer_now = now;
+   Sync();
+}
 
 // MQL5 requires notification parameters for this passive terminal event.
 // They are never read and this EA never calls a trade-execution API.
@@ -837,5 +1141,5 @@ void OnTradeTransaction(const MqlTradeTransaction &transaction, const MqlTradeRe
    }
    g_deal_position_id = position_id;
    g_last_close_event_at = TimeCurrent();
-   SendHistory(false);
+   RequestIncrementalHistory();
 }

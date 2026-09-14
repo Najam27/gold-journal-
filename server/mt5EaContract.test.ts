@@ -18,10 +18,25 @@ describe("Gold Journal EA history contract", () => {
   });
 
   it("logs and skips an unreconstructable position without aborting the remaining bounded history backfill", () => {
-    expect(eaSource).toContain("[MT5 LIVE] skipped unreconstructable historical position");
     expect(eaSource).toContain("if(item == \"\") {");
-    expect(eaSource).toContain("skipped++;");
+    // A skipped record enters the pending retry queue instead of being
+    // forgotten: skipped != lost.
+    expect(eaSource).toContain("pending++;");
+    expect(eaSource).toContain("EnqueuePendingTicket(position_id);");
     expect(eaSource).toContain("continuing batch.");
+  });
+
+  it("computes entry volume and price across ALL entry deals of a multi-deal position", () => {
+    // 0.5 @ 4000 + 0.5 @ 4010 + 1.0 @ 4020 must aggregate to 2.0 lots at a
+    // weighted average price, not just the first deal's volume/price.
+    expect(eaSource).toContain("entry_price_volume += deal_price * deal_volume;");
+    expect(eaSource).toContain("open_volume += deal_volume;");
+    expect(eaSource).toContain("open_volume > 0.0 ? entry_price_volume / open_volume");
+  });
+
+  it("advances the history cursor only after the server accepts the batch", () => {
+    expect(eaSource).toContain("if(!SendJson(payload, \"history_batch\")) {");
+    expect(eaSource).toContain("g_history_cursor = MathMin(cursor - added, position_count);");
   });
 
   it("aggregates by position ID, batches bounded records, and handles empty history", () => {

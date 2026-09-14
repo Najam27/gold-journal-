@@ -28,13 +28,34 @@ describe("MT5 EA automatic recovery contract", () => {
   it("treats 422, 429 and 5xx as transient and keeps retrying with bounded backoff", () => {
     expect(source).toMatch(/bool IsTransientStatus\(int status\)[\s\S]*?status == 422[\s\S]*?status == 429[\s\S]*?status == 500[\s\S]*?status == 504/);
     expect(source).toContain("MAX_RETRY_BACKOFF_SECONDS = 60");
-    expect(source).toMatch(/int RetryDelaySeconds\(\) \{ return BackoffSeconds\(g_consecutive_failures, MAX_RETRY_BACKOFF_SECONDS\); \}/);
+    expect(source).toMatch(/int RetryDelaySeconds\(\) \{ return BackoffSeconds\(g_consecutive_failures, EffectiveMaxRetrySeconds\(\)\); \}/);
   });
 
   it("exposes an explicit connection state machine instead of a single failure flag", () => {
     ["EA_INIT", "EA_CONNECTING", "EA_CONNECTED", "EA_SYNCING", "EA_HEALTHY", "EA_RECONNECTING", "EA_ERROR"].forEach(state => {
       expect(source).toContain(state);
     });
+    // Authentication and configuration failures must be visible as distinct,
+    // recoverable states instead of a generic offline.
+    expect(source).toContain("EA_AUTH_ERROR");
+    expect(source).toContain("EA_CONFIG_ERROR");
+    expect(source).toContain("SetState(EA_AUTH_ERROR);");
+    expect(source).toContain("SetState(EA_CONFIG_ERROR);");
+  });
+
+  it("stays loaded with missing or invalid inputs instead of dying with INIT_PARAMETERS_INCORRECT", () => {
+    // INIT_PARAMETERS_INCORRECT unloads the EA, which silently ends recovery
+    // until the trader notices. The EA must hold CONFIG_ERROR and re-check
+    // its inputs every timer tick so a corrected key/endpoint self-heals.
+    expect(source).not.toContain("INIT_PARAMETERS_INCORRECT");
+    expect(source).toContain("bool g_config_invalid = false");
+    expect(source).toContain("CONFIGURATION REQUIRED:");
+    expect(source).toMatch(/if\(g_config_invalid\) \{[\s\S]*?SetState\(EA_CONFIG_ERROR\);[\s\S]*?if\(HasConfiguredEndpoint\(\) && HasConfiguredApiKey\(\)\) \{/);
+  });
+
+  it("clears scheduled retries immediately after a backwards terminal clock jump", () => {
+    expect(source).toContain("terminal clock moved backwards");
+    expect(source).toContain("g_next_retry_at = 0;");
   });
 
   it("sends a standalone heartbeat so a stale snapshot is never mistaken for live", () => {
@@ -57,11 +78,13 @@ describe("MT5 EA automatic recovery contract", () => {
   });
 
   it("keeps the trade-transaction listener passive and event-driven", () => {
-    expect(source).toMatch(/void OnTradeTransaction\([\s\S]*?SendHistory\(false\);/);
+    expect(source).toMatch(/void OnTradeTransaction\([\s\S]*?RequestIncrementalHistory\(\);/);
     expect(source).toMatch(/if\(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_OUT_BY && entry != DEAL_ENTRY_INOUT\) return;/);
   });
 
   it("documents that a configuration error is recoverable without restarting MT5", () => {
-    expect(source).toContain("The EA keeps retrying, so correcting the input and applying recovers it.");
+    // The EA holds CONFIG_ERROR and re-checks its inputs every timer tick, so
+    // pressing OK with corrected inputs recovers without any removal.
+    expect(source).toContain("The EA stays loaded and recovers automatically once the inputs are valid.");
   });
 });
