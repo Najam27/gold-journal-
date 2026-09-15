@@ -1,5 +1,5 @@
 #property strict
-#property version   "2.17"
+#property version   "2.18"
 #property description "Gold Journal read-only journal bridge: never places or manages trades; sends account, position, and history facts to Gold Journal."
 
 input string Endpoint = "__GOLD_JOURNAL_MT5_ENDPOINT__";
@@ -18,7 +18,7 @@ input int MaxRetrySeconds = 60;
 // batches), so this must never exceed its 200-position cap.
 input int MaxOpenPositionsPerBatch = 200;
 
-const string EA_VERSION = "2.17.0";
+const string EA_VERSION = "2.18.0";
 const string PAYLOAD_VERSION = "2";
 const int REQUEST_TIMEOUT_MS = 15000;
 const int HISTORY_BATCH_SIZE = 50;
@@ -578,9 +578,45 @@ bool IsAllDigits(string value) {
    return true;
 }
 
+// A position TICKET identifies one position row right now. A position
+// IDENTIFIER (DEAL_POSITION_ID / POSITION_IDENTIFIER) identifies the whole
+// lifecycle. They are NOT interchangeable: on a netting account a reversal can
+// change the position ticket while the identifier keeps tracking the same
+// lifecycle. The live open stream is keyed by POSITION_TICKET and the history
+// stream by the identifier, so both lookups exist and each call site uses the
+// one it actually means.
+bool IsPositionIdentifierOpen(ulong position_identifier) {
+   if(position_identifier == 0) return false;
+   int total = PositionsTotal();
+   for(int i = 0; i < total; i++) {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      if((ulong)PositionGetInteger(POSITION_IDENTIFIER) == position_identifier) return true;
+   }
+   return false;
+}
+
+// The CURRENT position ticket for a lifecycle identifier, or 0 when that
+// lifecycle no longer holds an open position. Use this only when a ticket
+// operation is genuinely required.
+ulong PositionTicketByIdentifier(ulong position_identifier) {
+   if(position_identifier == 0) return 0;
+   int total = PositionsTotal();
+   for(int i = 0; i < total; i++) {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      if((ulong)PositionGetInteger(POSITION_IDENTIFIER) == position_identifier) return ticket;
+   }
+   return 0;
+}
+
 bool IsPositionOpenNow(ulong ticket) {
    if(ticket == 0) return false;
-   return PositionSelectByTicket(ticket);
+   if(PositionSelectByTicket(ticket)) return true;
+   // The reconciliation queue is seeded from stored records, which can hold
+   // either key, so a position that is open under its lifecycle identifier is
+   // never reported as closed.
+   return IsPositionIdentifierOpen(ticket);
 }
 
 int ReconcileIndex(ulong ticket) {
@@ -787,7 +823,13 @@ string ClosedPositionJson(ulong position_id) {
    // terminal CLOSED record here would freeze the trade and silently lose the
    // remaining volume, so a still-existing position is left to the live open
    // stream, which refreshes its volume, price, SL/TP and profit every cycle.
-   if(PositionSelectByTicket(position_id)) return "";
+   // `position_id` is a LIFECYCLE identifier (DEAL_POSITION_ID), NOT a position
+   // ticket. Testing it with PositionSelectByTicket() could report a still-open
+   // position as closed as soon as its ticket changed (a netting reversal), and
+   // that would emit a terminal CLOSED record for a live trade.
+   if(IsPositionIdentifierOpen(position_id)) return "";
+   // HistorySelectByPosition() requires the position identifier, which is
+   // exactly what DEAL_POSITION_ID provided to this function.
    if(!HistorySelectByPosition(position_id)) {
       PrintFormat("Gold Journal could not select history for position %I64u", position_id);
       return "";
@@ -1153,23 +1195,37 @@ void OnTimer() {
 // MQL5 requires notification parameters for this passive terminal event.
 // They are never read and this EA never calls a trade-execution API.
 void OnTradeTransaction(const MqlTradeTransaction &transaction, const MqlTradeRequest &request, const MqlTradeResult &result) {
-   // The transaction itself carries the entry type and position identifier, so
-   // the close notification does not depend on the terminal history cache being
-   // loaded (HistoryDealGetInteger can return 0 for a deal that is not yet in
-   // the cache, which silently dropped the notification).
+   // MqlTradeTransaction has NO `entry` member. Its documented fields are deal,
+   // order, symbol, type, order_type, order_state, deal_type, time_type,
+   // time_expiration, price, price_trigger, price_sl, price_tp, volume,
+   // position (the POSITION TICKET) and position_by. Reading a field named
+   // `entry` from the transaction does not compile, so MetaEditor produced no
+   // .ex5 at all and the EA never appeared in the Navigator. The deal entry type
+   // and the LIFECYCLE identifier both come from the DEAL: DEAL_ENTRY and
+   // DEAL_POSITION_ID. transaction.position is only the position TICKET and must
+   // never key the lifecycle (a netting reversal can change the ticket while the
+   // identifier keeps tracking the same position).
    if(transaction.type != TRADE_TRANSACTION_DEAL_ADD) return;
-   ENUM_DEAL_ENTRY entry = transaction.entry;
+   if(transaction.deal == 0) return;
+   // Selecting the deal by its own ticket makes its properties readable even
+   // while the terminal is still loading its history cache.
+   if(!HistoryDealSelect(transaction.deal)) return;
+   ENUM_DEAL_ENTRY entry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(transaction.deal, DEAL_ENTRY);
+   ulong position_identifier = (ulong)HistoryDealGetInteger(transaction.deal, DEAL_POSITION_ID);
+   if(position_identifier == 0) return;
+   // An entry deal is already covered by the live open-position stream; only a
+   // close needs history reconstruction: a full close, a partial close (which
+   // must stay OPEN), a close-by, or the closing leg of a reversal.
    if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_OUT_BY && entry != DEAL_ENTRY_INOUT) return;
-   // MT5 emits one transaction per closing deal. A stop-out/TP/manual close can
-   // produce several deals for the same position (for example a netting INOUT or
-   // multiple partial fills); debounce to a single quick sync so the first deal
-   // is not missed while a later transaction restarts the sweep.
-   ulong position_id = transaction.position;
-   if(position_id != 0 && position_id == g_deal_position_id) {
+   // Debounce per LIFECYCLE, never per timestamp: several deals of the same
+   // position (partial fills, a stop-out split across deals, a netting INOUT)
+   // collapse into one sweep, while another position closing in the same second
+   // is still swept immediately.
+   if(position_identifier == g_deal_position_id) {
       if(TimeCurrent() - g_last_close_event_at > 60) g_deal_position_id = 0;
       else return;
    }
-   g_deal_position_id = position_id;
+   g_deal_position_id = position_identifier;
    g_last_close_event_at = TimeCurrent();
    RequestIncrementalHistory();
 }

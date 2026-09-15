@@ -13,6 +13,14 @@ async function requireDb() { const db = await getDb(); if (!db) throw new Error(
 const MT5_TICKET_FILTER_CHUNK = 100;
 
 /**
+ * One Supabase round-trip per reconciled position, so a single pass is bounded.
+ * 20 keeps a reconciliation request comfortably inside the client budget while
+ * still draining a large first-time backfill in a few seconds of polling.
+ */
+export const MT5_RECONCILE_BATCH_LIMIT = 20;
+export const MT5_RECONCILE_BATCH_MAX = 200;
+
+/**
  * Splits a ticket list into bounded OR-filter chunks. A single OR filter with
  * hundreds of tickets (a large open-position snapshot) produced a URL long
  * enough for the gateway to reject with 414, which broke the whole MT5 Live
@@ -374,7 +382,16 @@ async function syncMt5PositionToTradeLog(userId: number, accountId: number, posi
   else await query.onDuplicateKeyUpdate({ set });
 }
 
-export async function syncStoredMt5PositionsToTradeLog(userId: number, accountId: number) {
+/**
+ * Reconciles stored MT5 positions into the Trade Log.
+ *
+ * This is a WRITE path: every position that needs journaling costs one Supabase
+ * round-trip. It therefore never runs inside a read request any more (that is
+ * what produced the account-switch request timeout) and it is bounded per call,
+ * so callers drain a large backlog over several invocations instead of holding
+ * one request open. `remaining` reports whether another pass is needed.
+ */
+export async function syncStoredMt5PositionsToTradeLog(userId: number, accountId: number, options: { limit?: number } = {}) {
   const db = await requireDb();
   const [positions, resetAt] = await Promise.all([
     db.select().from(mt5LivePositions).where(eq(mt5LivePositions.accountId, accountId)).orderBy(desc(mt5LivePositions.updatedAt)).limit(500),
@@ -401,8 +418,9 @@ export async function syncStoredMt5PositionsToTradeLog(userId: number, accountId
     if (position.status === "CLOSED") return Number(existing.pnl ?? 0) !== Number(position.realizedPnl ?? 0);
     return Number(existing.pnl ?? 0) !== Number(position.floatingPnl ?? 0);
   });
+  const limit = Math.min(Math.max(1, Math.trunc(options.limit ?? MT5_RECONCILE_BATCH_LIMIT)), MT5_RECONCILE_BATCH_MAX);
   let synchronized = 0;
-  for (const position of needsJournal) {
+  for (const position of needsJournal.slice(0, limit)) {
     await syncMt5PositionToTradeLog(userId, accountId, {
       ticket: position.ticket,
       symbol: position.symbol,
@@ -422,7 +440,7 @@ export async function syncStoredMt5PositionsToTradeLog(userId: number, accountId
     });
     synchronized += 1;
   }
-  return synchronized;
+  return { synchronized, remaining: Math.max(0, needsJournal.length - synchronized) };
 }
 
 export async function upsertMt5OpenPosition(userId: number, accountId: number, value: LiveBase & { floatingPnl: number }) {

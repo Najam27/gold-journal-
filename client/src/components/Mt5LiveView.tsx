@@ -680,7 +680,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow, onSwitchAccount }
           <ol>
             <li>
               <div>
-                <strong>Download the current EA build (2.17)</strong>
+                <strong>Download the current EA build (2.18)</strong>
                 <p>
                   Gold Journal EA is read-only: it never opens, closes, modifies, or cancels trades. Download a fresh EA from this page. Its endpoint is generated from this deployed site, it writes a startup confirmation in the MT5 Experts tab, then sends the first compatibility heartbeat, balance, equity, floating P&amp;L,
                   and live positions approximately every 3 seconds, plus history

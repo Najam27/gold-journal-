@@ -19,7 +19,7 @@ describe("Gold Journal MT5 EA reliability contract", () => {
   });
 
   it("keeps the three-second cadence while using bounded retry for transient HTTP failures", () => {
-    expect(source).toContain('#property version   "2.17"');
+    expect(source).toContain('#property version   "2.18"');
     expect(source).toContain("input int SyncSeconds = 3");
     // The transient-backoff ceiling is now a clamped EA input (default 60 s,
     // hard-capped at 900 s) instead of a magic constant.
@@ -121,7 +121,12 @@ describe("Gold Journal MT5 EA reliability contract", () => {
     // A DEAL_ENTRY_OUT deal is emitted for partial closes and for the closing
     // leg of a netting INOUT reversal. Only a position that no longer exists in
     // the terminal may become a terminal Trade Log record.
-    expect(source).toMatch(/string ClosedPositionJson\(ulong position_id\) \{\s*\/\/[\s\S]*?if\(PositionSelectByTicket\(position_id\)\) return "";/);
+    // `position_id` is a lifecycle identifier (DEAL_POSITION_ID), not a position
+    // ticket: PositionSelectByTicket(identifier) reported a still-open netting
+    // position as closed as soon as a reversal changed its ticket.
+    expect(source).toMatch(/string ClosedPositionJson\(ulong position_id\) \{\s*\/\/[\s\S]*?if\(IsPositionIdentifierOpen\(position_id\)\) return "";/);
+    expect(source).toContain("bool IsPositionIdentifierOpen(ulong position_identifier)");
+    expect(source).not.toContain("PositionSelectByTicket(position_id)");
     expect(source).toContain("bool IsPositionOpenNow(ulong ticket)");
     expect(source).toContain("if(IsPositionOpenNow(position_id)) { still_open++; continue; }");
     expect(source).toContain("bool CanSend(string expectedEvent)");
@@ -171,13 +176,20 @@ describe("Gold Journal MT5 EA reliability contract", () => {
     expect(source).toContain("void OnTradeTransaction(const MqlTradeTransaction &transaction");
     expect(source).toContain("DEAL_POSITION_ID");
     expect(source).toContain("SendHistory(false);");
-    // The close notification reads the transaction itself, because the deal may
-    // not be in the terminal history cache yet (HistoryDealGetInteger returned 0
-    // and silently dropped the notification).
+    // Selecting the deal by its own ticket makes its properties readable even
+    // while the terminal is still loading its history cache.
+    // MqlTradeTransaction has no `entry` member and its `position` field is a
+    // position TICKET, so both the entry type and the LIFECYCLE identifier are
+    // read from the deal. Reading `transaction.entry` did not compile, which
+    // produced no .ex5 at all and left the Navigator empty.
+    const codeOnly = source.split("\n").map(line => line.replace(/\/\/.*$/, "")).join("\n");
     expect(source).toContain("if(transaction.type != TRADE_TRANSACTION_DEAL_ADD) return;");
-    expect(source).toContain("ENUM_DEAL_ENTRY entry = transaction.entry;");
-    expect(source).toContain("ulong position_id = transaction.position;");
-    expect(source).not.toContain("HistoryDealGetInteger(transaction.deal");
+    expect(source).toContain("if(transaction.deal == 0) return;");
+    expect(source).toContain("if(!HistoryDealSelect(transaction.deal)) return;");
+    expect(source).toContain("ENUM_DEAL_ENTRY entry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(transaction.deal, DEAL_ENTRY);");
+    expect(source).toContain("ulong position_identifier = (ulong)HistoryDealGetInteger(transaction.deal, DEAL_POSITION_ID);");
+    expect(codeOnly).not.toContain("transaction.entry");
+    expect(codeOnly).not.toContain("transaction.position");
     // The incremental sweep must reach back to the last successful close sync,
     // not a fixed one-hour window, so a close that happened while the EA was
     // offline is still collected instead of re-arming the 24-hour replay gate.

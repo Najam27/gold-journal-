@@ -13,6 +13,7 @@ import { getMt5Integrity } from "./mt5Reliability";
 import { calculateAccountMt5Risk } from "./mt5Risk";
 import { toSafeAccount, toSafeAccountListItem, toSafeJournalRecord, toSafeTrade } from "./journalPrivacy";
 import { protectedProcedure, router } from "./_core/trpc";
+import { createPerfTrace } from "./perf";
 import { hasImageSignature, storageGetSignedUrl, storagePut } from "./storage";
 import { consumeRateLimit } from "./rateLimit";
 import { clearAccountJournalDataAtomic, recordGoalAlertsAtomic, removeAccountAtomic } from "./atomicOperations";
@@ -159,9 +160,16 @@ export const goldRouter = router({
   journal: router({
     bootstrap: protectedProcedure.query(async ({ ctx }) => toSafeAccountListItem(await ensureAccount(ctx.user.id))),
     get: protectedProcedure.input(z.object({ accountId: z.number().int().positive().optional() })).query(async ({ ctx, input }) => {
-      const account = await getOwnedAccount(ctx.user.id, input.accountId);
-      try { await syncStoredMt5PositionsToTradeLog(ctx.user.id, account.id); } catch (error) { console.warn("[Journal] MT5 pre-sync degraded", error instanceof Error ? error.message : "unknown error"); }
-      return getJournal(ctx.user.id, account.id);
+      // READ-ONLY by design. This procedure previously ran the MT5 -> Trade Log
+      // reconciliation (a write path with one Supabase round-trip per stored MT5
+      // position) before its first read, which is what made account switches and
+      // Trade Log polls slow enough to hit the 15 s client timeout. MT5
+      // reconciliation now runs through mt5.syncTradeLog, independently.
+      const trace = createPerfTrace("journal.get.request", { userId: ctx.user.id, accountId: input.accountId });
+      const account = await trace.stage("account authorization", () => getOwnedAccount(ctx.user.id, input.accountId));
+      const journal = await getJournal(ctx.user.id, account.id, account);
+      trace.done();
+      return journal;
     }),
   }),
   analysis: router({
@@ -216,12 +224,13 @@ export const goldRouter = router({
     integrity: protectedProcedure.input(accountIdInput).query(({ ctx, input }) => getMt5Integrity(ctx.user.id, input.accountId)),
     risk: protectedProcedure.input(riskCalculatorInput).query(({ ctx, input }) => calculateAccountMt5Risk(ctx.user.id, input.accountId, input)),
     history: protectedProcedure.input(accountIdInput.extend({ page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(50).default(20) })).query(({ ctx, input }) => getMt5History(ctx.user.id, input.accountId, input.page, input.pageSize)),
-    syncTradeLog: protectedProcedure.input(accountIdInput).mutation(async ({ ctx, input }) => {
+    syncTradeLog: protectedProcedure.input(accountIdInput.extend({ limit: z.number().int().min(1).max(200).optional() })).mutation(async ({ ctx, input }) => {
       await getOwnedAccount(ctx.user.id, input.accountId);
       const connection = await dbOrThrow().then(db => db.select({ id: mt5Connections.id }).from(mt5Connections).where(and(eq(mt5Connections.accountId, input.accountId), eq(mt5Connections.active, true))).limit(1));
       if (!connection[0]) throw new Error("No active MT5 connection is available for this journal account.");
-      const synchronized = await syncStoredMt5PositionsToTradeLog(ctx.user.id, input.accountId);
-      return { synchronized };
+      // Bounded per call: the client repeats this while `remaining > 0`, so a
+      // first-time backfill of hundreds of positions never blocks a request.
+      return syncStoredMt5PositionsToTradeLog(ctx.user.id, input.accountId, { limit: input.limit });
     }),
     createConnection: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), label: z.string().trim().min(1).max(120), brokerUtcOffsetMinutes: z.number().int().min(-12 * 60).max(14 * 60).default(180) })).mutation(async ({ ctx, input }) => {
       return issueMt5ConnectionKey({ userId: ctx.user.id, accountId: input.accountId, label: input.label, brokerUtcOffsetMinutes: input.brokerUtcOffsetMinutes, replace: false });
@@ -266,9 +275,9 @@ export const goldRouter = router({
   }),
   trades: router({
     list: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(50).default(12), search: z.string().trim().max(160).optional().default(""), result: z.enum(["WIN", "LOSS", "BREAK_EVEN", "OPEN"]).optional() })).query(async ({ ctx, input }) => {
+      // Pure read: the Trade Log must render from the paginated trade list alone,
+      // without waiting for MT5 reconciliation, analysis, or notifications.
       const account = await getOwnedAccount(ctx.user.id, input.accountId);
-      try { await syncStoredMt5PositionsToTradeLog(ctx.user.id, account.id); }
-      catch (error) { console.warn("[Trades] MT5 pre-sync degraded", error instanceof Error ? error.message : "unknown error"); }
       const db = await dbOrThrow();
       let where = and(eq(trades.userId, ctx.user.id), eq(trades.accountId, account.id));
       if (input.result) where = and(where, eq(trades.result, input.result));

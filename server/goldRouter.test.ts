@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -44,15 +46,32 @@ describe("Gold Journal protected server workflows", () => {
     expect(mocks.ensureAccount).toHaveBeenCalledWith(7);
   });
 
-  it("reconciles stored MT5 positions before returning an owned journal", async () => {
+  it("keeps the composite journal read free of MT5 reconciliation writes", async () => {
     mocks.getOwnedAccount.mockResolvedValue({ id: 12, userId: 7, name: "Primary Account" });
-    mocks.syncStoredMt5.mockResolvedValue(4);
     mocks.getJournal.mockResolvedValue({ activeAccount: { id: 12 }, trades: [{ id: 1, result: "WIN" }] });
     const caller = goldRouter.createCaller({ user } as any);
 
     await expect(caller.journal.get({ accountId: 12 })).resolves.toMatchObject({ activeAccount: { id: 12 }, trades: [{ result: "WIN" }] });
-    expect(mocks.syncStoredMt5).toHaveBeenCalledWith(7, 12);
-    expect(mocks.getJournal).toHaveBeenCalledWith(7, 12);
+    // journal.get used to run syncStoredMt5PositionsToTradeLog before its first
+    // read: one Supabase round-trip per stored MT5 position inside the Trade
+    // Log's critical request, which is what produced the account-switch timeout.
+    // Reconciliation is now event-driven through mt5.syncTradeLog.
+    expect(mocks.syncStoredMt5).not.toHaveBeenCalled();
+    // The authorized account row is reused instead of being resolved twice.
+    expect(mocks.getJournal).toHaveBeenCalledWith(7, 12, expect.objectContaining({ id: 12 }));
+  });
+
+  it("keeps both Trade Log read paths free of MT5 reconciliation writes", () => {
+    const source = readFileSync(resolve(process.cwd(), "server/goldRouter.ts"), "utf8");
+    const journalRead = source.slice(source.indexOf("get: protectedProcedure.input(z.object({ accountId"), source.indexOf("analysis: router({"));
+    const tradeRead = source.slice(source.indexOf("trades: router({"), source.indexOf("cash: router({"));
+
+    for (const read of [journalRead, tradeRead]) {
+      expect(read).not.toContain("syncStoredMt5PositionsToTradeLog(");
+      expect(read).toContain("getOwnedAccount(ctx.user.id");
+    }
+    // The only remaining caller is the explicit, bounded reconciliation mutation.
+    expect(source.match(/syncStoredMt5PositionsToTradeLog\(/g)).toHaveLength(1);
   });
 
   it("blocks anonymous account mutations before a database call", async () => {
@@ -166,12 +185,12 @@ describe("Gold Journal protected server workflows", () => {
   it("reconciles stored MT5 positions into only the owned account with an active connection", async () => {
     mocks.getOwnedAccount.mockResolvedValue({ id: 12, userId: 7 });
     mocks.getDb.mockResolvedValue({ select: () => limitedRows([{ id: 44 }]) });
-    mocks.syncStoredMt5.mockResolvedValue(3);
+    mocks.syncStoredMt5.mockResolvedValue({ synchronized: 3, remaining: 0 });
     const caller = goldRouter.createCaller({ user } as any);
 
-    await expect(caller.mt5.syncTradeLog({ accountId: 12 })).resolves.toEqual({ synchronized: 3 });
+    await expect(caller.mt5.syncTradeLog({ accountId: 12, limit: 5 })).resolves.toEqual({ synchronized: 3, remaining: 0 });
     expect(mocks.getOwnedAccount).toHaveBeenCalledWith(7, 12);
-    expect(mocks.syncStoredMt5).toHaveBeenCalledWith(7, 12);
+    expect(mocks.syncStoredMt5).toHaveBeenCalledWith(7, 12, { limit: 5 });
   });
 
   it("blocks MT5 Trade Log reconciliation when the requested account is not owned", async () => {

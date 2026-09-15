@@ -47,7 +47,9 @@ import {
   openJournalView,
   type JournalViewTarget,
 } from "@/lib/journalViewNavigation";
-import { invalidateAccountScopedQueries, resolveActiveAccount } from "@/lib/accountScope";
+import { beginAccountSwitchForApp, invalidateAccountScopedQueries, payloadBelongsToAccount, refreshCurrentAccount, resolveActiveAccount } from "@/lib/accountScope";
+import { classifyApiError } from "@/lib/apiErrors";
+import { JournalQueryError, SwitchingAccount } from "@/components/QueryError";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { OFFLINE_CASH_REQUEST_EVENT } from "@/lib/offlineMutationQueue";
 import { useLocalJournal } from "@/lib/journal/useLocalJournal";
@@ -399,6 +401,21 @@ export default function GoldJournal() {
   const [view, setView] = useState<View>("trades");
   const [mobileNav, setMobileNav] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  /**
+   * Account-switch transaction state.
+   *
+   * `switchPending` is true from the moment a switch starts until the FIRST
+   * (critical) read for the newly selected account has settled. Only that read
+   * runs during the switch; MT5, analysis, notifications, and the other
+   * secondary surfaces mount afterwards, so a switch can never fire a dozen
+   * heavy requests at once (which is what timed out the Trade Log).
+   *
+   * `switchTargetRef` dedupes the re-entrant selection events that a published
+   * selection triggers before React re-renders.
+   */
+  const [switchPending, setSwitchPending] = useState(false);
+  const switchTargetRef = useRef<number | undefined>(undefined);
+  const mt5ReconcileRef = useRef<{ busy: boolean; at: number }>({ busy: false, at: 0 });
   const [accountId, setAccountId] = useState<number | undefined>(() =>
     getSelectedAccountId()
   );
@@ -449,6 +466,11 @@ export default function GoldJournal() {
   const accountSelectionResolved =
     accountListQuery.isSuccess || Boolean(accountBootstrap.data?.id);
   const queryInput = useMemo(() => ({ accountId }), [accountId]);
+  // Which read the visible view needs first. Everything else is secondary and
+  // waits for it, so switching accounts loads one thing, not eight.
+  const criticalView = view === "trades" ? "trades" : view === "mt5" ? "mt5" : "journal";
+  const journalIsCritical = criticalView === "journal";
+  const mt5IsCritical = criticalView === "mt5";
   // journal.get is the heavy composite read (trades, goal trades, cash
   // movements, goals, skipped trades, plans, profile, plus two aggregates). It
   // feeds stats, goals, plans, and the behavioural report, none of which need a
@@ -460,7 +482,12 @@ export default function GoldJournal() {
     return false;
   })();
   const journalQuery = trpc.journal.get.useQuery(queryInput, {
-    enabled: Boolean(profileReady && accountSelectionResolved && accountId),
+    enabled: Boolean(
+      profileReady &&
+        accountSelectionResolved &&
+        accountId &&
+        (journalIsCritical || !switchPending)
+    ),
     retry: false,
     refetchInterval: journalRefetchInterval,
     refetchOnWindowFocus: true,
@@ -476,7 +503,10 @@ export default function GoldJournal() {
   );
   const mt5Workspace = trpc.mt5.workspace.useQuery(mt5WorkspaceInput!, {
     enabled: Boolean(
-      profileReady && mt5WorkspaceInput && (view === "trades" || view === "mt5")
+      profileReady &&
+        mt5WorkspaceInput &&
+        (view === "trades" || view === "mt5") &&
+        (mt5IsCritical || !switchPending)
     ),
     // The Trade Log only surfaces MT5 open positions as a secondary panel, so
     // it does not need the 2.5 s live cadence that the MT5 Live view runs.
@@ -501,7 +531,9 @@ export default function GoldJournal() {
     [accountId, debouncedSearch, tradePage, resultFilter]
   );
   const tradeListQuery = trpc.trades.list.useQuery(tradeListInput!, {
-    enabled: Boolean(profileReady && tradeListInput),
+    enabled: Boolean(
+      profileReady && tradeListInput && (criticalView === "trades" || !switchPending)
+    ),
     refetchInterval: view === "trades" ? 10_000 : false,
     refetchOnWindowFocus: true,
     staleTime: 4_000,
@@ -519,6 +551,11 @@ export default function GoldJournal() {
   const clearGoals = trpc.goals.clearAll.useMutation();
   const recordGoalAlerts = trpc.notifications.recordGoalAlerts.useMutation();
   const createAccount = trpc.accounts.create.useMutation();
+  // MT5 reconciliation is a WRITE path. It used to run inside journal.get and
+  // trades.list (one Supabase round-trip per stored position), which is what
+  // made account switches time out; it is now an explicit, bounded, event-driven
+  // call that the workspace payload itself triggers.
+  const syncMt5TradeLog = trpc.mt5.syncTradeLog.useMutation();
   // Local-first journal runtime. The browser writes locally first, updates the
   // UI immediately, queues the change durably, and syncs with retry/backoff.
   // The backend is the cloud synchronisation and backup layer.
@@ -554,6 +591,47 @@ export default function GoldJournal() {
   useEffect(() => {
     if (isOnline) void localJournal.flush();
   }, [isOnline, localJournal.flush]);
+  // Event-driven MT5 -> Trade Log reconciliation. The read paths no longer
+  // write, so the workspace payload (each position carries `journaled`) is the
+  // trigger: unjournaled MT5 positions are reconciled in bounded passes, and the
+  // journal/trade list is invalidated only when something actually changed.
+  useEffect(() => {
+    if (!accountId || switchPending) return;
+    const positions = [
+      ...(mt5Workspace.data?.openPositions ?? []),
+      ...(mt5Workspace.data?.closedPositions ?? []),
+    ] as Array<{ journaled?: boolean }>;
+    if (!positions.some(position => position?.journaled === false)) return;
+    const now = Date.now();
+    if (mt5ReconcileRef.current.busy || now - mt5ReconcileRef.current.at < 15_000) return;
+    mt5ReconcileRef.current = { busy: true, at: now };
+    let canceled = false;
+    const drain = async () => {
+      let synchronized = 0;
+      // Bounded passes: the server caps each call, so a first-time backfill of
+      // hundreds of positions drains over a few seconds instead of holding one
+      // request open until it times out.
+      for (let pass = 0; pass < 5 && !canceled; pass += 1) {
+        const result = (await syncMt5TradeLog.mutateAsync({ accountId, limit: 20 })) as
+          | { synchronized?: number; remaining?: number }
+          | undefined;
+        synchronized += Number(result?.synchronized ?? 0);
+        if (!result?.remaining) break;
+      }
+      return synchronized;
+    };
+    void drain()
+      .then(synchronized => {
+        if (!canceled && synchronized > 0) refreshCurrentAccount(utils);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        mt5ReconcileRef.current = { busy: false, at: mt5ReconcileRef.current.at };
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [accountId, mt5Workspace.data, switchPending, syncMt5TradeLog, utils]);
   useEffect(() => {
     const queueCash = (event: Event) => {
       const detail = (
@@ -621,6 +699,10 @@ export default function GoldJournal() {
             ? bootstrapAccountId
             : undefined));
     if (valid && valid !== accountId) {
+      // The first owned account is a selection, not a user switch: no cache is
+      // dropped, but the switch ref must know about it so a later real switch is
+      // not deduped away.
+      switchTargetRef.current = valid;
       setAccountId(valid);
       setSelectedAccountId(valid);
     } else if (
@@ -650,8 +732,23 @@ export default function GoldJournal() {
   }, [authUserId]);
   // Local-first render: fall back to the last local snapshot so a refresh,
   // a cold start, or a temporary backend outage still shows the user's journal.
-  const data =
-    (journalQuery.data as any) ?? (localJournal.localSnapshot as any) ?? undefined;
+  // Local-first render: fall back to the last local snapshot so a refresh,
+  // a cold start, or a temporary backend outage still shows the user's journal.
+  //
+  // Account generation guard: a payload that still belongs to the previous
+  // account (React Query placeholder data, or a late response) is never rendered
+  // as the selected account. This is the client half of "old account data must
+  // never reach the new account UI".
+  const journalPayload = payloadBelongsToAccount(journalQuery.data, accountId)
+    ? (journalQuery.data as any)
+    : undefined;
+  const localSnapshot = payloadBelongsToAccount(
+    localJournal.localSnapshot,
+    accountId
+  )
+    ? (localJournal.localSnapshot as any)
+    : undefined;
+  const data = journalPayload ?? localSnapshot ?? undefined;
   // The account the UI acts on is always the one the user selected. A server
   // echo for a different id (a previous account kept alive by placeholder data)
   // must never win, because that is what silently reverted a switch. Both the
@@ -734,12 +831,34 @@ export default function GoldJournal() {
   }, [account?.id, goalAlertPayload, recordGoalAlerts, utils.notifications]);
   const switchAccount = React.useCallback(
     (nextAccountId: number) => {
-      if (!nextAccountId || nextAccountId === accountId) return;
-      setAccountId(nextAccountId);
+      const target = Number(nextAccountId);
+      if (!Number.isInteger(target) || target <= 0) return;
+      // Dedupe the re-entrant selection event that publishing the selection
+      // fires before React re-renders.
+      if (target === accountId || target === switchTargetRef.current) return;
+      switchTargetRef.current = target;
+      // The account-switch transaction, in order:
+      //   1. cancel the previous account's in-flight requests (beginAccountSwitch)
+      //      so no late response can ever be committed for the new account;
+      //   2. drop the previous account's cached payloads;
+      //   3. publish + persist the selection;
+      //   4. the new account's critical read mounts and runs first;
+      //   5. secondary surfaces and MT5 polling start once it settles.
+      // Nothing is invalidated here: invalidating would refetch the queries we
+      // are leaving behind (the request storm), and the new account's queries
+      // are not in the cache yet.
+      setSwitchPending(true);
+      setAccountId(target);
       setTradePage(1);
-      void invalidateAccountScopedQueries(utils);
+      setSelectedAccountId(target);
+      void beginAccountSwitchForApp(target).then(result => {
+        if (import.meta.env.DEV && (result.canceled || result.removed))
+          console.info(
+            `[account] switched to ${target} accountId; canceled=${result.canceled} removed=${result.removed}`
+          );
+      });
     },
-    [accountId, utils]
+    [accountId]
   );
   useEffect(
     () =>
@@ -762,7 +881,41 @@ export default function GoldJournal() {
   useEffect(() => {
     setTradePage(1);
   }, [accountId, search, resultFilter]);
-  const refresh = () => invalidateAccountScopedQueries(utils);
+  // Account-scoped writes and manual refreshes still invalidate normally; only
+  // the account SWITCH uses the cancel/drop transaction above.
+  const refresh = () => refreshCurrentAccount(utils);
+  // A switch ends as soon as the critical read for the new account settles, so
+  // the secondary surfaces are enabled again by real data, not by a timer. The
+  // failsafe only exists so a failed critical read cannot disable them forever.
+  useEffect(() => {
+    if (!switchPending) return;
+    const critical =
+      criticalView === "trades"
+        ? tradeListQuery
+        : criticalView === "mt5"
+          ? mt5Workspace
+          : journalQuery;
+    const settled =
+      !critical.isPlaceholderData && (critical.isSuccess || critical.isError);
+    if (settled) setSwitchPending(false);
+  }, [
+    criticalView,
+    journalQuery.isError,
+    journalQuery.isPlaceholderData,
+    journalQuery.isSuccess,
+    mt5Workspace.isError,
+    mt5Workspace.isPlaceholderData,
+    mt5Workspace.isSuccess,
+    switchPending,
+    tradeListQuery.isError,
+    tradeListQuery.isPlaceholderData,
+    tradeListQuery.isSuccess,
+  ]);
+  useEffect(() => {
+    if (!switchPending) return;
+    const timer = window.setTimeout(() => setSwitchPending(false), 12_000);
+    return () => window.clearTimeout(timer);
+  }, [switchPending]);
   const accountSelectionPending =
     profileReady &&
     !accountListQuery.error &&
@@ -774,6 +927,17 @@ export default function GoldJournal() {
     accountSelectionPending ||
     (Boolean(accountId) && journalQuery.isLoading && !journalQuery.isPlaceholderData);
   const journalError = accountBootstrap.error || journalQuery.error;
+  // The visible view's first read. The Trade Log renders from its own paginated
+  // trade list, so a slow or failed composite journal read can no longer replace
+  // the whole Trade Log with a generic error: it degrades to a scoped notice.
+  const tradeLogHasList = view === "trades" && Boolean(tradeListQuery.data);
+  const blockingLoading = tradeLogHasList ? false : journalLoading;
+  const blockingError = tradeLogHasList ? undefined : journalError;
+  const compositeDegraded =
+    view === "trades" && tradeLogHasList && Boolean(journalError);
+  const switchingAccountName = ((ownedAccounts as any[]).find(
+    item => Number(item.id) === accountId
+  )?.name ?? "the selected account") as string;
   const retryJournal = React.useCallback(() => {
     void journalQuery.refetch();
     if (tradeListInput) void tradeListQuery.refetch();
@@ -1124,15 +1288,44 @@ export default function GoldJournal() {
         )}
         {view === "options" ? (
           <div className="view-wrap">{optionsPanel}</div>
-        ) : journalLoading ? (
-          <Loading
-            onReconnect={reconnectSession}
-            reconnectStatus={reconnectStatus}
+        ) : blockingLoading ? (
+          switchPending ? (
+            <SwitchingAccount name={switchingAccountName} />
+          ) : (
+            <Loading
+              onReconnect={reconnectSession}
+              reconnectStatus={reconnectStatus}
+            />
+          )
+        ) : blockingError ? (
+          <JournalQueryError
+            error={blockingError}
+            onRetry={retryJournal}
+            title="We could not load this journal view."
           />
-        ) : journalError ? (
-          <QueryError error={journalError} onRetry={retryJournal} />
         ) : (
           <div className="view-wrap">
+            {switchPending && (
+              <div className="derived-status" role="status">
+                <RefreshCcw size={15} />
+                <span>
+                  Switching to {switchingAccountName}… loading this account's data
+                  first.
+                </span>
+              </div>
+            )}
+            {compositeDegraded && (
+              <div className="derived-status" role="status">
+                <ShieldAlert size={15} />
+                <span>
+                  {classifyApiError(journalError).title} — the trade list below is
+                  still live.
+                </span>
+                <Button variant="outline" size="sm" onClick={retryJournal}>
+                  Retry
+                </Button>
+              </div>
+            )}
             {development.cooldown.status !== "CLEAR" && (view === "trades" || view === "goals" || view === "plan") && (
               <section className={`behavior-banner ${development.cooldown.status === "SESSION_COMPLETE" ? "complete" : ""}`} role="status">
                 <ShieldAlert size={17} />

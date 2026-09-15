@@ -5,6 +5,7 @@ import { getSupabaseAdmin } from "./supabaseAdmin";
 import { getDb } from "./db";
 import { toSafeAccount, toSafeJournalRecord, toSafeTrade } from "./journalPrivacy";
 import { normalizeAccountName } from "./accountIdentity";
+import { createPerfTrace } from "./perf";
 
 async function requireDb() { const db = await getDb(); if (!db) throw new Error("Supabase database is unavailable. Please retry shortly."); return db; }
 
@@ -49,26 +50,42 @@ export async function getOwnedAccount(userId: number, accountId?: number) {
   return found[0];
 }
 
-export async function getJournal(userId: number, accountId?: number) {
-  const db = await requireDb();
-  const activeAccount = await getOwnedAccount(userId, accountId);
+/**
+ * Fast, read-only composite journal read.
+ *
+ * This function performs NO writes and NO MT5 reconciliation: it used to run
+ * `syncStoredMt5PositionsToTradeLog` before its first read (one Supabase
+ * round-trip per stored MT5 position), which is what made every account switch
+ * and every Trade Log poll slow enough to hit the client request timeout. MT5
+ * reconciliation is now event-driven through `mt5.syncTradeLog`.
+ *
+ * `resolvedAccount` is the row the router already resolved and authorized, so a
+ * composite read no longer repeats `ensureAccount` plus the ownership select.
+ */
+export async function getJournal(userId: number, accountId?: number, resolvedAccount?: Awaited<ReturnType<typeof getOwnedAccount>> | null) {
+  const trace = createPerfTrace("journal.get", { userId, accountId });
+  const db = await trace.stage("connect", () => requireDb());
+  const activeAccount = resolvedAccount?.id ? resolvedAccount : await trace.stage("account lookup", () => getOwnedAccount(userId, accountId));
   const goalWindowStart = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000);
   const [accountList, tradeList, goalTradeList, movementList, goalList, skippedList, planList, profileList] = await Promise.all([
-    db.select().from(accounts).where(eq(accounts.userId, userId)).orderBy(desc(accounts.createdAt)).limit(1_000),
-    db.select().from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, activeAccount.id))).orderBy(desc(trades.tradeDate)).limit(500),
-    db.select().from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, activeAccount.id), gte(trades.tradeDate, goalWindowStart))).orderBy(desc(trades.tradeDate)).limit(10_000),
-    db.select().from(cashMovements).where(and(eq(cashMovements.userId, userId), eq(cashMovements.accountId, activeAccount.id))).orderBy(desc(cashMovements.movementDate)).limit(200),
-    db.select().from(goals).where(and(eq(goals.userId, userId), eq(goals.accountId, activeAccount.id), eq(goals.isCustom, true))).orderBy(goals.period, goals.createdAt).limit(200),
-    db.select().from(skippedTrades).where(and(eq(skippedTrades.userId, userId), eq(skippedTrades.accountId, activeAccount.id))).orderBy(desc(skippedTrades.tradeDate)).limit(500),
-    db.select().from(dailyPlans).where(and(eq(dailyPlans.userId, userId), eq(dailyPlans.accountId, activeAccount.id))).orderBy(desc(dailyPlans.planDate)).limit(500),
-    db.select().from(traderProfiles).where(eq(traderProfiles.userId, userId)).limit(1),
+    trace.stage("accounts", () => db.select().from(accounts).where(eq(accounts.userId, userId)).orderBy(desc(accounts.createdAt)).limit(1_000)),
+    trace.stage("trades", () => db.select().from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, activeAccount.id))).orderBy(desc(trades.tradeDate)).limit(500)),
+    trace.stage("goal trades", () => db.select().from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, activeAccount.id), gte(trades.tradeDate, goalWindowStart))).orderBy(desc(trades.tradeDate)).limit(10_000)),
+    trace.stage("cash", () => db.select().from(cashMovements).where(and(eq(cashMovements.userId, userId), eq(cashMovements.accountId, activeAccount.id))).orderBy(desc(cashMovements.movementDate)).limit(200)),
+    trace.stage("goals", () => db.select().from(goals).where(and(eq(goals.userId, userId), eq(goals.accountId, activeAccount.id), eq(goals.isCustom, true))).orderBy(goals.period, goals.createdAt).limit(200)),
+    trace.stage("skipped", () => db.select().from(skippedTrades).where(and(eq(skippedTrades.userId, userId), eq(skippedTrades.accountId, activeAccount.id))).orderBy(desc(skippedTrades.tradeDate)).limit(500)),
+    trace.stage("plans", () => db.select().from(dailyPlans).where(and(eq(dailyPlans.userId, userId), eq(dailyPlans.accountId, activeAccount.id))).orderBy(desc(dailyPlans.planDate)).limit(500)),
+    trace.stage("profile", () => db.select().from(traderProfiles).where(eq(traderProfiles.userId, userId)).limit(1)),
   ]);
   const profileRow = profileList[0] as { identityStatement?: string | null; disciplineWeights?: unknown; behaviorConfig?: unknown } | undefined;
-  const [cashResult, tradeSummaryResult] = await Promise.allSettled([getAccountCashNet(userId, activeAccount.id), getAccountTradeSummary(userId, activeAccount.id)]);
+  const [cashResult, tradeSummaryResult] = await Promise.allSettled([
+    trace.stage("rpc cash net", () => getAccountCashNet(userId, activeAccount.id)),
+    trace.stage("rpc trade summary", () => getAccountTradeSummary(userId, activeAccount.id)),
+  ]);
   const cashNet = resolveDerivedCashNet(cashResult);
   const cashNetValue = cashNet.source === "rpc" ? cashNet.value : movementList.reduce((total, movement) => total + (movement.type === "DEPOSIT" ? Number(movement.amount ?? 0) : -Number(movement.amount ?? 0)), 0);
   const tradeSummary = resolveDerivedTradeSummary(tradeSummaryResult);
-  return {
+  const journal = {
     activeAccount: toSafeAccount(activeAccount),
     accounts: accountList.map(toSafeAccount),
     // Trade Log retrieves only its visible page with signed screenshots through
@@ -94,6 +111,8 @@ export async function getJournal(userId: number, accountId?: number) {
       behaviorConfig: (profileRow?.behaviorConfig ?? null) as Record<string, number | null> | null,
     },
   };
+  trace.done();
+  return journal;
 }
 
 export async function ownsTrade(userId: number, tradeId: number) {
