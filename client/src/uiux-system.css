@@ -270,3 +270,40 @@ a:focus-visible {
   .monthly-trade-overview:hover,
   .stat-card:hover { transform: none; }
 }
+
+/* The phone bar carries six destinations (Trade Log, Analysis, Goals,
+   Psychology, Calendar, MT5 Live). Declared last so the wider grid overrides
+   the five-column default in index.css at phone widths. */
+.mobile-bottom-nav { grid-template-columns: repeat(6, 1fr); }
+.mobile-bottom-nav button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Desktop-only affordances (the sidebar collapse toggle) hide with the
+   icon-only sidebar instead of overlapping it. */
+@media (max-width: 1120px) {
+  .desktop-only { display: none; }
+}
+
+/* Active-account switcher in the page header, so the account can be changed
+   from every viewport, not only the desktop sidebar. */
+.pagebar-account {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 2.25rem;
+  max-width: 15rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--gj-control-border);
+  border-radius: 0.5625rem;
+  background: var(--surface-control);
+  color: var(--gj-gold-text);
+}
+.pagebar-account select {
+  max-width: 11rem;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--gj-text);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.pagebar-account svg:last-child { color: var(--text-muted); }

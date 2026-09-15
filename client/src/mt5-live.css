@@ -85,4 +85,26 @@
 
 .mt5-live-strip { margin: 1rem 0; padding: .7rem .85rem; border: 1px solid color-mix(in srgb, var(--gj-success) 35%, var(--gj-border)); border-radius: 14px; background: color-mix(in srgb, var(--gj-success) 7%, var(--gj-panel)); }.mt5-live-strip > header { align-items: center; color: var(--gj-muted); font-size: .7rem; }.mt5-live-strip > header span { display: flex; align-items: center; gap: .35rem; color: var(--gj-success); font-weight: 800; letter-spacing: .06em; }.mt5-live-strip > div { display: flex; gap: .55rem; overflow-x: auto; margin-top: .6rem; padding-bottom: .1rem; }.mt5-live-strip article { min-width: 175px; display: flex; align-items: center; gap: .45rem; padding: .55rem .65rem; border-left: 3px solid var(--gj-success); border-radius: 10px; background: var(--gj-panel); }.mt5-live-strip article.loss { border-left-color: var(--gj-danger); }.mt5-live-strip article b { margin-left: auto; font-size: .8rem; }
 
+/* Section chrome, recovery callouts, and the one-time key dialog body. These
+   surfaces ship with the multi-connection MT5 workspace and had no rules, so
+   they rendered as unstyled blocks next to the styled connection cards. */
+.mt5-connection-section,
+.mt5-position-section { display: grid; gap: 1rem; }
+.mt5-connection-section { margin-top: 1.25rem; }
+.mt5-position-section { margin-top: .35rem; }
+.mt5-data-source-ref { display: block; margin-top: .35rem; color: var(--gj-muted); font: 600 .68rem var(--gj-mono); word-break: break-all; }
+
+.mt5-recovery-callout { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .7rem; padding: .8rem .9rem; border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--gj-border)); border-radius: 12px; background: color-mix(in srgb, var(--warning) 8%, var(--gj-panel)); }
+.mt5-recovery-callout p { flex: 1 1 18rem; margin: 0; color: var(--gj-text); font-size: .78rem; line-height: 1.5; }
+
+.mt5-first-contact-recovery { display: grid; gap: .6rem; justify-items: start; margin-top: .85rem; padding: .8rem .9rem; border: 1px dashed var(--gj-border); border-radius: 12px; background: var(--gj-subtle); }
+.mt5-first-contact-recovery strong { color: var(--gj-text); font-size: .8rem; letter-spacing: .02em; }
+.mt5-first-contact-recovery p { margin: 0; color: var(--gj-muted); font-size: .75rem; line-height: 1.55; }
+
+.mt5-one-time-key { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; align-items: center; gap: .55rem; margin-top: .6rem; padding: .6rem .7rem; border: 1px solid var(--gj-border); border-radius: 10px; background: var(--gj-subtle); }
+.mt5-one-time-key > span { color: var(--gj-muted); font-size: .64rem; font-weight: 800; letter-spacing: .07em; }
+.mt5-one-time-key code { overflow: hidden; text-overflow: ellipsis; color: var(--gj-text); font: 600 .74rem var(--gj-mono); word-break: break-all; }
+
+.mt5-guide-note { margin-top: .45rem !important; padding: .5rem .6rem; border-left: 3px solid var(--gj-gold); border-radius: 0 8px 8px 0; background: color-mix(in srgb, var(--gj-gold) 6%, var(--gj-panel)); }
+
 @media (max-width: 900px) { .mt5-account-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.mt5-stream-freshness { grid-template-columns: repeat(2, minmax(0, 1fr)); } }@media (max-width: 680px) { .mt5-heading,.mt5-section-head,.mt5-connection-card footer { align-items: flex-start; flex-direction: column; }.mt5-connection-grid,.mt5-position-grid,.mt5-account-grid { grid-template-columns: 1fr; }.mt5-guide li { flex-direction: column; }.button-link { align-self: flex-start; }.mt5-metrics { grid-template-columns: 1fr; }.mt5-live-strip > header small { display: none; } }

@@ -31,7 +31,13 @@ export function useLocalJournal(options: {
   onSynced?: () => void;
 }) {
   const { accountId, subject, journal, dispatch, onSynced } = options;
-  const [snapshot, setSnapshot] = useState<Record<string, unknown> | null>(null);
+  // The snapshot is tagged with the account it belongs to: a local read for a
+  // newly selected account resolves asynchronously, and showing the previous
+  // account's journal in the meantime would mislabel one journal as another.
+  const [snapshot, setSnapshot] = useState<{
+    accountId?: number;
+    journal: Record<string, unknown> | null;
+  }>({ journal: null });
   const [syncState, setSyncState] = useState<JournalSyncState>("synced");
   const [pendingCount, setPendingCount] = useState(0);
   const [online, setOnline] = useState(() => isOnline());
@@ -74,11 +80,11 @@ export function useLocalJournal(options: {
   useEffect(() => {
     let cancelled = false;
     if (!accountId) {
-      setSnapshot(null);
+      setSnapshot({ journal: null });
       return;
     }
     void readJournalSnapshot(accountId).then(local => {
-      if (!cancelled) setSnapshot(local?.journal ?? null);
+      if (!cancelled) setSnapshot({ accountId, journal: local?.journal ?? null });
     });
     return () => {
       cancelled = true;
@@ -94,7 +100,7 @@ export function useLocalJournal(options: {
       let next = journal;
       for (const mutation of pending) next = applyMutationToJournal(next, mutation);
       if (cancelled) return;
-      setSnapshot(next);
+      setSnapshot({ accountId, journal: next });
       await saveJournalSnapshot(accountId, next);
     })();
     return () => {
@@ -142,9 +148,10 @@ export function useLocalJournal(options: {
       if (!accountId || !subject) throw new Error("Sign in before saving journal changes.");
       const mutation = await enqueueJournalMutation({ ...input, accountId, subject });
       setSnapshot(current => {
-        const next = applyMutationToJournal(current ?? journal ?? {}, mutation);
+        const base = current.accountId === accountId ? current.journal : null;
+        const next = applyMutationToJournal(base ?? journal ?? {}, mutation);
         void saveJournalSnapshot(accountId, next);
-        return next;
+        return { accountId, journal: next };
       });
       await refreshQueue();
       void flush();
@@ -155,7 +162,7 @@ export function useLocalJournal(options: {
 
   return {
     /** Last known journal for this account, safe to use as placeholder data. */
-    localSnapshot: snapshot,
+    localSnapshot: snapshot.accountId === accountId ? snapshot.journal : null,
     syncState,
     pendingCount,
     online,

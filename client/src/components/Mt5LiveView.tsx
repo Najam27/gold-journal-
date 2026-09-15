@@ -289,7 +289,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow, onSwitchAccount }
       });
       setNewApiKey(created.apiKey);
       toast.success(
-        "Replacement MT5 key created. Copy it into the EA, then restart the EA once."
+        "Replacement MT5 key created. Paste it into the EA Inputs, press OK, and the bridge re-authenticates on its next probe."
       );
       refresh();
     } catch (error: any) {
@@ -306,7 +306,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow, onSwitchAccount }
         confirmed: true,
       });
       setNewApiKey(rotated.apiKey);
-      toast.success("New MT5 key issued. Paste it into the current EA download, then restart the EA.");
+      toast.success("New MT5 key issued. Paste it into the EA Inputs and press OK; the EA re-authenticates automatically.");
       refresh();
     } catch (error: any) {
       toast.error(error.message || "Could not issue a new MT5 key.");
@@ -394,7 +394,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow, onSwitchAccount }
             </h3>
             <p>
               {recoveredMt5History
-                ? "Your existing journaled MT5 trades are safe. Create a replacement connection below, download a fresh EA for this deployed site, copy its new key into the EA, then restart the EA once to restore live balance, equity, and margin updates."
+                ? "Your existing journaled MT5 trades are safe. Create a replacement connection below, download a fresh EA for this deployed site, paste its new key into the EA Inputs, and press OK. The EA keeps probing and re-authenticates on its own to restore live balance, equity, and margin updates."
                 : activeConnection?.syncHealth?.message ||
                   "Download the EA from this page, then attach it to any chart. Its Experts tab first confirms this deployment endpoint, then balance, equity, free margin, and floating P&L appear after its next summary event."}
             </p>
@@ -680,7 +680,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow, onSwitchAccount }
           <ol>
             <li>
               <div>
-                <strong>Replace the earlier EA build</strong>
+                <strong>Download the current EA build (2.17)</strong>
                 <p>
                   Gold Journal EA is read-only: it never opens, closes, modifies, or cancels trades. Download a fresh EA from this page. Its endpoint is generated from this deployed site, it writes a startup confirmation in the MT5 Experts tab, then sends the first compatibility heartbeat, balance, equity, floating P&amp;L,
                   and live positions approximately every 3 seconds, plus history
@@ -699,14 +699,21 @@ export function Mt5LiveView({ account, accounts, onJournalNow, onSwitchAccount }
             </li>
             <li>
               <div>
-                <strong>Install in MT5</strong>
+                <strong>Copy it into the terminal and compile</strong>
                 <p>
-                  Copy it to{" "}
-                  <code>
-                    C:\Users\[YourName]\AppData\Roaming\MetaQuotes\Terminal\[ID]\MQL5\Experts\
-                  </code>
-                  . In MT5, open Navigator → Expert Advisors, right-click, then
-                  Refresh. Configure only the generated endpoint and matching API key; do not add a Connection ID. Auto Trading/Algo Trading may remain off because this EA does not execute trades.
+                  In MT5 use File → Open Data Folder, then open{" "}
+                  <code>MQL5\Experts</code> and paste the downloaded file there.
+                  Open it in MetaEditor (double-click it in the Navigator, or
+                  right-click → Modify) and press <b>F7</b> to compile. Compiling
+                  is required: the Navigator only lists an Expert Advisor once
+                  MetaEditor has produced its <code>.ex5</code> file, so a build
+                  with a compile error never appears under Expert Advisors. The
+                  MetaEditor Errors tab must read <b>0 errors</b> before you
+                  continue. Then go back to MT5, open Navigator → Expert
+                  Advisors, right-click and choose Refresh. Configure only the
+                  generated endpoint and matching API key; do not add a
+                  Connection ID. Auto Trading/Algo Trading may remain off because
+                  this EA does not execute trades.
                 </p>
               </div>
             </li>
@@ -738,11 +745,15 @@ export function Mt5LiveView({ account, accounts, onJournalNow, onSwitchAccount }
             </li>
             <li>
               <div>
-                <strong>Restart the EA once</strong>
+                <strong>Attach the EA and confirm first contact</strong>
                 <p>
-                  Attach the EA to any chart and paste the matching API key. In
-                  Experts, first confirm READ-ONLY MODE and API authentication,
-                  then wait for summary, open-position, and history-sync lines.
+                  Drag the EA from Navigator → Expert Advisors onto any chart
+                  (for example XAUUSD M5) and paste the matching API key into its
+                  Inputs. In the Experts tab, first confirm READ-ONLY MODE and
+                  API authentication, then wait for summary, open-position, and
+                  history-sync lines. If you later issue a replacement key,
+                  paste it into the same Inputs and press OK: the running EA
+                  re-authenticates on its next probe, so no re-attach is needed.
                   Keep MT5 open until MT5 Live shows the snapshot and synced
                   positions; those trades then appear automatically in Trade Log.
                 </p>

@@ -33,6 +33,7 @@ import {
   sessions,
   toNumber,
 } from "@/lib/gold";
+import { keepPreviousData } from "@tanstack/react-query";
 import { trpc } from "@/lib/trpc";
 import { getAuthRedirectUrl } from "@/lib/authRedirect";
 import { supabase } from "@/lib/supabase";
@@ -47,6 +48,7 @@ import {
   type JournalViewTarget,
 } from "@/lib/journalViewNavigation";
 import { invalidateAccountScopedQueries } from "@/lib/accountScope";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { OFFLINE_CASH_REQUEST_EVENT } from "@/lib/offlineMutationQueue";
 import { useLocalJournal } from "@/lib/journal/useLocalJournal";
 import { JOURNAL_LOCAL_EVENT } from "@/lib/journal/journalStore";
@@ -62,6 +64,7 @@ import { TradeLogWithViewer } from "@/components/TradeLogWithViewer";
 import { TradeDialogWithCustomOptions } from "@/components/TradeDialogWithCustomOptions";
 import { PnlCalendarWithWeeks } from "@/components/PnlCalendarWithWeeks";
 import { FlexibleGoalsView } from "@/components/FlexibleGoalsView";
+import { TraderDevelopmentPanel } from "@/components/TraderDevelopmentPanel";
 import { SessionRecovery } from "@/components/SessionRecovery";
 import { Mt5LiveView } from "@/components/Mt5LiveView";
 import { UserAiProviderSettings } from "@/components/UserAiProviderSettings";
@@ -92,6 +95,7 @@ import {
   Bell,
   BookOpen,
   Bot,
+  Brain,
   CalendarDays,
   Check,
   ChevronDown,
@@ -129,6 +133,7 @@ type View =
   | "missed"
   | "analysis"
   | "goals"
+  | "psychology"
   | "calendar"
   | "plan"
   | "mentor"
@@ -180,6 +185,7 @@ const navItems: { id: View; label: string; icon: typeof BookOpen }[] = [
   { id: "missed", label: "Missed Trades", icon: Target },
   { id: "analysis", label: "Analysis", icon: BarChart3 },
   { id: "goals", label: "Goals", icon: Goal },
+  { id: "psychology", label: "Psychology", icon: Brain },
   { id: "calendar", label: "PnL Calendar", icon: CalendarDays },
   { id: "plan", label: "Plan & Execution", icon: Check },
   { id: "mentor", label: "AI Mentor", icon: Bot },
@@ -187,6 +193,9 @@ const navItems: { id: View; label: string; icon: typeof BookOpen }[] = [
   { id: "risk", label: "Risk Calculator", icon: CircleDollarSign },
   { id: "options", label: "Options", icon: Settings2 },
 ];
+// The phone bottom bar keeps the six destinations a trader opens mid-session.
+// Every other view stays reachable from the sidebar drawer.
+const mobileNavIds: View[] = ["trades", "analysis", "goals", "psychology", "calendar", "mt5"];
 export const JOURNAL_RETRY_EVENT = "gold-journal:retry";
 const isJournalView = (value: unknown): value is View =>
   navItems.some(item => item.id === value);
@@ -409,6 +418,9 @@ export default function GoldJournal() {
   const [search, setSearch] = useState("");
   const [resultFilter, setResultFilter] = useState("ALL");
   const [tradePage, setTradePage] = useState(1);
+  // Typing must not fire a filtered server read on every keystroke: the input
+  // stays instant and the trade-list query follows a short pause.
+  const debouncedSearch = useDebouncedValue(search, 250);
   const [missedDialog, setMissedDialog] = useState(false);
   useEffect(() => {
     const navigate = (event: Event) => {
@@ -437,12 +449,26 @@ export default function GoldJournal() {
   const accountSelectionResolved =
     accountListQuery.isSuccess || Boolean(accountBootstrap.data?.id);
   const queryInput = useMemo(() => ({ accountId }), [accountId]);
+  // journal.get is the heavy composite read (trades, goal trades, cash
+  // movements, goals, skipped trades, plans, profile, plus two aggregates). It
+  // feeds stats, goals, plans, and the behavioural report, none of which need a
+  // sub-second cadence, so it polls slowly and only while a view shows the
+  // derived data. MT5 Live owns its own fast workspace/history polls.
+  const journalRefetchInterval = (() => {
+    if (view === "trades" || view === "mt5") return 20_000;
+    if (view === "goals" || view === "psychology" || view === "calendar") return 120_000;
+    return false;
+  })();
   const journalQuery = trpc.journal.get.useQuery(queryInput, {
     enabled: Boolean(profileReady && accountSelectionResolved && accountId),
     retry: false,
-    refetchInterval:
-      view === "trades" ? 2_500 : view === "goals" ? 300_000 : false,
+    refetchInterval: journalRefetchInterval,
     refetchOnWindowFocus: true,
+    staleTime: 5_000,
+    // Switching accounts keeps the current view on screen and swaps it in when
+    // the new account resolves, instead of flashing the full-page loader and
+    // looking like the switch did nothing.
+    placeholderData: keepPreviousData,
   });
   const mt5WorkspaceInput = useMemo(
     () => (accountId ? { accountId } : undefined),
@@ -452,8 +478,11 @@ export default function GoldJournal() {
     enabled: Boolean(
       profileReady && mt5WorkspaceInput && (view === "trades" || view === "mt5")
     ),
-    refetchInterval: view === "trades" || view === "mt5" ? 2_500 : false,
+    // The Trade Log only surfaces MT5 open positions as a secondary panel, so
+    // it does not need the 2.5 s live cadence that the MT5 Live view runs.
+    refetchInterval: view === "mt5" ? 2_500 : view === "trades" ? 10_000 : false,
     refetchOnWindowFocus: true,
+    staleTime: 2_000,
   });
   const tradeListInput = useMemo(
     () =>
@@ -462,19 +491,20 @@ export default function GoldJournal() {
             accountId,
             page: tradePage,
             pageSize: 12,
-            search,
+            search: debouncedSearch,
             result:
               resultFilter === "ALL"
                 ? undefined
                 : (resultFilter as "WIN" | "LOSS" | "BREAK_EVEN" | "OPEN"),
           }
         : undefined,
-    [accountId, tradePage, search, resultFilter]
+    [accountId, debouncedSearch, tradePage, resultFilter]
   );
   const tradeListQuery = trpc.trades.list.useQuery(tradeListInput!, {
     enabled: Boolean(profileReady && tradeListInput),
-    refetchInterval: view === "trades" ? 2_500 : false,
+    refetchInterval: view === "trades" ? 10_000 : false,
     refetchOnWindowFocus: true,
+    staleTime: 4_000,
   });
   const utils = trpc.useUtils();
   const createTrade = trpc.trades.create.useMutation();
@@ -622,17 +652,22 @@ export default function GoldJournal() {
   // a cold start, or a temporary backend outage still shows the user's journal.
   const data =
     (journalQuery.data as any) ?? (localJournal.localSnapshot as any) ?? undefined;
+  // The account the UI acts on is always the one the user selected. A server
+  // echo for a different id (a previous account kept alive by placeholder data)
+  // must never win, because that is what silently reverted a switch.
   const account =
-    data?.activeAccount ?? ownedAccounts.find(item => item.id === accountId);
-  const trades = data?.trades ?? [];
-  const goalTrades = data?.goalTrades ?? trades;
-  const cashMovements = data?.cashMovements ?? [];
-  const stats = journalStats(
-    trades,
-    account,
-    cashMovements,
-    data?.cashNet,
-    data?.tradeSummary
+    (data?.activeAccount?.id === accountId ? data.activeAccount : undefined) ??
+    ownedAccounts.find((item: any) => item.id === accountId) ??
+    data?.activeAccount;
+  // Stable references keep the memoised goal assessment and behavioural report
+  // from re-running when an unrelated render happens (search typing, view
+  // switches, notification polls).
+  const trades = useMemo(() => data?.trades ?? [], [data?.trades]);
+  const goalTrades = useMemo(() => data?.goalTrades ?? trades, [data?.goalTrades, trades]);
+  const cashMovements = useMemo(() => data?.cashMovements ?? [], [data?.cashMovements]);
+  const stats = useMemo(
+    () => journalStats(trades, account, cashMovements, data?.cashNet, data?.tradeSummary),
+    [trades, account, cashMovements, data?.cashNet, data?.tradeSummary]
   );
   const activeMt5Connection = mt5Workspace.data?.connections?.find(
     (connection: any) => connection.active
@@ -680,9 +715,10 @@ export default function GoldJournal() {
     [goalEntries]
   );
   useEffect(() => {
-    if (account?.id && account.id !== accountId) setAccountId(account.id);
+    // Publish the resolved account so the account manager, the exporters, the
+    // risk calculator, and MT5 Live all read the same active account.
     if (account?.id) setSelectedAccountId(account.id);
-  }, [account?.id, accountId]);
+  }, [account?.id]);
   useEffect(() => {
     if (!account?.id || !goalAlertPayload.length || recordGoalAlerts.isPending)
       return;
@@ -709,6 +745,17 @@ export default function GoldJournal() {
       }),
     [switchAccount]
   );
+  // Every account-scoped surface (exports, risk sizing, the MT5 view, the
+  // account manager) reads the same shared selection, so switching here must
+  // publish the choice instead of only holding it in local state.
+  const selectAccount = React.useCallback(
+    (nextAccountId: number) => {
+      if (!nextAccountId) return;
+      switchAccount(nextAccountId);
+      setSelectedAccountId(nextAccountId);
+    },
+    [switchAccount]
+  );
   useEffect(() => {
     setTradePage(1);
   }, [accountId, search, resultFilter]);
@@ -722,7 +769,7 @@ export default function GoldJournal() {
     profileLoading ||
     accountBootstrap.isLoading ||
     accountSelectionPending ||
-    (Boolean(accountId) && journalQuery.isLoading);
+    (Boolean(accountId) && journalQuery.isLoading && !journalQuery.isPlaceholderData);
   const journalError = accountBootstrap.error || journalQuery.error;
   const retryJournal = React.useCallback(() => {
     void journalQuery.refetch();
@@ -989,13 +1036,13 @@ export default function GoldJournal() {
         user={user}
         account={account}
         accounts={ownedAccounts.length ? ownedAccounts : (data?.accounts ?? [])}
-        onAccount={switchAccount}
+        onAccount={selectAccount}
         onCreate={async (name: string) => {
           const result = await createAccount.mutateAsync({
             name,
             startingBalance: 0,
           });
-          switchAccount(result.id);
+          selectAccount(result.id);
           toast.success("New trading account created.");
           refresh();
         }}
@@ -1047,7 +1094,7 @@ export default function GoldJournal() {
         user={user}
         onLogout={logout}
         onInstall={requestInstall}
-        onAccount={switchAccount}
+        onAccount={selectAccount}
       />
       <main className="gj-main">
         <MobileTopbar
@@ -1059,6 +1106,9 @@ export default function GoldJournal() {
           online={isOnline}
           alerts={dangerGoals.length}
           onNew={() => openNewTrade()}
+          account={account}
+          accounts={ownedAccounts.length ? ownedAccounts : (data?.accounts ?? [])}
+          onAccount={selectAccount}
         />
         {data?.tradeSummaryError && (
           <div className="derived-status" role="status">
@@ -1087,7 +1137,7 @@ export default function GoldJournal() {
                   <strong>{development.cooldown.status === "SESSION_COMPLETE" ? "SESSION COMPLETE" : "COOLDOWN"}</strong>
                   <span>{development.cooldown.message} {development.cooldown.actions[0] ?? ""}</span>
                 </p>
-                <button type="button" onClick={() => setView("goals")}>Review development</button>
+                <button type="button" onClick={() => setView("psychology")}>Review development</button>
               </section>
             )}
             {view === "trades" && (
@@ -1166,18 +1216,6 @@ export default function GoldJournal() {
                 goals={data?.goals ?? []}
                 trades={goalTrades}
                 plans={data?.dailyPlans ?? []}
-                report={development}
-                identityStatement={(data as any)?.traderProfile?.identityStatement ?? ""}
-                profilePending={saveProfile.isPending}
-                onSaveIdentity={async (statement: string) => {
-                  try {
-                    await saveProfile.mutateAsync({ identityStatement: statement });
-                    toast.success("Trading identity saved.");
-                    refresh();
-                  } catch (error) {
-                    toast.error(error instanceof Error ? error.message : "The identity statement could not be saved.");
-                  }
-                }}
                 pending={
                   createGoal.isPending ||
                   updateGoal.isPending ||
@@ -1217,6 +1255,27 @@ export default function GoldJournal() {
                   refresh();
                 }}
               />
+            )}
+            {view === "psychology" && (
+              <section className="psychology-workspace">
+                {/* The panel owns this destination: session psychology,
+                    behavioural focus, cooldowns, streaks, and identity
+                    consistency, separate from the Goals risk-control desk. */}
+                <TraderDevelopmentPanel
+                  report={development}
+                  identityStatement={(data as any)?.traderProfile?.identityStatement ?? ""}
+                  pending={saveProfile.isPending}
+                  onSaveIdentity={async (statement: string) => {
+                    try {
+                      await saveProfile.mutateAsync({ identityStatement: statement });
+                      toast.success("Trading identity saved.");
+                      refresh();
+                    } catch (error) {
+                      toast.error(error instanceof Error ? error.message : "The identity statement could not be saved.");
+                    }
+                  }}
+                />
+              </section>
             )}
             {view === "calendar" && (
               <CalendarView
@@ -1259,7 +1318,7 @@ export default function GoldJournal() {
                       "MT5 trade auto-filled. Add your analysis details below.",
                   })
                 }
-                onSwitchAccount={switchAccount}
+                onSwitchAccount={selectAccount}
               />
             )}
           </div>
@@ -1488,7 +1547,28 @@ function JournalSyncIndicator() {
     </span>
   );
 }
-function PageHeader({ view, online, onNew }: any) {
+function AccountSwitcher({ account, accounts, onAccount }: any) {
+  if (!accounts?.length) return null;
+  return (
+    <label className="pagebar-account">
+      <Wallet size={14} />
+      <span className="sr-only">Active trading account</span>
+      <select
+        aria-label="Active trading account"
+        value={account?.id || ""}
+        onChange={event => onAccount(Number(event.target.value))}
+      >
+        {accounts.map((item: any) => (
+          <option key={item.id} value={item.id}>
+            {item.name}
+          </option>
+        ))}
+      </select>
+      <ChevronDown size={14} />
+    </label>
+  );
+}
+function PageHeader({ view, online, onNew, account, accounts, onAccount }: any) {
   const title =
     navItems.find(item => item.id === view)?.label || "Gold Journal";
   return (
@@ -1500,6 +1580,7 @@ function PageHeader({ view, online, onNew }: any) {
           <h1>{title}</h1>
         </div>
         <div className="pagebar-actions">
+          <AccountSwitcher account={account} accounts={accounts} onAccount={onAccount} />
           <span className="sync-chip">
             <Cloud size={14} /> {online ? "Live cloud sync" : "Offline"}
           </span>
@@ -1521,9 +1602,12 @@ function MobileNav({
   active: View;
   onView: (view: View) => void;
 }) {
+  const items = mobileNavIds
+    .map(id => navItems.find(item => item.id === id))
+    .filter((item): item is (typeof navItems)[number] => Boolean(item));
   return (
     <nav className="mobile-bottom-nav">
-      {navItems.slice(0, 5).map(item => {
+      {items.map(item => {
         const Icon = item.icon;
         return (
           <button

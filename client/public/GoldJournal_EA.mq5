@@ -1,5 +1,5 @@
 #property strict
-#property version   "2.16"
+#property version   "2.17"
 #property description "Gold Journal read-only journal bridge: never places or manages trades; sends account, position, and history facts to Gold Journal."
 
 input string Endpoint = "__GOLD_JOURNAL_MT5_ENDPOINT__";
@@ -18,7 +18,7 @@ input int MaxRetrySeconds = 60;
 // batches), so this must never exceed its 200-position cap.
 input int MaxOpenPositionsPerBatch = 200;
 
-const string EA_VERSION = "2.16.0";
+const string EA_VERSION = "2.17.0";
 const string PAYLOAD_VERSION = "2";
 const int REQUEST_TIMEOUT_MS = 15000;
 const int HISTORY_BATCH_SIZE = 50;
@@ -99,6 +99,13 @@ datetime g_last_open_success = 0;
 datetime g_last_history_success = 0;
 int g_consecutive_failures = 0;
 int g_config_failures = 0;
+// Repeated-status tracking for the two latching configuration faults (retired
+// key, wrong endpoint). The last observed HTTP status and how many times in a
+// row it repeated keep the log line actionable and quiet.
+int g_config_last_auth_status = 0;
+int g_config_auth_streak = 0;
+int g_config_last_endpoint_status = 0;
+int g_config_endpoint_streak = 0;
 bool g_requires_revalidation = false;
 bool g_config_warning_logged = false;
 bool g_compatibility_reported = false;
@@ -328,7 +335,7 @@ void MarkEventFailure(string expectedEvent, int status, string detail, int retry
          PrintFormat("[MT5 LIVE] API key rejected or retired; operation=%s; http=%d. Issue a replacement key in Gold Journal MT5 Live, paste it into the EA Inputs, and apply. The EA keeps probing and resumes automatically.", expectedEvent, status);
          g_config_warning_logged = true;
       } else {
-         PrintFormat("[MT5 LIVE] auth probe still failing; operation=%s; http=%d; failures=%d; retry_in=%ds", expectedEvent, status, g_config_failures, delay);
+         PrintFormat("[MT5 LIVE] auth probe still failing; operation=%s; http=%d; failures=%d; repeats=%d; retry_in=%ds", expectedEvent, status, g_config_failures, g_config_auth_streak, delay);
       }
       SetState(EA_AUTH_ERROR);
       return;
@@ -349,7 +356,7 @@ void MarkEventFailure(string expectedEvent, int status, string detail, int retry
          PrintFormat("[MT5 LIVE] MT5 endpoint not found; operation=%s; http=%d; endpoint=%s. Download a fresh EA from the same Gold Journal deployment. The EA keeps probing and resumes automatically.", expectedEvent, status, Endpoint);
          g_config_warning_logged = true;
       } else {
-         PrintFormat("[MT5 LIVE] endpoint probe still failing; operation=%s; http=%d; retry_in=%ds", expectedEvent, status, delay);
+         PrintFormat("[MT5 LIVE] endpoint probe still failing; operation=%s; http=%d; repeats=%d; retry_in=%ds", expectedEvent, status, g_config_endpoint_streak, delay);
       }
       SetState(EA_CONFIG_ERROR);
       return;

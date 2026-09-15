@@ -1,9 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bot, CircleDollarSign, ShieldAlert } from "lucide-react";
 import { Field, RiskMetric } from "@/components/journalPrimitives";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { getSelectedAccountId } from "@/lib/accountSelection";
+import { getSelectedAccountId, subscribeSelectedAccount } from "@/lib/accountSelection";
 import { AI_UI_COPY, coachRisk, type AiRiskCoachOutcome } from "@/lib/ai/aiService";
 import { uiStateForErrorCode, type AiUiState } from "@/lib/ai/aiTypes";
 import { useAiSettings } from "@/lib/ai/useAiSettings";
@@ -17,7 +17,10 @@ import { trpc } from "@/lib/trpc";
  * review runs in this browser against the user's own Google AI Studio key.
  */
 export function RiskCalculatorPanel() {
-  const accountId = getSelectedAccountId();
+  // Position sizing must follow the active account, so the panel subscribes to
+  // the shared selection instead of reading it once at render time.
+  const [accountId, setAccountId] = useState<number | undefined>(() => getSelectedAccountId());
+  useEffect(() => subscribeSelectedAccount(setAccountId), []);
   const [basis, setBasis] = useState<"EQUITY" | "BALANCE">("EQUITY");
   const [riskPercent, setRiskPercent] = useState("1");
   const [entryPrice, setEntryPrice] = useState("");

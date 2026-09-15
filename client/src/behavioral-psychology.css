@@ -1,0 +1,220 @@
+/* Trader development / behavioural psychology surfaces.
+   Built only from the existing theme tokens (--gj-*, --success, --warning,
+   --destructive) so light and dark mode both stay readable.
+
+   This stylesheet owns three groups of UI that ship as separate pages/blocks:
+     1. the dev- prefixed classes — the Psychology page (TraderDevelopmentPanel)
+     2. the day-behavior and day-class-chip classes — the P&L calendar day
+        drill-down (execution, psychology, and trade classification)
+     3. the gate, taxonomy, process-preview, and plan-readiness classes — the
+        trade dialog pre-trade gate and the Plan & Execution check-in. */
+
+.dev-workspace { display: grid; gap: 16px; }
+.dev-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 20px 22px; border: 1px solid var(--gj-line); border-radius: 16px; background: linear-gradient(118deg, color-mix(in srgb, var(--gj-panel) 95%, transparent), color-mix(in srgb, var(--gj-gold) 6%, var(--gj-panel))); box-shadow: var(--gj-depth-1); }
+.dev-header > div:first-child { display: grid; gap: 7px; max-width: 760px; }
+.dev-header h2 { margin: 0; color: var(--gj-text); font-size: clamp(19px, 1.9vw, 26px); letter-spacing: -.03em; }
+.dev-header p { margin: 0; color: var(--gj-subtext); font-size: 12px; line-height: 1.55; }
+.dev-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.dev-score { display: grid; justify-items: end; gap: 4px; padding: 12px 16px; border: 1px solid var(--gj-line); border-radius: 13px; background: var(--gj-panel-2); min-width: 168px; }
+.dev-score > span { color: var(--gj-dim); font: 800 8px "DM Mono", monospace; letter-spacing: .1em; }
+.dev-score strong { color: var(--gj-text); font-size: 34px; line-height: 1; }
+.dev-score small { color: var(--gj-subtext); font-size: 10px; text-align: right; }
+.dev-score.safe { border-color: color-mix(in srgb, var(--success) 45%, var(--gj-line)); }
+.dev-score.safe strong { color: var(--success); }
+.dev-score.watch { border-color: color-mix(in srgb, var(--warning) 45%, var(--gj-line)); }
+.dev-score.watch strong { color: var(--warning); }
+.dev-score.risk { border-color: color-mix(in srgb, var(--destructive) 55%, var(--gj-line)); }
+.dev-score.risk strong { color: var(--destructive); }
+
+.dev-stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 11px; }
+.dev-stat { display: grid; gap: 6px; min-width: 0; padding: 14px 15px; border: 1px solid var(--gj-line); border-radius: 12px; background: var(--gj-panel); box-shadow: var(--gj-depth-1); }
+.dev-stat > span { color: var(--gj-dim); font: 800 8px "DM Mono", monospace; letter-spacing: .1em; }
+.dev-stat strong { color: var(--gj-text); font-size: 24px; line-height: 1; }
+.dev-stat small { overflow: hidden; color: var(--gj-subtext); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.dev-stat.safe strong { color: var(--success); }
+.dev-stat.watch strong { color: var(--warning); }
+.dev-stat.risk strong { color: var(--destructive); }
+
+.dev-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; align-items: start; }
+.dev-panel { display: grid; gap: 14px; }
+.dev-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dev-panel-head h3 { margin: 5px 0 0; color: var(--gj-text); font-size: 15px; }
+.dev-panel-head-actions { display: flex; align-items: center; gap: 8px; color: var(--gj-gold); }
+
+.dev-breakdown { display: grid; gap: 9px; }
+.dev-breakdown-row { display: grid; grid-template-columns: minmax(140px, 1.1fr) minmax(80px, 1fr) 42px minmax(58px, auto); align-items: center; gap: 10px; }
+.dev-breakdown-row > span { color: var(--gj-subtext); font-size: 11px; }
+.dev-breakdown-row > i { display: block; height: 6px; overflow: hidden; border-radius: 99px; background: var(--gj-panel-2); }
+.dev-breakdown-row > i > b { display: block; height: 100%; min-width: 2px; border-radius: inherit; background: var(--gj-gold); transition: width .4s var(--ease-out, cubic-bezier(.23, 1, .32, 1)); }
+.dev-breakdown-row > i > b.safe { background: var(--success); }
+.dev-breakdown-row > i > b.watch { background: var(--warning); }
+.dev-breakdown-row > i > b.risk { background: var(--destructive); }
+.dev-breakdown-row > strong { color: var(--gj-text); font-size: 13px; text-align: right; }
+.dev-breakdown-row > em { color: var(--gj-dim); font-size: 9px; font-style: normal; text-align: right; }
+
+.dev-note { margin: 0; color: var(--gj-subtext); font-size: 10px; line-height: 1.55; }
+.dev-empty { margin: 0; color: var(--gj-subtext); font-size: 11px; line-height: 1.55; }
+
+.dev-focus { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.dev-focus > div { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--gj-line); border-radius: 10px; background: var(--gj-panel-2); }
+.dev-focus span { color: var(--gj-dim); font: 800 8px "DM Mono", monospace; letter-spacing: .08em; }
+.dev-focus strong { color: var(--gj-text); font-size: 18px; }
+.dev-recommendation { margin: 0; padding: 12px 14px; border-left: 3px solid var(--gj-gold); border-radius: 0 9px 9px 0; color: var(--gj-text); background: color-mix(in srgb, var(--gj-gold) 6%, var(--gj-panel)); font-size: 11px; line-height: 1.5; }
+
+.dev-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.dev-list li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 11px; }
+.dev-list li > span { color: var(--gj-subtext); min-width: 0; }
+.dev-list li > b { color: var(--gj-text); font-weight: 600; text-align: right; }
+.dev-list.compact li { font-size: 10px; }
+
+.dev-cooldown, .dev-readiness { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; padding: 12px 14px; border: 1px solid var(--gj-line); border-radius: 11px; background: var(--gj-panel-2); }
+.dev-cooldown > svg, .dev-readiness > svg { margin-top: 2px; color: var(--gj-gold); }
+.dev-cooldown > div, .dev-readiness > div { display: grid; gap: 5px; }
+.dev-cooldown strong, .dev-readiness strong { color: var(--gj-text); font-size: 12px; }
+.dev-cooldown span, .dev-readiness span { color: var(--gj-subtext); font-size: 10px; line-height: 1.5; }
+.dev-cooldown.watch, .dev-readiness.watch { border-color: color-mix(in srgb, var(--warning) 45%, var(--gj-line)); }
+.dev-cooldown.risk, .dev-readiness.risk { border-color: color-mix(in srgb, var(--destructive) 50%, var(--gj-line)); }
+.dev-cooldown.risk > svg, .dev-readiness.risk > svg { color: var(--destructive); }
+.dev-readiness.safe { border-color: color-mix(in srgb, var(--success) 40%, var(--gj-line)); }
+.dev-readiness.safe > svg { color: var(--success); }
+
+.dev-versus { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.dev-versus > div { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--gj-line); border-radius: 10px; background: var(--gj-panel-2); }
+.dev-versus span { color: var(--gj-dim); font: 800 8px "DM Mono", monospace; letter-spacing: .08em; }
+.dev-versus strong { color: var(--gj-text); font-size: 16px; }
+.dev-versus small { color: var(--gj-subtext); font-size: 9px; line-height: 1.4; }
+.dev-versus .safe { border-color: color-mix(in srgb, var(--success) 40%, var(--gj-line)); }
+.dev-versus .watch { border-color: color-mix(in srgb, var(--warning) 45%, var(--gj-line)); }
+
+.dev-classifications { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.dev-classification { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--gj-line); border-radius: 10px; background: var(--gj-panel-2); }
+.dev-classification span { color: var(--gj-dim); font: 800 8px "DM Mono", monospace; letter-spacing: .08em; }
+.dev-classification strong { color: var(--gj-text); font-size: 20px; }
+.dev-classification small { color: var(--gj-subtext); font-size: 9px; }
+.dev-classification.safe { border-color: color-mix(in srgb, var(--success) 38%, var(--gj-line)); }
+.dev-classification.risk { border-color: color-mix(in srgb, var(--destructive) 42%, var(--gj-line)); }
+
+.dev-pnl-split { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.dev-pnl-split > div { display: grid; gap: 4px; padding: 11px 12px; border: 1px solid var(--gj-line); border-radius: 10px; background: var(--gj-panel-2); }
+.dev-pnl-split span { color: var(--gj-dim); font: 800 8px "DM Mono", monospace; letter-spacing: .08em; }
+.dev-pnl-split strong { font-size: 15px; }
+
+.dev-streaks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.dev-streaks > div { display: grid; gap: 5px; padding: 12px; border: 1px solid var(--gj-line); border-radius: 10px; background: var(--gj-panel-2); }
+.dev-streaks strong { color: var(--gj-text); font-size: 22px; line-height: 1; }
+.dev-streaks span { color: var(--gj-subtext); font-size: 9px; line-height: 1.35; }
+.dev-streaks .safe strong { color: var(--success); }
+
+.dev-weekly { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.dev-weekly > div { display: grid; gap: 6px; padding: 11px 12px; border: 1px solid var(--gj-line); border-radius: 10px; background: var(--gj-panel-2); }
+.dev-weekly span { color: var(--gj-subtext); font-size: 10px; }
+.dev-weekly strong { color: var(--gj-text); font-size: 17px; }
+.dev-weekly i { display: block; height: 5px; overflow: hidden; border-radius: 99px; background: var(--gj-panel); }
+.dev-weekly i > b { display: block; height: 100%; border-radius: inherit; background: var(--gj-gold); }
+.dev-weekly .safe i > b { background: var(--success); }
+.dev-weekly .watch i > b { background: var(--warning); }
+.dev-weekly .risk i > b { background: var(--destructive); }
+
+.dev-weekly-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.dev-weekly-summary > div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 9px; padding: 12px; border: 1px solid var(--gj-line); border-radius: 10px; background: var(--gj-panel-2); }
+.dev-weekly-summary svg { grid-row: 1 / span 2; margin-top: 2px; }
+.dev-weekly-summary span { color: var(--gj-dim); font: 800 8px "DM Mono", monospace; letter-spacing: .08em; }
+.dev-weekly-summary strong { color: var(--gj-text); font-size: 11px; font-weight: 600; line-height: 1.45; }
+.dev-weekly-summary .safe svg { color: var(--success); }
+.dev-weekly-summary .risk svg { color: var(--destructive); }
+.dev-weekly-summary .watch svg { color: var(--warning); }
+
+.dev-insights { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.dev-insights li { display: grid; gap: 4px; padding: 11px 13px; border: 1px solid var(--gj-line); border-radius: 10px; background: var(--gj-panel-2); }
+.dev-insights em { font: 800 8px "DM Mono", monospace; letter-spacing: .1em; }
+.dev-insights .observed em { color: var(--gj-gold); }
+.dev-insights .interpretation { border-style: dashed; }
+.dev-insights .interpretation em { color: var(--warning); }
+.dev-insights span { color: var(--gj-subtext); font-size: 10px; line-height: 1.5; }
+
+.dev-identity { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; align-items: start; }
+.dev-identity > strong { color: var(--gj-text); font-size: 30px; line-height: 1; }
+
+/* Behavioural cooldown banner on the Trade Log. */
+.behavior-banner { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 13px 16px; border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--gj-line)); border-radius: 12px; background: color-mix(in srgb, var(--warning) 7%, var(--gj-panel)); }
+.behavior-banner > svg { color: var(--warning); }
+.behavior-banner.complete { border-color: color-mix(in srgb, var(--destructive) 50%, var(--gj-line)); background: color-mix(in srgb, var(--destructive) 6%, var(--gj-panel)); }
+.behavior-banner.complete > svg { color: var(--destructive); }
+.behavior-banner p { display: grid; gap: 3px; margin: 0; }
+.behavior-banner strong { color: var(--gj-text); font-size: 12px; }
+.behavior-banner span { color: var(--gj-subtext); font-size: 10px; line-height: 1.45; }
+.behavior-banner button { color: var(--gj-gold-text); font-size: 10px; text-decoration: underline; white-space: nowrap; }
+
+/* Calendar day drill-down: execution + psychology. */
+.day-behavior { display: grid; gap: 12px; }
+.day-behavior-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 11px; }
+.day-behavior-card { display: grid; gap: 7px; padding: 13px; border: 1px solid var(--gj-line); border-radius: 11px; background: var(--gj-panel-2); }
+.day-behavior-card > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.day-behavior-card > header span { color: var(--gj-dim); font: 800 8px "DM Mono", monospace; letter-spacing: .1em; }
+.day-behavior-card > header svg { color: var(--gj-gold); }
+.day-behavior-card ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.day-behavior-card li { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; color: var(--gj-subtext); font-size: 10px; }
+.day-behavior-card li b { color: var(--gj-text); font-weight: 600; }
+.day-behavior-card.safe { border-color: color-mix(in srgb, var(--success) 38%, var(--gj-line)); }
+.day-behavior-card.risk { border-color: color-mix(in srgb, var(--destructive) 42%, var(--gj-line)); }
+.day-behavior-lesson { margin: 0; padding: 11px 13px; border-left: 3px solid var(--gj-gold); border-radius: 0 9px 9px 0; color: var(--gj-subtext); background: color-mix(in srgb, var(--gj-gold) 6%, var(--gj-panel)); font-size: 10px; line-height: 1.55; }
+.day-class-chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border: 1px solid var(--gj-line); border-radius: 99px; color: var(--gj-subtext); font-size: 9px; background: var(--gj-panel); }
+.day-class-chip.safe { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, var(--gj-line)); }
+.day-class-chip.risk { color: var(--destructive); border-color: color-mix(in srgb, var(--destructive) 40%, var(--gj-line)); }
+
+/* Plan page: psychological check-in. */
+.field-hint { color: var(--gj-dim); font-size: 9px; font-weight: 500; letter-spacing: normal; }
+.plan-rules-empty { display: grid; gap: 8px; justify-items: start; padding: 4px 0; }
+.plan-rules-empty p { margin: 0; color: var(--gj-subtext); font-size: 10px; line-height: 1.5; }
+.plan-readiness { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; padding: 12px 14px; border: 1px solid var(--gj-line); border-radius: 11px; background: var(--gj-panel-2); }
+.plan-readiness > svg { margin-top: 2px; color: var(--gj-gold); }
+.plan-readiness > div { display: grid; gap: 4px; }
+.plan-readiness strong { color: var(--gj-text); font-size: 12px; }
+.plan-readiness span { color: var(--gj-subtext); font-size: 10px; line-height: 1.5; }
+.plan-readiness.safe { border-color: color-mix(in srgb, var(--success) 40%, var(--gj-line)); }
+.plan-readiness.safe > svg { color: var(--success); }
+.plan-readiness.watch { border-color: color-mix(in srgb, var(--warning) 45%, var(--gj-line)); }
+.plan-readiness.watch > svg { color: var(--warning); }
+.plan-readiness.risk { border-color: color-mix(in srgb, var(--destructive) 45%, var(--gj-line)); }
+.plan-readiness.risk > svg { color: var(--destructive); }
+
+/* Trade dialog: pre-trade gate and taxonomy. */
+.gate-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.gate-grid button { min-height: 30px; padding: 0 10px; border: 1px solid var(--gj-line); border-radius: 99px; color: var(--gj-subtext); font-size: 10px; background: var(--gj-panel-2); }
+.gate-grid button.checked { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, var(--gj-line)); background: color-mix(in srgb, var(--success) 9%, var(--gj-panel)); }
+.gate-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--gj-subtext); font-size: 10px; }
+.plan-status-options, .taxonomy-group { display: flex; flex-wrap: wrap; gap: 6px; }
+.plan-status-options button, .taxonomy-group button { min-height: 28px; padding: 0 9px; border: 1px solid var(--gj-line); border-radius: 99px; color: var(--gj-subtext); font-size: 10px; background: var(--gj-panel-2); }
+.plan-status-options button.selected { color: var(--gj-gold-text); border-color: color-mix(in srgb, var(--gj-gold) 55%, var(--gj-line)); background: color-mix(in srgb, var(--gj-gold) 10%, var(--gj-panel)); }
+.taxonomy-group button.selected { color: var(--destructive); border-color: color-mix(in srgb, var(--destructive) 50%, var(--gj-line)); background: color-mix(in srgb, var(--destructive) 9%, var(--gj-panel)); }
+.taxonomy-wrap { display: grid; gap: 10px; }
+.taxonomy-category { display: grid; gap: 6px; }
+.taxonomy-category > span { color: var(--gj-gold); font: 800 8px "DM Mono", monospace; letter-spacing: .1em; }
+.process-preview { display: grid; gap: 5px; padding: 11px 13px; border-left: 3px solid var(--gj-gold); border-radius: 0 9px 9px 0; background: color-mix(in srgb, var(--gj-gold) 6%, var(--gj-panel)); }
+.process-preview strong { color: var(--gj-text); font-size: 12px; }
+.process-preview span { color: var(--gj-subtext); font-size: 10px; line-height: 1.5; }
+.process-preview.bad { border-color: var(--destructive); background: color-mix(in srgb, var(--destructive) 6%, var(--gj-panel)); }
+.process-preview.good { border-color: var(--success); background: color-mix(in srgb, var(--success) 6%, var(--gj-panel)); }
+
+/* The Psychology destination: the trader development panel is the page, laid
+   out with the same rhythm as the Goals control desk so the two read as one
+   control system. */
+.psychology-workspace { display: grid; gap: 16px; max-width: 1420px; margin: 0 auto; padding: 4px 0 24px; }
+
+@media (max-width: 1050px) {
+  .dev-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dev-columns { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 700px) {
+  .dev-header { align-items: flex-start; flex-direction: column; padding: 17px; }
+  .dev-score { justify-items: start; width: 100%; }
+  .dev-score small { text-align: left; }
+  .dev-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .dev-breakdown-row { grid-template-columns: minmax(110px, 1.2fr) minmax(48px, 1fr) 34px; }
+  .dev-breakdown-row > em { display: none; }
+  .dev-focus, .dev-versus, .dev-streaks, .dev-pnl-split, .dev-classifications { grid-template-columns: 1fr; }
+  .dev-identity { grid-template-columns: 1fr; }
+  .behavior-banner { grid-template-columns: auto minmax(0, 1fr); align-items: flex-start; }
+  .behavior-banner button { grid-column: 2; white-space: normal; text-align: left; }
+}

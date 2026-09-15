@@ -4,13 +4,33 @@ import { describe, expect, it } from "vitest";
 const source = readFileSync(new URL("../../public/GoldJournal_EA.mq5", import.meta.url), "utf8");
 
 describe("Gold Journal MT5 EA reliability contract", () => {
+  it("declares every global it uses, so the EA compiles and appears in the MT5 Navigator", () => {
+    // A used-but-undeclared global is a hard MetaEditor error: the compiler
+    // produces no .ex5 file, so the EA never appears under Navigator > Expert
+    // Advisors. This test is the guard against that class of regression.
+    const declared = new Set<string>();
+    for (const line of source.split("\n")) {
+      if (!/^[A-Za-z#]/.test(line)) continue;
+      for (const match of line.matchAll(/\b(g_[A-Za-z0-9_]+)\s*(?:\[\d*\])?\s*(?:=|;|,)/g)) declared.add(match[1]);
+    }
+    const used = new Set<string>([...source.matchAll(/\bg_[A-Za-z0-9_]+/g)].map(match => match[0]));
+    const undeclared = [...used].filter(identifier => !declared.has(identifier));
+    expect(undeclared).toEqual([]);
+  });
+
   it("keeps the three-second cadence while using bounded retry for transient HTTP failures", () => {
-    expect(source).toContain('#property version   "2.16"');
+    expect(source).toContain('#property version   "2.17"');
     expect(source).toContain("input int SyncSeconds = 3");
     // The transient-backoff ceiling is now a clamped EA input (default 60 s,
     // hard-capped at 900 s) instead of a magic constant.
     expect(source).toContain("input int MaxRetrySeconds = 60;");
     expect(source).toContain("const int MAX_RETRY_BACKOFF_SECONDS = 60");
+    // Repeated configuration faults keep their own streak so the throttled log
+    // line stays actionable instead of printing the same text forever.
+    expect(source).toContain("int g_config_last_auth_status = 0;");
+    expect(source).toContain("int g_config_auth_streak = 0;");
+    expect(source).toContain("int g_config_last_endpoint_status = 0;");
+    expect(source).toContain("int g_config_endpoint_streak = 0;");
     expect(source).toContain("const int MAX_RETRY_CEILING_SECONDS = 900");
     expect(source).toContain("bool IsTransientStatus(int status)");
     // Server-side 4xx payload rejections (422 invalid data/timestamp, 400,
