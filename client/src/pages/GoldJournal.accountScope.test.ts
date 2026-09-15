@@ -9,9 +9,18 @@ describe("Gold Journal account switching", () => {
   it("uses the shared full account-scope invalidation helper for direct switches and refreshes", () => {
     const source = readJournal();
 
-    expect(source).toContain('import { invalidateAccountScopedQueries } from "@/lib/accountScope";');
+    expect(source).toContain('import { invalidateAccountScopedQueries, resolveActiveAccount } from "@/lib/accountScope";');
     expect(source).toMatch(/const switchAccount = React\.useCallback\([\s\S]*?setAccountId\(nextAccountId\);[\s\S]*?invalidateAccountScopedQueries\(utils\)/);
     expect(source).toContain("const refresh = () => invalidateAccountScopedQueries(utils);");
+  });
+
+  it("resolves the active account through the guarded helper so a cold start cannot crash", () => {
+    const source = readJournal();
+
+    // An inline `data?.activeAccount?.id === accountId ? data.activeAccount`
+    // matched on two undefineds and then dereferenced an undefined payload.
+    expect(source).toMatch(/const account = resolveActiveAccount\(\s*data\?\.activeAccount,\s*ownedAccounts as \{ id: number \}\[\],\s*accountId\s*\)/);
+    expect(source).not.toMatch(/data\.activeAccount/);
   });
 
   it("publishes every user-initiated switch through the shared account selection", () => {

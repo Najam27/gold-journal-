@@ -47,7 +47,7 @@ import {
   openJournalView,
   type JournalViewTarget,
 } from "@/lib/journalViewNavigation";
-import { invalidateAccountScopedQueries } from "@/lib/accountScope";
+import { invalidateAccountScopedQueries, resolveActiveAccount } from "@/lib/accountScope";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { OFFLINE_CASH_REQUEST_EVENT } from "@/lib/offlineMutationQueue";
 import { useLocalJournal } from "@/lib/journal/useLocalJournal";
@@ -654,11 +654,14 @@ export default function GoldJournal() {
     (journalQuery.data as any) ?? (localJournal.localSnapshot as any) ?? undefined;
   // The account the UI acts on is always the one the user selected. A server
   // echo for a different id (a previous account kept alive by placeholder data)
-  // must never win, because that is what silently reverted a switch.
-  const account =
-    (data?.activeAccount?.id === accountId ? data.activeAccount : undefined) ??
-    ownedAccounts.find((item: any) => item.id === accountId) ??
-    data?.activeAccount;
+  // must never win, because that is what silently reverted a switch. Both the
+  // selection and the payload can be unknown on a cold start, so the shared
+  // helper never compares a missing selection as though it were an id.
+  const account = resolveActiveAccount(
+    data?.activeAccount,
+    ownedAccounts as { id: number }[],
+    accountId
+  );
   // Stable references keep the memoised goal assessment and behavioural report
   // from re-running when an unrelated render happens (search typing, view
   // switches, notification polls).

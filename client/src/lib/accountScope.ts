@@ -14,6 +14,25 @@ function safeInvalidate(target: { invalidate?: Invalidate } | undefined) {
   try { return Promise.resolve(target?.invalidate?.()).catch(() => undefined); } catch { return Promise.resolve(); }
 }
 
+/**
+ * Picks the trading account the UI must act on.
+ *
+ * The selected account always wins. A server payload is only trusted when its
+ * own id already matches the selection, because journal queries keep the
+ * previous account's data alive while the next one loads. Both sides can be
+ * unknown at the same time (a cold start before the first account is selected),
+ * so a missing selection must never be compared as if it were an id.
+ */
+export function resolveActiveAccount<T extends { id: number }>(
+  serverAccount: T | null | undefined,
+  accounts: readonly T[] | null | undefined,
+  accountId: number | undefined
+): T | undefined {
+  if (serverAccount && accountId != null && serverAccount.id === accountId) return serverAccount;
+  const owned = (accounts ?? []).find(item => item?.id === accountId);
+  return owned ?? serverAccount ?? undefined;
+}
+
 export function invalidateAccountScopedQueries(utils: AccountScopedUtils) {
   const invalidations = [
     safeInvalidate(utils.journal?.get),

@@ -1,5 +1,32 @@
 import { describe, expect, it, vi } from "vitest";
-import { invalidateAccountScopedQueries } from "./accountScope";
+import { invalidateAccountScopedQueries, resolveActiveAccount } from "./accountScope";
+
+describe("resolveActiveAccount", () => {
+  const accounts = [
+    { id: 1, name: "Primary" },
+    { id: 2, name: "Funded" },
+  ];
+
+  it("survives a cold start where the selection and the payload are both unknown", () => {
+    // This exact combination crashed the dashboard: undefined === undefined
+    // matched and then read a property off an undefined payload.
+    expect(resolveActiveAccount(undefined, undefined, undefined)).toBeUndefined();
+    expect(resolveActiveAccount(null, [], undefined)).toBeUndefined();
+    expect(resolveActiveAccount(undefined, [], 3)).toBeUndefined();
+  });
+
+  it("keeps the user's selection while the previous account payload is still cached", () => {
+    expect(resolveActiveAccount({ id: 1, name: "Primary" }, accounts, 2)).toMatchObject({ id: 2, name: "Funded" });
+  });
+
+  it("trusts a matching server payload and prefers it over the summary list", () => {
+    expect(resolveActiveAccount({ id: 2, name: "Funded live" }, accounts, 2)).toMatchObject({ name: "Funded live" });
+  });
+
+  it("falls back to the payload when the owned-account list has not loaded yet", () => {
+    expect(resolveActiveAccount({ id: 7, name: "Restored" }, [], 7)).toMatchObject({ id: 7 });
+  });
+});
 
 describe("account-scoped query invalidation", () => {
   it("does not turn a missing or rejected optional invalidation into a mutation failure", async () => {
