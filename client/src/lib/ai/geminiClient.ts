@@ -1,23 +1,26 @@
 /**
- * Minimal, dependency-free Google AI Studio (Gemini) client that runs in the
- * user's browser.
+ * Google AI Studio (Gemini) transport that runs in the user's browser.
  *
  * The request goes straight from this browser to Google's Generative Language
  * API over HTTPS. It is never proxied through Cloudflare, a Worker, a
  * serverless function, or any Gold Journal backend, and the API key is never
- * placed in a URL, log line, or telemetry payload: the `x-goog-api-key`
- * header carries it on every call.
+ * placed in a URL, log line, or telemetry payload: the `x-goog-api-key` header
+ * carries it on every call.
  */
+import { normalizeGeminiModelId, rankGeminiModels } from "@shared/aiCore";
 import { AiError } from "./aiTypes";
 
 export const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 export const GEMINI_MODELS_URL = `${GEMINI_BASE_URL}/models`;
 
-/** Providers we treat as "the key itself is wrong" regardless of status code. */
-function isKeyRejection(status: number, providerMessage: string): boolean {
-  if (status === 401 || status === 403) return true;
-  if (status === 400 && /API.?key/i.test(providerMessage)) return true;
-  return false;
+/** One listing page. Google caps a page at 1000 entries; 200 keeps it to one round trip for most keys. */
+const MODELS_PAGE_SIZE = 200;
+const MODELS_MAX_PAGES = 5;
+
+function modelsPageUrl(pageToken?: string): string {
+  const params = new URLSearchParams({ pageSize: String(MODELS_PAGE_SIZE) });
+  if (pageToken) params.set("pageToken", pageToken);
+  return `${GEMINI_MODELS_URL}?${params.toString()}`;
 }
 
 /** Anything that looks like a provider credential must never reach an error string. */
@@ -31,13 +34,38 @@ function sanitizeProviderMessage(message: string): string {
   return message.replace(KEY_LIKE, "[redacted]").replace(/\s+/g, " ").trim().slice(0, 180);
 }
 
+const MODEL_NOT_FOUND_HINT = /not found|not exist|no such model|unknown model|is not available|isn't available|invalid model/i;
+const MODEL_UNSUPPORTED_HINT = /not supported|unsupported|does not support|don't support|supported generation methods|not available for|only supports/i;
+const QUOTA_HINT = /quota|billing|spending limit|free tier|credit|resource_exhausted|per day|daily limit|exceeded your current/i;
+const SCHEMA_HINT = /response_?schema|responseSchema|invalid json payload|unknown name|schema/i;
+
+function isKeyRejection(status: number, providerMessage: string): boolean {
+  if (status === 401) return true;
+  if (status === 400 && /api.?key/i.test(providerMessage)) return true;
+  if (status === 403) return !QUOTA_HINT.test(providerMessage);
+  return false;
+}
+
+/**
+ * Maps a Gemini HTTP status onto a stable internal error code so the UI can
+ * explain *why* a request failed instead of showing a generic "provider error".
+ */
 function classifyStatus(status: number, providerMessage = ""): AiError {
-  if (isKeyRejection(status, providerMessage)) return new AiError("invalid_key", "Google AI rejected this API key. Check the key in AI settings.", status);
-  if (status === 404) return new AiError("provider_error", "The selected Google AI model was not found. Pick a different Gemini model in AI settings.", status);
-  if (status === 429) return new AiError("rate_limited", "Google AI rate-limited this request. Wait a moment and retry.", status);
-  if (status >= 500) return new AiError("provider_error", "The Google AI service is temporarily unavailable. Please retry.", status);
   const detail = sanitizeProviderMessage(providerMessage);
-  return new AiError("provider_error", detail ? `Google AI rejected the request (HTTP ${status}): ${detail}` : `Google AI rejected the request (HTTP ${status}). Check the selected model or retry.`, status);
+  if (isKeyRejection(status, detail)) return new AiError("invalid_key", "Gemini rejected this API key. Check the key in AI settings.", status);
+  if (status === 400 && MODEL_NOT_FOUND_HINT.test(detail)) return new AiError("model_not_found", "The selected Gemini model is no longer offered. Choose an available model in AI settings.", status);
+  if (status === 404) return new AiError("model_not_found", "The selected Gemini model is unavailable for this API key. Choose an available model in AI settings.", status);
+  if (status === 400 && MODEL_UNSUPPORTED_HINT.test(detail)) return new AiError("model_unsupported", "The selected Gemini model does not support generateContent. Choose another available model.", status);
+  if (status === 429) {
+    return QUOTA_HINT.test(detail)
+      ? new AiError("quota_exceeded", "Gemini quota or billing limit reached for this key. Check your Google AI Studio plan or wait for the quota window to reset.", status)
+      : new AiError("rate_limited", "Gemini rate-limited this request. Wait a moment and retry.", status);
+  }
+  if (status === 403) return new AiError("quota_exceeded", detail ? `Gemini refused the request (HTTP 403): ${detail}` : "Gemini refused this API key or its project quota is exhausted.", status);
+  if (status >= 500) return new AiError("provider_error", "The Gemini service is temporarily unavailable. Please retry.", status);
+  if (status === 400 && SCHEMA_HINT.test(detail)) return new AiError("schema_error", `Gemini rejected the requested response schema (HTTP 400): ${detail}`, status);
+  if (status === 400) return new AiError("invalid_request", detail ? `Gemini rejected the request (HTTP 400): ${detail}` : "Gemini rejected the request shape (HTTP 400).", status);
+  return new AiError("provider_error", detail ? `Gemini rejected the request (HTTP ${status}): ${detail}` : `Gemini rejected the request (HTTP ${status}). Check the selected model or retry.`, status);
 }
 
 function classifyThrown(error: unknown, timedOut: boolean, abortedByUser: boolean): AiError {
@@ -45,7 +73,7 @@ function classifyThrown(error: unknown, timedOut: boolean, abortedByUser: boolea
   if (timedOut) return new AiError("timeout", "AI request timed out. Please retry.");
   if (error instanceof AiError) return error;
   // `fetch` rejects with a TypeError on DNS/offline/CORS failures.
-  return new AiError("network_error", "Could not reach Google AI. Check your internet connection and retry.");
+  return new AiError("network_error", "Could not reach Gemini. Check your internet connection and retry.");
 }
 
 type RequestOptions = {
@@ -91,37 +119,28 @@ async function providerErrorMessage(response: Response): Promise<string> {
   }
 }
 
-export type KeyVerification = { label: string; freeTier: boolean; limitRemaining: number | null; /** Gemini model ids this key can actually call. */ models: string[] };
-
-/**
- * Validates a key against Google's public model listing. The key travels only
- * in the `x-goog-api-key` header, never in the URL, and is never persisted.
- */
-export async function verifyGoogleApiKey(apiKey: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<KeyVerification> {
-  const deadline = withDeadline({ signal: options.signal, timeoutMs: Math.min(20_000, options.timeoutMs ?? 20_000) });
-  try {
-    const response = await fetch(GEMINI_MODELS_URL, {
-      method: "GET",
-      headers: { "x-goog-api-key": apiKey, Accept: "application/json" },
-      signal: deadline.signal,
-    });
-    if (!response.ok) throw classifyStatus(response.status, await providerErrorMessage(response));
-    const body = (await response.json().catch(() => null)) as { models?: unknown[] } | null;
-    if (!body || typeof body !== "object") throw new AiError("malformed_response", "Google AI returned an unreadable key status.");
-    const models = normalizeModelList(body.models);
-    return { label: models.length > 0 ? `Google AI Studio (${models.length} usable models)` : "Google AI Studio key", freeTier: false, limitRemaining: null, models };
-  } catch (error) {
-    const { timedOut, abortedByUser } = deadline.flags();
-    if (error instanceof Error && error.name === "AbortError" && !timedOut && !abortedByUser) throw new AiError("network_error", "Could not reach Google AI. Check your internet connection and retry.");
-    throw classifyThrown(error, timedOut, abortedByUser);
-  } finally {
-    deadline.cleanup();
-  }
+function rethrowTransport(error: unknown, deadline: { flags: () => { timedOut: boolean; abortedByUser: boolean } }): never {
+  const { timedOut, abortedByUser } = deadline.flags();
+  if (error instanceof Error && error.name === "AbortError" && !timedOut && !abortedByUser) throw new AiError("network_error", "Could not reach Gemini. Check your internet connection and retry.");
+  throw classifyThrown(error, timedOut, abortedByUser);
 }
+
+/** A model entry that this specific key can actually run inference on. */
+export type GeminiModelInfo = { id: string; label: string; inputTokenLimit: number | null };
+
+export type KeyVerification = {
+  label: string;
+  freeTier: boolean;
+  limitRemaining: number | null;
+  /** Gemini model ids this key can actually call for text generation. */
+  models: string[];
+};
 
 /**
  * Turns Google's model listing into usable `generateContent` model ids so the
  * settings UI can offer models this specific key is actually allowed to call.
+ * Only text-generation models survive: image, speech, audio, video, and
+ * embedding models also answer `generateContent` but cannot produce a report.
  */
 export function normalizeModelList(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -131,12 +150,69 @@ export function normalizeModelList(raw: unknown): string[] {
     const record = entry as { name?: unknown; supportedGenerationMethods?: unknown };
     if (typeof record.name !== "string") continue;
     const methods = Array.isArray(record.supportedGenerationMethods) ? record.supportedGenerationMethods : [];
-    // Only offer models this key can actually run inference on.
     if (!methods.includes("generateContent")) continue;
-    const id = record.name.replace(/^models\//, "");
-    if (id && !ids.includes(id)) ids.push(id);
+    ids.push(record.name);
   }
-  return ids.sort((a, b) => (a.includes("flash") === b.includes("flash") ? a.localeCompare(b) : a.includes("flash") ? -1 : 1)).slice(0, 40);
+  return rankGeminiModels(ids);
+}
+
+/** Normalizes a raw page of Google models into picker-friendly entries. */
+function toModelInfo(raw: unknown): GeminiModelInfo[] {
+  if (!Array.isArray(raw)) return [];
+  const models: GeminiModelInfo[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as { name?: unknown; displayName?: unknown; supportedGenerationMethods?: unknown; inputTokenLimit?: unknown };
+    if (typeof record.name !== "string") continue;
+    const methods = Array.isArray(record.supportedGenerationMethods) ? record.supportedGenerationMethods : [];
+    if (!methods.includes("generateContent")) continue;
+    const id = normalizeGeminiModelId(record.name);
+    if (!id) continue;
+    models.push({
+      id,
+      label: typeof record.displayName === "string" && record.displayName.trim() ? record.displayName.trim() : id,
+      inputTokenLimit: typeof record.inputTokenLimit === "number" && Number.isFinite(record.inputTokenLimit) ? record.inputTokenLimit : null,
+    });
+  }
+  return models;
+}
+
+/**
+ * Lists every text-generation model this key can call, following Google's
+ * pagination (`nextPageToken`). Without pagination a key with a large catalog
+ * sees an alphabetical fragment of its models, which is how a perfectly usable
+ * model can look "unknown" to the picker.
+ */
+export async function listGeminiModels(apiKey: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<GeminiModelInfo[]> {
+  const deadline = withDeadline({ signal: options.signal, timeoutMs: Math.min(30_000, options.timeoutMs ?? 30_000) });
+  try {
+    const collected: GeminiModelInfo[] = [];
+    const seen = new Set<string>();
+    let pageToken: string | undefined;
+    for (let page = 0; page < MODELS_MAX_PAGES; page++) {
+      const response = await fetch(modelsPageUrl(pageToken), {
+        method: "GET",
+        headers: { "x-goog-api-key": apiKey, Accept: "application/json" },
+        signal: deadline.signal,
+      });
+      if (!response.ok) throw classifyStatus(response.status, await providerErrorMessage(response));
+      const body = (await response.json().catch(() => null)) as { models?: unknown; nextPageToken?: unknown } | null;
+      if (!body || typeof body !== "object") throw new AiError("malformed_response", "Gemini returned an unreadable model list.");
+      for (const model of toModelInfo(body.models)) {
+        if (seen.has(model.id)) continue;
+        seen.add(model.id);
+        collected.push(model);
+      }
+      pageToken = typeof body.nextPageToken === "string" && body.nextPageToken ? body.nextPageToken : undefined;
+      if (!pageToken) break;
+    }
+    const byId = new Map(collected.map(model => [model.id, model]));
+    return rankGeminiModels(collected.map(model => model.id)).map(id => byId.get(id)!).filter(Boolean);
+  } catch (error) {
+    return rethrowTransport(error, deadline);
+  } finally {
+    deadline.cleanup();
+  }
 }
 
 export type StructuredRequest = {
@@ -149,6 +225,8 @@ export type StructuredRequest = {
   temperature?: number;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Called when Google rejected the strict schema and the request was retried in JSON-only mode. */
+  onSchemaFallback?: () => void;
 };
 
 /**
@@ -190,11 +268,21 @@ type GeminiResponse = {
   promptFeedback?: { blockReason?: string };
 };
 
+/** Candidate finish reasons that mean Google refused to answer. */
+const BLOCKED_FINISH_REASONS = new Set(["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "LANGUAGE"]);
+
 /** Joins every text part of the first candidate into one JSON string. */
 function candidateText(body: GeminiResponse): string | null {
   const parts = body.candidates?.[0]?.content?.parts ?? [];
   const text = parts.map(part => (typeof part.text === "string" ? part.text : "")).join("");
   return text.length > 0 ? text : null;
+}
+
+/** Parses a candidate's text, tolerating a fenced JSON block. */
+function parseCandidateJson(content: string): unknown {
+  const text = content.trim();
+  const fenced = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return JSON.parse(fenced ? fenced[1] : text);
 }
 
 /**
@@ -203,7 +291,9 @@ function candidateText(body: GeminiResponse): string | null {
  */
 export async function requestStructuredCompletion(request: StructuredRequest): Promise<unknown> {
   const deadline = withDeadline({ signal: request.signal, timeoutMs: request.timeoutMs ?? 120_000 });
-  const model = encodeURIComponent(request.model.replace(/^models\//, ""));
+  // Normalized exactly once: `models/models/…` can never be built.
+  const model = encodeURIComponent(normalizeGeminiModelId(request.model));
+  if (!model) throw new AiError("model_not_found", "No Gemini model is selected. Choose one in AI settings.");
   const url = `${GEMINI_BASE_URL}/models/${model}:generateContent`;
   const generationConfig = (withSchema: boolean) => ({
     temperature: request.temperature ?? 0.1,
@@ -226,35 +316,45 @@ export async function requestStructuredCompletion(request: StructuredRequest): P
     let providerMessage = "";
     if (!response.ok) {
       providerMessage = await providerErrorMessage(response);
-      // A 400 that is not a key complaint means Google rejected the request
-      // shape (usually a schema keyword its `responseSchema` subset does not
-      // accept). Retry once in plain JSON mode: the browser-side zod + grounding
-      // validation still enforces the full contract, so the result is exactly as
-      // safe, and the feature keeps working instead of hard-failing.
-      if (response.status === 400 && !isKeyRejection(400, providerMessage)) {
+      // A 400 that is not a key/model complaint means Google rejected the
+      // request shape (usually a schema keyword its `responseSchema` subset does
+      // not accept for this model). Retry once in plain JSON mode: the
+      // browser-side zod + grounding validation still enforces the full
+      // contract, so the result is exactly as safe, and the feature keeps
+      // working instead of hard-failing.
+      const canRetryAsJsonOnly =
+        response.status === 400 &&
+        !isKeyRejection(400, providerMessage) &&
+        !MODEL_NOT_FOUND_HINT.test(providerMessage) &&
+        !MODEL_UNSUPPORTED_HINT.test(providerMessage);
+      if (canRetryAsJsonOnly) {
+        request.onSchemaFallback?.();
         response = await send(false);
         providerMessage = response.ok ? "" : await providerErrorMessage(response);
       }
       if (!response.ok) throw classifyStatus(response.status, providerMessage);
     }
     const body = (await response.json().catch(() => null)) as GeminiResponse | null;
-    if (!body || typeof body !== "object") throw new AiError("malformed_response", "Google AI returned an empty response. Please retry.");
-    if (body.promptFeedback?.blockReason) throw new AiError("provider_error", `Google AI blocked this request (${body.promptFeedback.blockReason}). Adjust the journal data wording and retry.`);
+    if (!body || typeof body !== "object") throw new AiError("malformed_response", "Gemini returned an empty response. Please retry.");
+    if (body.promptFeedback?.blockReason) throw new AiError("blocked", `Gemini blocked this request (${body.promptFeedback.blockReason}). Adjust the journal data wording and retry.`);
+    const finishReason = body.candidates?.[0]?.finishReason;
     const content = candidateText(body);
-    if (content == null) throw new AiError("malformed_response", "Google AI returned an empty response. Please retry.");
+    if (content == null) {
+      if (finishReason && BLOCKED_FINISH_REASONS.has(finishReason)) throw new AiError("blocked", `Gemini refused to answer (${finishReason}). Adjust the journal data wording and retry.`);
+      if (finishReason === "MAX_TOKENS") throw new AiError("malformed_response", "Gemini hit its output limit before finishing the report. Retry, or choose a model with a larger output budget.");
+      throw new AiError("malformed_response", "Gemini returned an empty response. Please retry.");
+    }
+    if (finishReason && BLOCKED_FINISH_REASONS.has(finishReason)) throw new AiError("blocked", `Gemini refused to answer (${finishReason}). Adjust the journal data wording and retry.`);
     let parsed: unknown;
     try {
-      const text = content.trim();
-      const fenced = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-      parsed = JSON.parse(fenced ? fenced[1] : text);
+      parsed = parseCandidateJson(content);
     } catch {
-      throw new AiError("malformed_response", "Google AI returned an unreadable response. Please retry.");
+      if (finishReason === "MAX_TOKENS") throw new AiError("schema_error", "Gemini's report was cut off before the JSON was complete. Retry, or choose a model with a larger output budget.");
+      throw new AiError("malformed_response", "Gemini returned an unreadable response. Please retry.");
     }
     return parsed;
   } catch (error) {
-    const { timedOut, abortedByUser } = deadline.flags();
-    if (error instanceof Error && error.name === "AbortError" && !timedOut && !abortedByUser) throw new AiError("network_error", "Could not reach Google AI. Check your internet connection and retry.");
-    throw classifyThrown(error, timedOut, abortedByUser);
+    return rethrowTransport(error, deadline);
   } finally {
     deadline.cleanup();
   }

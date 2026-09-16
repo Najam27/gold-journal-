@@ -15,7 +15,7 @@ import { formatMoney } from "@/lib/gold";
 import { openJournalView } from "@/lib/journalViewNavigation";
 import { trpc } from "@/lib/trpc";
 import { AI_UI_COPY, analyzeJournal, type AiAnalysisOutcome } from "@/lib/ai/aiService";
-import { uiStateForErrorCode, type AiUiState } from "@/lib/ai/aiTypes";
+import { isModelError, uiStateForErrorCode, type AiUiState } from "@/lib/ai/aiTypes";
 import { useAiSettings } from "@/lib/ai/useAiSettings";
 import type {
   AnalysisFilters,
@@ -905,16 +905,42 @@ export function AnalysisDashboard({ accountId }: Props) {
             <div>
               <strong>{AI_UI_COPY[aiUiState].title}</strong>
               <p>{aiOutcome?.message ?? AI_UI_COPY[aiUiState].body}</p>
+              {aiOutcome?.warning && <p className="muted">{aiOutcome.warning}</p>}
               {aiSettings.configured && aiUiState !== "not_configured" && (
                 <Button variant="outline" size="sm" onClick={() => void runAi()}>
                   Retry
+                </Button>
+              )}
+              {isModelError(aiOutcome?.errorCode) && (
+                <Button variant="outline" size="sm" onClick={() => openJournalView("options")}>
+                  Pick an available Gemini model
+                </Button>
+              )}
+              {aiOutcome?.errorCode === "invalid_key" && (
+                <Button variant="outline" size="sm" onClick={() => openJournalView("options")}>
+                  Fix Gemini key
                 </Button>
               )}
             </div>
           </div>
         )}
         {aiOutcome && !aiRunning && aiOutcome.available && (
-          <AiReport result={{ ai: aiOutcome }} />
+          <>
+            {aiOutcome.modelRepairedFrom && (
+              <p className="analysis-warning" role="status">
+                {aiOutcome.modelRepairedFrom} is no longer offered by Gemini. This
+                report used {aiOutcome.model}, and that selection has been saved.
+              </p>
+            )}
+            {aiOutcome.schemaFallback && (
+              <p className="analysis-warning" role="status">
+                Gemini rejected the strict response schema for this model, so the
+                analysis was retried in JSON mode and validated locally before it
+                was accepted.
+              </p>
+            )}
+            <AiReport result={{ ai: aiOutcome }} />
+          </>
         )}
       </section>
       <section className="panel">

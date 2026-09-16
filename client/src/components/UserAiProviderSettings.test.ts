@@ -22,4 +22,18 @@ describe("Options user AI provider settings", () => {
   it("explains that local storage is readable by page scripts", () => {
     expect(source).toContain("Local storage is readable by JavaScript running on this site.");
   });
+
+  it("names Gemini as the only provider and offers a live connection test", () => {
+    expect(source).toContain("Test Gemini Connection");
+    expect(source).toContain("checkGeminiConnection");
+    expect(source).toContain("AI_PROVIDER_LABEL");
+    expect(source).not.toMatch(/openrouter|openai|anthropic/i);
+  });
+
+  it("offers only the models the key can actually call, and never renders or URL-carries the raw key", () => {
+    expect(source).toContain("availableModels");
+    // The saved credential is only ever shown masked.
+    expect(source).toContain("maskedKey");
+    expect(source).not.toContain("?key=");
+  });
 });
