@@ -1,5 +1,5 @@
-const CACHE_NAME = "gold-journal-static-v24";
-const PRECACHE = ["/manifest.json", "/gold-journal-mark.svg"];
+const CACHE_NAME = "gold-journal-static-v25";
+const PRECACHE = ["/manifest.json", "/gold-journal-3d.svg"];
 
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => Promise.allSettled(PRECACHE.map(asset => cache.add(asset)))).then(() => self.skipWaiting()));

@@ -562,3 +562,210 @@ img, video, canvas { max-width: 100%; }
   .view-hero-3d-canvas { display: none !important; }
   .account-hero { padding: 1rem; }
 }
+
+/* ===========================================================================
+   9 · APPLICATION SHELL — THE SIDEBAR IS A FIXED RAIL, NOT PAGE CONTENT
+
+   The rail used to be an in-flow flex column that was ALSO given a
+   `margin-left` on the main area, so every viewport between 761px and 1120px
+   got a 270px-wide column of unlabelled icons with no way back: the legacy
+   breakpoint hid the labels and the collapse button while a later layer kept
+   the width. Three rules now own this, and nothing else may:
+
+     · ≥1024px — a fixed rail that scrolls internally (collapsed: 76px)
+     · <1024px — an off-canvas drawer over the full-width page
+     · the page never reserves space for a drawer, and never for both
+   =========================================================================== */
+.gj-shell {
+  --gj-sidebar-w: 16.875rem;   /* 270px · expanded rail */
+  --gj-sidebar-rail: 4.75rem;  /*  76px · collapsed rail */
+  display: block;
+}
+
+/* Out of the document flow, with its own scroll area: a long trade log scrolls
+   without dragging the navigation with it, and the account block stays put. */
+.gj-sidebar {
+  position: fixed;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: var(--gj-sidebar-w);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.gj-main {
+  margin-left: var(--gj-sidebar-w);
+  min-width: 0;
+  /* The fixed action stack (update banner + three pills) lives in the
+     bottom-right corner; reserving its height keeps the last row of every view
+     clear of it instead of letting it sit on top of the data. */
+  padding-bottom: 12rem;
+}
+
+/* The rail collapses on desktop only, and the choice survives a reload. */
+@media (min-width: 1024px) {
+  .gj-shell:has(> .gj-sidebar.is-collapsed) .gj-main { margin-left: var(--gj-sidebar-rail); }
+  .gj-sidebar.is-collapsed .sidebar-brand { justify-content: center; padding: 2.5rem .5rem .625rem; }
+  .gj-sidebar.is-collapsed .collapse-button { position: absolute; top: .5rem; right: 50%; width: 1.625rem; height: 1.625rem; transform: translateX(50%); }
+  .gj-sidebar.is-collapsed .sidebar-nav { padding-inline: .375rem; }
+  .gj-sidebar.is-collapsed .sidebar-bottom { padding-inline: .5rem; }
+  .gj-sidebar.is-collapsed .install-button { padding-inline: 0; }
+  .mobile-topbar { display: none; }
+}
+
+/* The drawer is the phone/tablet navigation: nothing is reserved for it. */
+@media (max-width: 1023px) {
+  .gj-sidebar {
+    width: min(20rem, 86vw);
+    transform: translateX(-104%);
+    transition: transform var(--gj-dur-base) var(--gj-ease);
+    box-shadow: 1.5rem 0 3.75rem -1.875rem rgba(0, 0, 0, .68);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .gj-sidebar.is-open { transform: translateX(0); }
+  /* A collapsed desktop rail must never open as an icon-only drawer, and the
+     rail toggle has nothing to toggle out here. */
+  .gj-shell .gj-sidebar .collapse-button { display: none; }
+  .gj-main { margin-left: 0; padding-bottom: 14rem; }
+  .desktop-pagebar { display: none; }
+  .drawer-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    display: block;
+    border: 0;
+    background: color-mix(in srgb, var(--surface-overlay) 100%, transparent);
+    backdrop-filter: blur(2px);
+  }
+  .mobile-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    min-height: calc(3.9375rem + env(safe-area-inset-top));
+    /* The retired 760px block pinned `height: 63px`; a notch would eat into it. */
+    height: auto;
+    margin-inline: calc(var(--gj-space-page) * -1);
+    padding: env(safe-area-inset-top) var(--gj-space-page) 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .mobile-topbar > button { width: 2.375rem; height: 2.375rem; display: grid; place-items: center; }
+  .mobile-topbar > div { min-width: 0; display: flex; align-items: center; gap: .5rem; font-size: .75rem; }
+  /* Icon-only in the drawer range too: the pills stop covering the data. */
+  .account-rename-fab,
+  .mt5-import-fab,
+  .options-fab {
+    justify-content: center;
+    max-width: 2.75rem;
+    padding: .5rem;
+    border-radius: .75rem;
+    overflow: hidden;
+  }
+  .account-rename-fab span,
+  .mt5-import-fab span,
+  .options-fab span { display: none; }
+}
+
+/* ===========================================================================
+   10 · WIDE-SCREEN REFLOW — the shell is data-dense, so it reflows early
+
+   These are the four surfaces that broke in a narrow desktop window: a page
+   title wrapping one word per line, four stat cards squeezed into 150px each,
+   a toolbar with no wrap, and the action stack sitting on the last row.
+   =========================================================================== */
+@media (min-width: 1024px) {
+  .desktop-pagebar { min-height: 6.5rem; gap: 1rem; flex-wrap: nowrap; }
+  .desktop-pagebar > div:first-child { min-width: 0; }
+  .desktop-pagebar p,
+  .desktop-pagebar h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .desktop-pagebar h1 { font-size: clamp(1.25rem, .45vw + 1.06rem, 1.75rem); }
+  .pagebar-actions { flex-wrap: nowrap; min-width: 0; }
+}
+@media (min-width: 1024px) and (max-width: 1200px) {
+  /* The switcher and the sync indicator already say what the chip says. */
+  .pagebar-actions .sync-chip { display: none; }
+}
+/* Above 400px only: the smallest phone keeps the single-column stack from
+   section 7, which this later block would otherwise outrank. */
+@media (min-width: 401px) and (max-width: 1150px) {
+  .stats-grid,
+  .stats-grid.compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 1150px) {
+  .toolbar { flex-wrap: wrap; row-gap: .625rem; }
+  .toolbar-push { margin-left: 0; flex-wrap: wrap; }
+}
+@media (max-width: 480px) {
+  /* The list manager's select + input + Add row stops fitting one line. */
+  .option-create { grid-template-columns: minmax(0, 1fr); }
+}
+/* A metric is one token: it never breaks mid-number to fit a card. */
+.stat-card strong.data-text { white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .gj-main { padding-bottom: 14rem; }
+}
+
+/* ===========================================================================
+   11 · RETIRED RAIL RULES, NEUTRALISED
+
+   `index.css` still carries a 761–1120px block that hid every sidebar label and
+   the collapse button while a later layer kept the 270px width, and a 760px
+   block that redefined the drawer. Both are superseded by sections 9–10 above,
+   and the source file is too large for the editor's patch window, so the labels
+   are re-enabled here instead of leaving the rail a dead end.
+
+   Specificity note: these are 0-2-0 rules, so the 0-3-0 rail rules in
+   `index.css` (@media min-width: 1024px) still win when the rail is collapsed,
+   and the 0-3-0 drawer rule below still hides the toggle under 1024px.
+   =========================================================================== */
+.gj-sidebar .brand-copy { display: grid; }
+.gj-sidebar .account-switcher { display: block; }
+.gj-sidebar .sidebar-nav span { display: inline; }
+.gj-sidebar .sidebar-nav em { display: grid; }
+.gj-sidebar .side-balance { display: grid; }
+.gj-sidebar .sync-row span { display: inline; }
+.gj-sidebar .install-button span { display: inline; }
+.gj-sidebar .user-copy { display: grid; }
+.gj-sidebar .user-row > svg { display: block; }
+.gj-sidebar .sidebar-brand,
+.gj-sidebar .sidebar-nav button,
+.gj-sidebar .user-row { justify-content: flex-start; }
+.gj-sidebar .sidebar-brand { padding-left: 1rem; padding-right: 1rem; }
+.gj-sidebar .sidebar-nav button { padding-left: .75rem; padding-right: .75rem; }
+.gj-sidebar .user-row { padding-left: .375rem; padding-right: .375rem; }
+.gj-sidebar .collapse-button { display: grid; }
+
+/* ===========================================================================
+   12 · BRAND MARK + DRAWER CLOSE CONTROL
+   =========================================================================== */
+/* `/gold-journal-3d.svg` is a lit coin with its own plate and shadows, so the
+   container only adds the ambient halo, never a second hard edge. */
+.gold-mark { padding: 0; }
+.gold-mark img { filter: drop-shadow(0 .375rem .875rem rgba(0, 0, 0, .45)); }
+
+/* Off-canvas only: an explicit exit that does not depend on hitting the scrim. */
+.drawer-close {
+  width: 1.875rem;
+  height: 1.875rem;
+  margin-left: auto;
+  display: none;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: .625rem;
+  background: var(--surface-panel);
+  color: var(--text-muted);
+  transition: color var(--gj-dur-fast) ease, border-color var(--gj-dur-fast) ease;
+}
+.drawer-close:hover { color: var(--tone); border-color: color-mix(in srgb, var(--tone) 45%, var(--border)); }
+@media (max-width: 1023px) { .drawer-close { display: grid; } }
+
+/* The top bar must keep bleeding exactly as far as `.gj-main`'s own padding, or
+   the narrowest phones get a horizontal scrollbar from the header alone. */
+@media (max-width: 400px) {
+  .mobile-topbar { margin-inline: -.625rem; padding-inline: .625rem; }
+}

@@ -101,4 +101,80 @@ describe("responsive contract", () => {
     expect(psychologyCss).toMatch(/\.dev-breakdown-row \{[^}]*min-width: 0/);
     expect(psychologyCss).toMatch(/@media \(max-width: 620px\) \{[\s\S]*\.dev-breakdown-row \{[\s\S]*flex-wrap: wrap/);
   });
+
+  it("stacks the stat cards before they squeeze, but never below 400px", () => {
+    expect(interactionsCss).toContain("@media (min-width: 401px) and (max-width: 1150px)");
+  });
+});
+
+describe("sidebar shell", () => {
+  it("is fixed to the viewport and scrolls internally", () => {
+    expect(interactionsCss).toMatch(/\.gj-sidebar \{[^}]*position: fixed/);
+    expect(interactionsCss).toMatch(/\.gj-sidebar \{[^}]*overflow-y: auto/);
+    expect(interactionsCss).toMatch(/\.gj-sidebar \{[^}]*overscroll-behavior: contain/);
+  });
+
+  it("collapses to the rail on desktop only, and moves the page with it", () => {
+    // The rail state must not leak into the drawer range.
+    expect(indexCss).toMatch(/@media \(min-width: 1024px\) \{ \.gj-sidebar\.is-collapsed/);
+    expect(interactionsCss).toContain(".gj-shell:has(> .gj-sidebar.is-collapsed) .gj-main { margin-left: var(--gj-sidebar-rail); }");
+  });
+
+  it("neutralises the retired 761–1120px forced icon rail instead of leaving it live", () => {
+    // `index.css` sits past the editor's patch window, so the superseded block is
+    // undone from the last-loaded layer at equal specificity — later wins.
+    expect(indexCss).toContain("@media (max-width: 1120px) { .gj-main { margin-left: 76px;");
+    expect(interactionsCss).toContain("RETIRED RAIL RULES, NEUTRALISED");
+    expect(interactionsCss).toContain(".gj-sidebar .brand-copy { display: grid; }");
+    const restore = interactionsCss.indexOf(".gj-sidebar .collapse-button { display: grid; }");
+    expect(restore).toBeGreaterThan(interactionsCss.indexOf("@media (min-width: 1024px) { .gj-shell:has"));
+    // …and the drawer's 0-3-0 `.gj-shell .gj-sidebar .collapse-button` still
+    // hides the restored 0-2-0 toggle below 1024px (asserted above).
+  });
+
+  it("becomes an off-canvas drawer under 1024px with a way out", () => {
+    expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*\.gj-sidebar\.is-open \{ transform: translateX\(0\); \}/);
+    expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*\.drawer-scrim \{/);
+    expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*\.mobile-topbar \{/);
+    // The rail toggle is meaningless off-canvas; an explicit exit replaces it.
+    expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*\.collapse-button \{ display: none; \}/);
+    expect(shell).toContain('className="drawer-close"');
+    expect(shell).toContain('aria-label="Close navigation"');
+  });
+
+  it("remembers the rail and closes the drawer on Escape without a scroll lock leaking", () => {
+    expect(shell).toContain('window.localStorage.getItem("gj:sidebar-rail")');
+    expect(shell).toContain('window.localStorage.setItem("gj:sidebar-rail"');
+    expect(shell).toMatch(/event\.key === "Escape"/);
+    expect(shell).toContain('document.body.style.overflow = "hidden";');
+    expect(shell).toContain('window.addEventListener("resize", closeOnWideViewport)');
+  });
+
+  it("reserves the fixed action stack instead of letting it cover the last row", () => {
+    expect(interactionsCss).toMatch(/\.gj-main \{[^}]*padding-bottom: 12rem/);
+    expect(interactionsCss).toContain(".gj-main { padding-bottom: 14rem; }");
+  });
+});
+
+describe("brand mark", () => {
+  const markSvg = read("../public/gold-journal-3d.svg");
+  const manifest = read("../public/manifest.json");
+  const serviceWorker = read("../public/sw.js");
+
+  it("is the 3D bullion mark everywhere the brand appears", () => {
+    expect(shell).toContain('const logoUrl = "/gold-journal-3d.svg";');
+    expect(indexHtml).toContain('rel="icon" type="image/svg+xml" href="/gold-journal-3d.svg"');
+    expect(indexHtml).toContain('rel="apple-touch-icon" href="/gold-journal-3d.svg"');
+    expect(manifest).toContain('"/gold-journal-3d.svg"');
+    expect(manifest).not.toContain("gold-journal-mark.svg");
+    expect(serviceWorker).toContain('"/gold-journal-3d.svg"');
+  });
+
+  it("renders depth with layered gradients rather than a flat glyph", () => {
+    expect(markSvg).toContain('viewBox="0 0 512 512"');
+    expect(markSvg).toContain('aria-label="Gold Journal"');
+    // Face, edge slab, rim light and a blurred shadow = 3D, no bitmap needed.
+    for (const layer of ["gjFace", "gjEdge", "gjRim", "gjBlur"]) expect(markSvg).toContain(`id="${layer}"`);
+    expect(markSvg).toContain("filter=\"url(#gjBlur)\"");
+  });
 });

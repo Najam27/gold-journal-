@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Gold Journal">
+  <!--
+    Gold Journal mark — a lit 3D bullion coin.
+
+    Rendered with layered gradients instead of a bitmap so it stays crisp from a
+    16px favicon to the 82px auth lockup, with no extra network request. The
+    lighting model is deliberately simple: cool rim light from the top-left, warm
+    key light across the face, deep warm occlusion under the rim, and a shadow
+    slab behind the coin that gives it real thickness.
+  -->
+  <defs>
+    <linearGradient id="gjPlate" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#131d31" />
+      <stop offset=".52" stop-color="#0b1322" />
+      <stop offset="1" stop-color="#060a13" />
+    </linearGradient>
+    <radialGradient id="gjPlateGlow" cx=".5" cy=".32" r=".68">
+      <stop offset="0" stop-color="#f2c96a" stop-opacity=".3" />
+      <stop offset=".55" stop-color="#f2c96a" stop-opacity=".07" />
+      <stop offset="1" stop-color="#f2c96a" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="gjFace" x1=".12" y1="0" x2=".88" y2="1">
+      <stop offset="0" stop-color="#fff6da" />
+      <stop offset=".2" stop-color="#f7dc98" />
+      <stop offset=".46" stop-color="#e0b04a" />
+      <stop offset=".74" stop-color="#b07f22" />
+      <stop offset="1" stop-color="#7a5210" />
+    </linearGradient>
+    <linearGradient id="gjEdge" x1="0" y1="0" x2=".35" y2="1">
+      <stop offset="0" stop-color="#c9962f" />
+      <stop offset=".45" stop-color="#8d6115" />
+      <stop offset="1" stop-color="#4f3406" />
+    </linearGradient>
+    <linearGradient id="gjRim" x1=".15" y1="0" x2=".85" y2="1">
+      <stop offset="0" stop-color="#eaf3ff" stop-opacity=".9" />
+      <stop offset=".38" stop-color="#eaf3ff" stop-opacity=".12" />
+      <stop offset=".62" stop-color="#ffd98a" stop-opacity=".5" />
+      <stop offset="1" stop-color="#ffd98a" stop-opacity=".06" />
+    </linearGradient>
+    <linearGradient id="gjEmblem" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fffbe8" />
+      <stop offset="1" stop-color="#d8a942" />
+    </linearGradient>
+    <radialGradient id="gjSpec" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".92" />
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+    </radialGradient>
+    <filter id="gjBlur" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="16" />
+    </filter>
+  </defs>
+
+  <!-- Plate · the midnight terminal surface -->
+  <rect width="512" height="512" rx="116" fill="url(#gjPlate)" />
+  <rect width="512" height="512" rx="116" fill="url(#gjPlateGlow)" />
+
+  <!-- Orbital arcs · the "journal of a market" motif, behind the coin -->
+  <g fill="none" stroke="#f2c96a" stroke-opacity=".22">
+    <ellipse cx="256" cy="256" rx="196" ry="96" transform="rotate(-24 256 256)" stroke-width="4" />
+    <ellipse cx="256" cy="256" rx="96" ry="196" transform="rotate(-24 256 256)" stroke-width="3" />
+  </g>
+
+  <!-- Coin shadow slab · gives the coin thickness below the face -->
+  <ellipse cx="256" cy="286" rx="150" ry="146" fill="#3d2a06" opacity=".55" filter="url(#gjBlur)" />
+  <circle cx="256" cy="272" r="150" fill="url(#gjEdge)" />
+
+  <!-- Coin face -->
+  <circle cx="256" cy="252" r="150" fill="url(#gjFace)" />
+  <circle cx="256" cy="252" r="150" fill="none" stroke="url(#gjRim)" stroke-width="7" />
+  <circle cx="256" cy="252" r="126" fill="none" stroke="#7a5210" stroke-opacity=".45" stroke-width="3" />
+
+  <!-- Embossed emblem: an oracle ring with crosshair spokes -->
+  <g fill="none" stroke-linecap="round" stroke-width="16">
+    <g stroke="#7a5210" stroke-opacity=".55" transform="translate(3 4)">
+      <circle cx="256" cy="252" r="74" />
+      <path d="M256 172v160M172 252h168" />
+    </g>
+    <g stroke="url(#gjEmblem)">
+      <circle cx="256" cy="252" r="74" />
+      <path d="M256 172v160M172 252h168" />
+    </g>
+  </g>
+
+  <!-- Specular hit + bottom bounce light -->
+  <ellipse cx="196" cy="188" rx="52" ry="34" fill="url(#gjSpec)" opacity=".55" transform="rotate(-28 196 188)" />
+  <path d="M118 330c34 52 96 78 154 70" fill="none" stroke="#ffe6a8" stroke-opacity=".4" stroke-width="9" stroke-linecap="round" />
+
+  <!-- Facet sparkles -->
+  <g fill="#fff3cf">
+    <path d="M392 122l11 30 30 11-30 11-11 30-11-30-30-11 30-11z" opacity=".92" />
+    <path d="M118 372l7 19 19 7-19 7-7 19-7-19-19-7 19-7z" opacity=".7" />
+  </g>
+</svg>

@@ -129,7 +129,7 @@ import {
   Zap,
 } from "lucide-react";
 
-const logoUrl = "/gold-journal-mark.svg";
+const logoUrl = "/gold-journal-3d.svg";
 const AnalysisDashboardLazy = React.lazy(async () => ({
   default: (await import("@/components/AnalysisDashboard")).AnalysisDashboard,
 }));
@@ -404,7 +404,50 @@ export default function GoldJournal() {
   const previousAuthUserId = useRef<string | null | undefined>(undefined);
   const [view, setView] = useState<View>("trades");
   const [mobileNav, setMobileNav] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  /**
+   * Rail state is chrome, not app state, so it is remembered per device. Above
+   * 1024px it folds the sidebar to the icon rail; below that the sidebar is an
+   * off-canvas drawer and `mobileNav` owns open/closed instead.
+   */
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem("gj:sidebar-rail") === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("gj:sidebar-rail", collapsed ? "1" : "0");
+    } catch {
+      /* Storage can be unavailable (private mode); the rail then just resets. */
+    }
+  }, [collapsed]);
+  /**
+   * The drawer is a real overlay: Escape closes it and the page behind it must
+   * not scroll, otherwise a swipe on the phone scrolls the journal underneath
+   * the menu instead of the menu itself.
+   */
+  useEffect(() => {
+    if (!mobileNav) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileNav(false);
+    };
+    // Widening past the drawer breakpoint (or rotating a tablet) must not leave
+    // the page holding a scroll lock behind a scrim that is no longer drawn.
+    const closeOnWideViewport = () => {
+      if (window.innerWidth >= 1024) setMobileNav(false);
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", closeOnWideViewport);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", closeOnWideViewport);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [mobileNav]);
   /**
    * Account-switch transaction state.
    *
@@ -1669,6 +1712,15 @@ function AppSidebar({
             ) : (
               <PanelLeftClose size={17} />
             )}
+          </button>
+          {/* Drawer-only exit: the rail toggle is meaningless off-canvas, and a
+              visible close control beats hoping the user taps the scrim. */}
+          <button
+            className="drawer-close"
+            aria-label="Close navigation"
+            onClick={() => onView(active)}
+          >
+            <X size={17} />
           </button>
         </div>
         <div className="account-switcher">
