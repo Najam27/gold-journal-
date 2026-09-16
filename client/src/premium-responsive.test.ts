@@ -133,13 +133,21 @@ describe("sidebar shell", () => {
   });
 
   it("becomes an off-canvas drawer under 1024px with a way out", () => {
-    expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*\.gj-sidebar\.is-open \{ transform: translateX\(0\); \}/);
+    expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*?\.gj-sidebar\.is-open[^{]*\{ transform: translateX\(0\); \}/);
     expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*\.drawer-scrim \{/);
     expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*\.mobile-topbar \{/);
     // The rail toggle is meaningless off-canvas; an explicit exit replaces it.
     expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*\.collapse-button \{ display: none; \}/);
     expect(shell).toContain('className="drawer-close"');
     expect(shell).toContain('aria-label="Close navigation"');
+  });
+
+  it("opens the drawer at full width even while the rail preference is collapsed", () => {
+    // `.gj-sidebar.is-collapsed { width: 76px }` is 0-2-0 in two earlier layers,
+    // so it beat the drawer's 0-1-0 width and left a 76px sliver behind the
+    // scrim — a menu that was technically open and completely unusable.
+    expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*\.gj-shell \.gj-sidebar\.is-collapsed \{[\s\S]*?width: min\(20rem, 86vw\);/);
+    expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*\.gj-shell \.gj-sidebar\.is-collapsed\.is-open \{ transform: translateX\(0\); \}/);
   });
 
   it("remembers the rail and closes the drawer on Escape without a scroll lock leaking", () => {
@@ -153,6 +161,33 @@ describe("sidebar shell", () => {
   it("reserves the fixed action stack instead of letting it cover the last row", () => {
     expect(interactionsCss).toMatch(/\.gj-main \{[^}]*padding-bottom: 12rem/);
     expect(interactionsCss).toContain(".gj-main { padding-bottom: 14rem; }");
+  });
+});
+
+describe("Trade Log account strip", () => {
+  const strip = read("./components/premium/AccountStatusStrip.tsx");
+
+  it("shows the account name and the connection states, and nothing else", () => {
+    expect(shell).toContain("AccountStatusStrip");
+    expect(shell).not.toContain("AccountHero");
+    expect(shell).not.toContain("LIVE ACCOUNT OVERVIEW");
+    expect(strip).toContain("MT5 connected");
+    expect(strip).toContain("MT5 not connected");
+    expect(strip).toContain("Cloud synced");
+    expect(strip).toContain("Offline — local data");
+    // A status line, not a dashboard: no metrics, no 3D surface, no tilt.
+    expect(strip).not.toContain("AnimatedNumber");
+    expect(strip).not.toContain("Premium3DBackground");
+    expect(strip).not.toContain("TiltCard");
+  });
+
+  it("takes the hero surface out of the stylesheet with the component", () => {
+    expect(terminalCss).not.toContain(".hero-metric");
+    expect(terminalCss).not.toContain(".account-hero-floating");
+    expect(terminalCss).not.toContain("DASHBOARD HERO");
+    expect(interactionsCss).toContain(".account-strip {");
+    expect(interactionsCss).toContain(".connection-pill.profit");
+    expect(interactionsCss).toContain(".connection-pill.loss");
   });
 });
 

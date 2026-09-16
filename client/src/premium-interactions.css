@@ -92,12 +92,6 @@
   pointer-events: none;
 }
 .view-hero-3d .view-hero-3d-canvas.is-ready { opacity: .55; }
-.account-hero .account-hero-3d {
-  inset: 0 0 0 auto;
-  width: 46%;
-  opacity: .5;
-}
-.account-hero .account-hero-3d.is-ready { opacity: .5; }
 @media (max-width: 900px) {
   .view-hero-3d-canvas { display: none; }
 }
@@ -419,10 +413,8 @@
 .control-summary-card,
 .mt5-position-card,
 .mt5-account-card,
-.day-trade-body,
-.pnl-week-row,
-.account-hero,
-.insight-panel,
+.day-trade-body,  .pnl-week-row,
+  .insight-panel,
 .automation-card,
 .trade-detail,
 .trade-table td,
@@ -556,11 +548,9 @@ img, video, canvas { max-width: 100%; }
 
 /* 8 · SHORT · LANDSCAPE: the decorative layer steps aside ------------------ */
 @media (max-height: 34rem) and (orientation: landscape) {
-  .account-hero-3d,
   .premium-3d,
   .gold-canvas,
   .view-hero-3d-canvas { display: none !important; }
-  .account-hero { padding: 1rem; }
 }
 
 /* ===========================================================================
@@ -616,14 +606,20 @@ img, video, canvas { max-width: 100%; }
 
 /* The drawer is the phone/tablet navigation: nothing is reserved for it. */
 @media (max-width: 1023px) {
-  .gj-sidebar {
+  /* `.gj-sidebar.is-collapsed { width: 76px }` from two earlier layers is 0-2-0,
+     so a drawer opened while the rail preference was collapsed rendered as a
+     76px sliver: the page looked frozen behind the scrim because the menu was
+     there but unusable. Both states now resolve to the drawer width. */
+  .gj-sidebar,
+  .gj-shell .gj-sidebar.is-collapsed {
     width: min(20rem, 86vw);
     transform: translateX(-104%);
     transition: transform var(--gj-dur-base) var(--gj-ease);
     box-shadow: 1.5rem 0 3.75rem -1.875rem rgba(0, 0, 0, .68);
     padding-bottom: env(safe-area-inset-bottom);
   }
-  .gj-sidebar.is-open { transform: translateX(0); }
+  .gj-sidebar.is-open,
+  .gj-shell .gj-sidebar.is-collapsed.is-open { transform: translateX(0); }
   /* A collapsed desktop rail must never open as an icon-only drawer, and the
      rail toggle has nothing to toggle out here. */
   .gj-shell .gj-sidebar .collapse-button { display: none; }
@@ -768,4 +764,63 @@ img, video, canvas { max-width: 100%; }
    the narrowest phones get a horizontal scrollbar from the header alone. */
 @media (max-width: 400px) {
   .mobile-topbar { margin-inline: -.625rem; padding-inline: .625rem; }
+}
+
+/* ===========================================================================
+   13 · ACCOUNT STATUS STRIP (Trade Log)
+
+   The Trade Log opens straight into the account identity and its two links.
+   Each state is icon + text + colour, never colour alone, and the strip stays a
+   single row until it genuinely cannot fit.
+   =========================================================================== */
+.account-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .75rem 1rem;
+  margin: 0 0 1rem;
+  padding: .8125rem 1.125rem;
+  border: 1px solid color-mix(in srgb, var(--tone) 24%, var(--border));
+  border-radius: .875rem;
+  background: linear-gradient(120deg, color-mix(in srgb, var(--tone) 7%, var(--surface-panel)), var(--surface-panel) 62%);
+  box-shadow: var(--shadow-sm), var(--shadow-inset-top);
+}
+.account-strip-id { display: flex; align-items: center; gap: .625rem; min-width: 0; }
+.account-strip-id > span { color: var(--text-dim); font-size: .5625rem; font-weight: 800; letter-spacing: .16em; }
+.account-strip-id > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-heading);
+  font-size: .9375rem;
+  letter-spacing: -.025em;
+}
+.account-strip-signals { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+.connection-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: .375rem;
+  padding: .375rem .625rem;
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  background: var(--surface-panel);
+  color: var(--text-muted);
+  font-size: .6875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+}
+.connection-pill i { width: .4375rem; height: .4375rem; border-radius: 50%; background: var(--text-dim); }
+.connection-pill.profit { border-color: color-mix(in srgb, var(--accent-emerald) 38%, var(--border)); color: var(--accent-emerald); }
+.connection-pill.profit i { background: var(--accent-emerald); box-shadow: 0 0 9px color-mix(in srgb, var(--accent-emerald) 85%, transparent); }
+.connection-pill.loss { border-color: color-mix(in srgb, var(--accent-coral) 38%, var(--border)); color: var(--accent-coral); }
+.connection-pill.loss i { background: var(--accent-coral); box-shadow: 0 0 9px color-mix(in srgb, var(--accent-coral) 80%, transparent); }
+.connection-pill.live { border-color: color-mix(in srgb, var(--accent-cyan) 34%, var(--border)); color: var(--accent-cyan); }
+.connection-pill.warn { border-color: color-mix(in srgb, var(--accent-amber) 38%, var(--border)); color: var(--accent-amber); }
+.connection-pill.muted { color: var(--text-dim); }
+@media (max-width: 560px) {
+  .account-strip { align-items: flex-start; }
+  .account-strip-signals { width: 100%; }
 }

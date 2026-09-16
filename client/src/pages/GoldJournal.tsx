@@ -50,7 +50,7 @@ import {
 import { beginAccountSwitchForApp, invalidateAccountScopedQueries, payloadBelongsToAccount, refreshCurrentAccount, resolveActiveAccount } from "@/lib/accountScope";
 import { classifyApiError } from "@/lib/apiErrors";
 import { JournalQueryError, SwitchingAccount } from "@/components/QueryError";
-import { AccountHero } from "@/components/premium/AccountHero";
+import { AccountStatusStrip } from "@/components/premium/AccountStatusStrip";
 import { AmbientField } from "@/components/premium/AmbientField";
 import { Premium3DBackground } from "@/components/premium/Premium3DBackground";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
@@ -1227,25 +1227,6 @@ export default function GoldJournal() {
     } else setInstallHelp(true);
   };
   const pagedTrades = tradeListQuery.data?.trades ?? [];
-  // Today's result for the hero, derived from the same trade rows the Trade Log
-  // and the P&L calendar already render — no separate query, no new math.
-  const today = useMemo(() => {
-    const todayKey = getPktDateInput();
-    const rows = trades.filter(
-      (trade: any) => getPktDateInput(trade.tradeDate) === todayKey
-    );
-    const pnl = rows.reduce(
-      (total: number, trade: any) => total + toNumber(trade.pnl),
-      0
-    );
-    const wins = rows.filter((trade: any) => trade.result === "WIN").length;
-    const closed = rows.filter((trade: any) => trade.result !== "OPEN").length;
-    return {
-      pnl,
-      count: rows.length,
-      winRate: closed ? (wins / closed) * 100 : 0,
-    };
-  }, [trades]);
   const authGate = getAuthGate(authStatus);
   // The splash and login screens already own a lazy gold Three.js hero
   // (GoldCanvas + its static CSS fallback), so they are not wrapped again here:
@@ -1408,33 +1389,10 @@ export default function GoldJournal() {
               </section>
             )}
             {view === "trades" && account && (
-              <AccountHero
+              <AccountStatusStrip
                 accountName={account.name || "Active account"}
-                balanceLabel={
-                  activeMt5Connection?.balance != null
-                    ? "MT5 balance"
-                    : "Journal balance"
-                }
-                balance={toNumber(
-                  activeMt5Connection?.balance ?? stats.balance
-                )}
-                equity={
-                  activeMt5Connection?.equity != null
-                    ? toNumber(activeMt5Connection.equity)
-                    : null
-                }
-                floatingPnl={
-                  activeMt5Connection?.floatingPnl != null
-                    ? toNumber(activeMt5Connection.floatingPnl)
-                    : null
-                }
-                todayPnl={today.pnl}
-                todayTrades={today.count}
-                todayWinRate={today.winRate}
-                winRate={stats.winRate}
-                totalTrades={stats.total}
-                online={isOnline}
                 mt5Connected={Boolean(activeMt5Connection)}
+                online={isOnline}
                 syncing={mt5Workspace.isFetching}
               />
             )}
