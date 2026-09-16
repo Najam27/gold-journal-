@@ -4,8 +4,8 @@
   "description": "Private trading performance journal.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#10141a",
-  "theme_color": "#10141a",
+  "background_color": "#070c17",
+  "theme_color": "#070c17",
   "icons": [
     {
       "src": "/gold-journal-mark.svg",

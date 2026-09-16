@@ -9,9 +9,10 @@
      3. the gate, taxonomy, process-preview, and plan-readiness classes — the
         trade dialog pre-trade gate and the Plan & Execution check-in. */
 
-.dev-workspace { display: grid; gap: 16px; }
-.dev-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 20px 22px; border: 1px solid var(--gj-line); border-radius: 16px; background: linear-gradient(118deg, color-mix(in srgb, var(--gj-panel) 95%, transparent), color-mix(in srgb, var(--gj-gold) 6%, var(--gj-panel))); box-shadow: var(--gj-depth-1); }
-.dev-header > div:first-child { display: grid; gap: 7px; max-width: 760px; }
+.dev-workspace { display: grid; gap: 16px; min-width: 0; }
+.dev-workspace > * { min-width: 0; }
+.dev-header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 20px; min-width: 0; padding: clamp(16px, 1.6vw, 22px); border: 1px solid var(--gj-line); border-radius: 16px; background: linear-gradient(118deg, color-mix(in srgb, var(--gj-panel) 95%, transparent), color-mix(in srgb, var(--gj-gold) 6%, var(--gj-panel))); box-shadow: var(--gj-depth-1); }
+.dev-header > div:first-child { display: grid; gap: 7px; min-width: 0; flex: 1 1 20rem; max-width: 760px; }
 .dev-header h2 { margin: 0; color: var(--gj-text); font-size: clamp(19px, 1.9vw, 26px); letter-spacing: -.03em; }
 .dev-header p { margin: 0; color: var(--gj-subtext); font-size: 12px; line-height: 1.55; }
 .dev-actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -26,7 +27,8 @@
 .dev-score.risk { border-color: color-mix(in srgb, var(--destructive) 55%, var(--gj-line)); }
 .dev-score.risk strong { color: var(--destructive); }
 
-.dev-stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 11px; }
+.dev-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 158px), 1fr)); gap: 11px; }
+.dev-stat-grid > * { min-width: 0; }
 .dev-stat { display: grid; gap: 6px; min-width: 0; padding: 14px 15px; border: 1px solid var(--gj-line); border-radius: 12px; background: var(--gj-panel); box-shadow: var(--gj-depth-1); }
 .dev-stat > span { color: var(--gj-dim); font: 800 8px "DM Mono", monospace; letter-spacing: .1em; }
 .dev-stat strong { color: var(--gj-text); font-size: 24px; line-height: 1; }
@@ -35,15 +37,24 @@
 .dev-stat.watch strong { color: var(--warning); }
 .dev-stat.risk strong { color: var(--destructive); }
 
-.dev-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; align-items: start; }
-.dev-panel { display: grid; gap: 14px; }
-.dev-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+/* One column by default, two once there is room for two comfortable panels (see
+   the min-width rule at the end of this file). Explicit rather than auto-fit so
+   the same panels stay side by side at every desktop width instead of silently
+   re-flowing into three or four columns. The panel owns its own padding because
+   `.panel` only provides the surface, and every track is minmax(0, …) so long
+   labels can never force horizontal overflow. */
+.dev-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
+.dev-columns > * { min-width: 0; }
+.dev-panel { display: grid; gap: 14px; min-width: 0; padding: clamp(15px, 1.5vw, 20px); }
+.dev-panel-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 12px; min-width: 0; }
+.dev-panel-head > div:first-child { min-width: 0; }
 .dev-panel-head h3 { margin: 5px 0 0; color: var(--gj-text); font-size: 15px; }
 .dev-panel-head-actions { display: flex; align-items: center; gap: 8px; color: var(--gj-gold); }
 
-.dev-breakdown { display: grid; gap: 9px; }
-.dev-breakdown-row { display: grid; grid-template-columns: minmax(140px, 1.1fr) minmax(80px, 1fr) 42px minmax(58px, auto); align-items: center; gap: 10px; }
-.dev-breakdown-row > span { color: var(--gj-subtext); font-size: 11px; }
+.dev-breakdown { display: grid; gap: 9px; min-width: 0; }
+.dev-breakdown-row { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(3rem, 1fr) 2.25rem minmax(3.25rem, auto); align-items: center; gap: 8px 10px; min-width: 0; }
+.dev-breakdown-row > * { min-width: 0; }
+.dev-breakdown-row > span { color: var(--gj-subtext); font-size: 11px; overflow-wrap: anywhere; }
 .dev-breakdown-row > i { display: block; height: 6px; overflow: hidden; border-radius: 99px; background: var(--gj-panel-2); }
 .dev-breakdown-row > i > b { display: block; height: 100%; min-width: 2px; border-radius: inherit; background: var(--gj-gold); transition: width .4s var(--ease-out, cubic-bezier(.23, 1, .32, 1)); }
 .dev-breakdown-row > i > b.safe { background: var(--success); }
@@ -55,16 +66,17 @@
 .dev-note { margin: 0; color: var(--gj-subtext); font-size: 10px; line-height: 1.55; }
 .dev-empty { margin: 0; color: var(--gj-subtext); font-size: 11px; line-height: 1.55; }
 
-.dev-focus { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.dev-focus { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr)); gap: 10px; }
+.dev-focus > * { min-width: 0; }
 .dev-focus > div { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--gj-line); border-radius: 10px; background: var(--gj-panel-2); }
 .dev-focus span { color: var(--gj-dim); font: 800 8px "DM Mono", monospace; letter-spacing: .08em; }
 .dev-focus strong { color: var(--gj-text); font-size: 18px; }
 .dev-recommendation { margin: 0; padding: 12px 14px; border-left: 3px solid var(--gj-gold); border-radius: 0 9px 9px 0; color: var(--gj-text); background: color-mix(in srgb, var(--gj-gold) 6%, var(--gj-panel)); font-size: 11px; line-height: 1.5; }
 
-.dev-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
-.dev-list li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 11px; }
-.dev-list li > span { color: var(--gj-subtext); min-width: 0; }
-.dev-list li > b { color: var(--gj-text); font-weight: 600; text-align: right; }
+.dev-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.dev-list li { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; font-size: 11px; min-width: 0; }
+.dev-list li > span { color: var(--gj-subtext); min-width: 0; overflow-wrap: anywhere; }
+.dev-list li > b { color: var(--gj-text); font-weight: 600; text-align: right; overflow-wrap: anywhere; }
 .dev-list.compact li { font-size: 10px; }
 
 .dev-cooldown, .dev-readiness { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; padding: 12px 14px; border: 1px solid var(--gj-line); border-radius: 11px; background: var(--gj-panel-2); }
@@ -78,7 +90,8 @@
 .dev-readiness.safe { border-color: color-mix(in srgb, var(--success) 40%, var(--gj-line)); }
 .dev-readiness.safe > svg { color: var(--success); }
 
-.dev-versus { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.dev-versus { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 7.5rem), 1fr)); gap: 10px; }
+.dev-versus > * { min-width: 0; }
 .dev-versus > div { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--gj-line); border-radius: 10px; background: var(--gj-panel-2); }
 .dev-versus span { color: var(--gj-dim); font: 800 8px "DM Mono", monospace; letter-spacing: .08em; }
 .dev-versus strong { color: var(--gj-text); font-size: 16px; }
@@ -86,7 +99,8 @@
 .dev-versus .safe { border-color: color-mix(in srgb, var(--success) 40%, var(--gj-line)); }
 .dev-versus .watch { border-color: color-mix(in srgb, var(--warning) 45%, var(--gj-line)); }
 
-.dev-classifications { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.dev-classifications { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr)); gap: 10px; }
+.dev-classifications > * { min-width: 0; }
 .dev-classification { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--gj-line); border-radius: 10px; background: var(--gj-panel-2); }
 .dev-classification span { color: var(--gj-dim); font: 800 8px "DM Mono", monospace; letter-spacing: .08em; }
 .dev-classification strong { color: var(--gj-text); font-size: 20px; }
@@ -94,18 +108,20 @@
 .dev-classification.safe { border-color: color-mix(in srgb, var(--success) 38%, var(--gj-line)); }
 .dev-classification.risk { border-color: color-mix(in srgb, var(--destructive) 42%, var(--gj-line)); }
 
-.dev-pnl-split { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.dev-pnl-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr)); gap: 10px; }
+.dev-pnl-split > * { min-width: 0; }
 .dev-pnl-split > div { display: grid; gap: 4px; padding: 11px 12px; border: 1px solid var(--gj-line); border-radius: 10px; background: var(--gj-panel-2); }
 .dev-pnl-split span { color: var(--gj-dim); font: 800 8px "DM Mono", monospace; letter-spacing: .08em; }
 .dev-pnl-split strong { font-size: 15px; }
 
-.dev-streaks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.dev-streaks { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 6.5rem), 1fr)); gap: 10px; }
+.dev-streaks > * { min-width: 0; }
 .dev-streaks > div { display: grid; gap: 5px; padding: 12px; border: 1px solid var(--gj-line); border-radius: 10px; background: var(--gj-panel-2); }
 .dev-streaks strong { color: var(--gj-text); font-size: 22px; line-height: 1; }
 .dev-streaks span { color: var(--gj-subtext); font-size: 9px; line-height: 1.35; }
 .dev-streaks .safe strong { color: var(--success); }
 
-.dev-weekly { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.dev-weekly { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr)); gap: 10px; }
 .dev-weekly > div { display: grid; gap: 6px; padding: 11px 12px; border: 1px solid var(--gj-line); border-radius: 10px; background: var(--gj-panel-2); }
 .dev-weekly span { color: var(--gj-subtext); font-size: 10px; }
 .dev-weekly strong { color: var(--gj-text); font-size: 17px; }
@@ -115,7 +131,9 @@
 .dev-weekly .watch i > b { background: var(--warning); }
 .dev-weekly .risk i > b { background: var(--destructive); }
 
-.dev-weekly-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.dev-weekly-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 10px; }
+.dev-weekly-summary > * { min-width: 0; }
+.dev-weekly-summary strong { overflow-wrap: anywhere; }
 .dev-weekly-summary > div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 9px; padding: 12px; border: 1px solid var(--gj-line); border-radius: 10px; background: var(--gj-panel-2); }
 .dev-weekly-summary svg { grid-row: 1 / span 2; margin-top: 2px; }
 .dev-weekly-summary span { color: var(--gj-dim); font: 800 8px "DM Mono", monospace; letter-spacing: .08em; }
@@ -147,7 +165,8 @@
 
 /* Calendar day drill-down: execution + psychology. */
 .day-behavior { display: grid; gap: 12px; }
-.day-behavior-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 11px; }
+.day-behavior-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13.75rem), 1fr)); gap: 11px; }
+.day-behavior-grid > * { min-width: 0; }
 .day-behavior-card { display: grid; gap: 7px; padding: 13px; border: 1px solid var(--gj-line); border-radius: 11px; background: var(--gj-panel-2); }
 .day-behavior-card > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .day-behavior-card > header span { color: var(--gj-dim); font: 800 8px "DM Mono", monospace; letter-spacing: .1em; }
@@ -201,20 +220,69 @@
    control system. */
 .psychology-workspace { display: grid; gap: 16px; max-width: 1420px; margin: 0 auto; padding: 4px 0 24px; }
 
-@media (max-width: 1050px) {
-  .dev-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .dev-columns { grid-template-columns: 1fr; }
+/* ---------------------------------------------------------------------------
+   PSYCHOLOGY RESPONSIVE LADDER
+   Layout is intrinsic (auto-fit + minmax(0, …)) so it reflows on its own; these
+   breakpoints only tighten rhythm, never switch to a smaller copy of desktop.
+   --------------------------------------------------------------------------- */
+
+/* Tablet: the two analysis columns would each be under ~26rem, so stack them
+   and let each panel breathe full width. */
+@media (max-width: 1100px) {
+  .dev-stat-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); }
+}
+
+/* The header splits: title block, then the discipline score full width. */
+@media (max-width: 860px) {
+  .dev-header { align-items: stretch; flex-direction: column; gap: 14px; }
+  .dev-header > div:first-child { max-width: none; }
+  .dev-score { justify-items: start; min-width: 0; width: 100%; }
+  .dev-score small { text-align: left; }
+  .dev-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
 }
 
 @media (max-width: 700px) {
-  .dev-header { align-items: flex-start; flex-direction: column; padding: 17px; }
-  .dev-score { justify-items: start; width: 100%; }
-  .dev-score small { text-align: left; }
-  .dev-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .dev-breakdown-row { grid-template-columns: minmax(110px, 1.2fr) minmax(48px, 1fr) 34px; }
-  .dev-breakdown-row > em { display: none; }
-  .dev-focus, .dev-versus, .dev-streaks, .dev-pnl-split, .dev-classifications { grid-template-columns: 1fr; }
+  .psychology-workspace { gap: 13px; padding-bottom: 18px; }
+  .dev-workspace { gap: 13px; }
+  .dev-header { padding: 15px; border-radius: 14px; }
+  .dev-panel { padding: 15px; gap: 12px; }
+  .dev-panel-head-actions { width: 100%; justify-content: flex-start; }
+  .dev-stat { padding: 12px 13px; }
+  .dev-stat strong { font-size: 21px; }
+  .dev-focus, .dev-versus, .dev-streaks, .dev-pnl-split, .dev-classifications,
+  .dev-weekly-summary { grid-template-columns: minmax(0, 1fr); }
   .dev-identity { grid-template-columns: 1fr; }
   .behavior-banner { grid-template-columns: auto minmax(0, 1fr); align-items: flex-start; }
   .behavior-banner button { grid-column: 2; white-space: normal; text-align: left; }
+  .dev-cooldown, .dev-readiness { padding: 11px 12px; }
+}
+
+/* Phone: score-plus-weight sits with the label, the meter spans the full row. */
+@media (max-width: 620px) {
+  .dev-breakdown-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+  }
+  .dev-breakdown-row > span { flex: 1 1 8rem; }
+  .dev-breakdown-row > i { flex: 1 1 100%; order: 3; }
+  .dev-breakdown-row > strong { flex: 0 0 auto; margin-left: auto; }
+  .dev-breakdown-row > em { flex: 0 0 auto; }
+  .dev-list li { font-size: 11px; }
+  .dev-list li > b { text-align: right; }
+}
+
+@media (max-width: 460px) {
+  .dev-stat-grid { grid-template-columns: minmax(0, 1fr); }
+  .dev-stat small { white-space: normal; }
+  .dev-score strong { font-size: 30px; }
+  .dev-actions { width: 100%; }
+  .dev-actions > * { flex: 1 1 auto; }
+}
+
+/* Desktop: the analysis panels sit two-up, exactly as before, and stay there at
+   every wider viewport. Declared last so it wins over the max-width ladder. */
+@media (min-width: 860px) {
+  .dev-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

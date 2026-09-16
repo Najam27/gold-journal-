@@ -81,17 +81,8 @@
   border-color: var(--gj-control-border);
   background: var(--gj-control);
   color: var(--gj-control-text);
-  color-scheme: light;
-}
-
-.dark .gj-shell select,
-.dark .mt5-add-form select,
-.dark .mt5-offset-field,
-.dark .option-create select,
-.dark .option-page-create select,
-.dark .pdf-date-range input,
-.dark .manager-create-row input,
-.dark .manager-rename-row input {
+  /* Dark-only app: native control chrome (select popups, date pickers,
+     scrollbars) must match the terminal surface, never the OS light default. */
   color-scheme: dark;
 }
 

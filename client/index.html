@@ -1,18 +1,30 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
 
   <head>
     <meta charset="UTF-8" />
+    <!--
+      Pinch-zoom stays enabled (no maximum-scale) because the terminal viewports
+      are dense; viewport-fit=cover lets the mobile shell use the safe areas.
+    -->
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1" />
-    <meta name="theme-color" content="#10141a" />
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#070c17" />
     <meta name="description" content="Gold Journal — a private trading performance journal." />
     <link rel="manifest" href="/manifest.json" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <title>Gold Journal</title>
+    <script>
+      // Gold Journal is dark-only. Applying the class here (before the bundle
+      // loads) guarantees the first painted frame is already the midnight
+      // terminal canvas instead of flashing the base token scale.
+      document.documentElement.classList.add("dark");
+      document.documentElement.style.colorScheme = "dark";
+    </script>
   </head>
 
   <body>

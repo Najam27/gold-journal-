@@ -160,9 +160,9 @@ html:not(.dark) .gj-sidebar { box-shadow: 22px 0 60px -34px rgba(13, 28, 52, .30
   border-radius: 13px;
   background: linear-gradient(150deg, var(--surface-panel-elevated), color-mix(in srgb, var(--tone) 6%, var(--surface-panel)));
   box-shadow: var(--shadow-sm), var(--shadow-inset-top);
-  color-scheme: light;
+  /* Dark-only app: native select chrome must match the panel it sits on. */
+  color-scheme: dark;
 }
-.dark .account-switcher { color-scheme: dark; }
 .account-switcher p { color: var(--text-dim); font-size: 8px; letter-spacing: .16em; }
 .account-switcher select {
   appearance: none;
@@ -747,12 +747,12 @@ input[type="password"] {
   box-shadow: inset 0 1px 2px rgba(4, 12, 26, .06) !important;
   transition: border-color var(--gj-dur-fast) ease, box-shadow var(--gj-dur-base) var(--gj-ease), background-color var(--gj-dur-fast) ease;
 }
-.gj-shell select { color-scheme: light; }
-.dark .gj-shell select,
-.dark select,
-.dark input[type="date"] { color-scheme: dark; }
-html:not(.dark) select { color-scheme: light; }
-/* Native option rows must always be theme-correct in both modes. */
+/* Dark-only app: native control chrome (select popups, date pickers, the
+   account switcher) must match the terminal surface in every view. */
+.gj-shell select,
+select,
+input[type="date"] { color-scheme: dark; }
+/* Native option rows follow the same rule. */
 .gj-shell select option,
 select option {
   background: var(--surface-dropdown);

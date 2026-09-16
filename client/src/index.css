@@ -57,7 +57,12 @@
   --radius: .85rem;
 
   /* ================================================
-     SEMANTIC DESIGN TOKENS - LIGHT THEME
+     BASE TOKEN SCALE + NON-COLOUR TOKENS
+     Gold Journal is dark-only: the authoritative palette is the `:root, .dark`
+     block below, which re-declares every colour token declared here, so these
+     values are never painted. What this block still owns is the non-colour
+     scale (radius, easing, durations) and the documented ramp the dark palette
+     is derived from.
      ================================================ */
 
   /* Surfaces - six-layer depth system (LIGHT)
@@ -237,9 +242,12 @@
   --duration-slow: 350ms;
 }
 
+/* Dark is the only theme, so it is attached to `:root` as well: the palette
+   applies before any script runs and no light frame can ever paint. */
+:root,
 .dark {
   /* ================================================
-     SEMANTIC DESIGN TOKENS - DARK THEME
+     SEMANTIC DESIGN TOKENS - DARK THEME (authoritative)
      ================================================ */
 
   /* Surfaces - six-layer depth system (DARK, midnight navy terminal) */
@@ -410,8 +418,7 @@
 }
 
 * { border-color: var(--border); }
-html { background: var(--background); color-scheme: light; }
-html.dark { color-scheme: dark; }
+html { background: var(--background); color-scheme: dark; }
 body { margin: 0; min-width: 320px; background: var(--background); color: var(--foreground); font-family: "Inter", sans-serif; }
 button, input, select, textarea { font: inherit; }
 button, select { cursor: pointer; }
@@ -424,6 +431,15 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .gj-sidebar.is-collapsed { width: 76px; }
 .gj-sidebar.is-collapsed + .gj-main { margin-left: 76px; }
 .sidebar-brand { min-height: 82px; display: flex; align-items: center; gap: 12px; padding: 20px 17px; border-bottom: 1px solid color-mix(in srgb, var(--gj-line) 20%, transparent); }
+/* -----------------------------------------------------------------------------
+   RETIRED LIGHT FALLBACKS
+   These `html:not(.dark)` rules are unreachable: the app is dark-only, `dark` is
+   applied to <html> before first paint (index.html) and again by ThemeProvider,
+   and the authoritative palette is attached to `:root` as well as `.dark`. They
+   are kept only so a future cleanup pass can see exactly what the retired light
+   theme used to override. Only this `html:not(.dark)` prefix is dead — the
+   `.dark` and media-query rules further down are live.
+   ----------------------------------------------------------------------------- */
 html:not(.dark) .sidebar-brand { border-bottom-color: var(--gj-line); }
 .gold-mark { flex: 0 0 auto; display: grid; place-items: center; border-radius: 12px; background: radial-gradient(circle at 35% 20%, color-mix(in srgb, var(--gj-gold) 35%, transparent), color-mix(in srgb, var(--gj-gold) 12%, transparent) 55%, transparent 70%); box-shadow: 0 0 26px color-mix(in srgb, var(--gj-gold) 18%, transparent); overflow: hidden; }
 .gold-mark img { width: 100%; height: 100%; object-fit: contain; }
@@ -432,11 +448,9 @@ html:not(.dark) .sidebar-brand { border-bottom-color: var(--gj-line); }
 .brand-copy span, .eyebrow, .section-label { color: var(--gj-gold-text); font-size: 9px; font-weight: 700; letter-spacing: .17em; }
 .collapse-button { width: 29px; height: 29px; margin-left: auto; display: grid; place-items: center; border: 1px solid var(--gj-control-border); border-radius: 8px; background: transparent; color: var(--gj-control-muted); transition: color var(--duration-fast) ease, border-color var(--duration-fast) ease; }
 .collapse-button:hover { color: var(--gj-gold-text); border-color: var(--gj-gold); }
-.account-switcher { position: relative; margin: 18px 14px 8px; padding: 10px 12px; border: 1px solid var(--gj-control-border); border-radius: 12px; background: var(--gj-panel-2); color-scheme: light; }
-.html:not(.dark) .account-switcher { color-scheme: light; }
-.html.dark .account-switcher { color-scheme: dark; }
+.account-switcher { position: relative; margin: 18px 14px 8px; padding: 10px 12px; border: 1px solid var(--gj-control-border); border-radius: 12px; background: var(--gj-panel-2); color-scheme: dark; }
 .account-switcher p { margin: 0 0 5px; color: var(--gj-control-muted); font-size: 8px; font-weight: 700; letter-spacing: .14em; }
-.account-switcher select { appearance: none; width: 100%; border: 0; outline: 0; background: var(--gj-control); color: var(--gj-control-text); font-size: 12px; font-weight: 700; color-scheme: light; }
+.account-switcher select { appearance: none; width: 100%; border: 0; outline: 0; background: var(--gj-control); color: var(--gj-control-text); font-size: 12px; font-weight: 700; color-scheme: dark; }
 .account-switcher svg { position: absolute; right: 10px; bottom: 11px; color: var(--gj-control-muted); pointer-events: none; }
 .sidebar-nav { display: grid; gap: 3px; padding: 10px; }
 .sidebar-nav button { position: relative; height: 41px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border: 0; border-radius: 9px; background: transparent; color: var(--gj-control-muted); font-size: 12px; text-align: left; transition: background var(--duration-fast) ease, color var(--duration-fast) ease, transform var(--duration-fast) ease; }

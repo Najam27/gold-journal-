@@ -1,60 +1,42 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect } from "react";
 
-type Theme = "light" | "dark";
+/**
+ * Gold Journal is a dark-only product.
+ *
+ * The premium terminal look (midnight canvas, tinted ambient fields, cyan live
+ * data, violet intelligence) only reads correctly on the dark palette, so the
+ * theme is fixed rather than switchable. Keeping the provider and the `useTheme`
+ * hook means any component that asks for the theme still gets a usable answer,
+ * and the `dark` class is applied before first paint (see the bootstrap script in
+ * index.html) so nothing flashes a light frame.
+ */
+export type Theme = "dark";
 
 interface ThemeContextType {
   theme: Theme;
-  toggleTheme?: () => void;
   switchable: boolean;
 }
 
+const DARK_THEME: ThemeContextType = { theme: "dark", switchable: false };
+
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
-interface ThemeProviderProps {
-  children: React.ReactNode;
-  defaultTheme?: Theme;
-  switchable?: boolean;
-}
-
-export function ThemeProvider({
-  children,
-  defaultTheme = "light",
-  switchable = false,
-}: ThemeProviderProps) {
-  const [theme, setTheme] = useState<Theme>(() => {
-    if (switchable) {
-      const requested = new URLSearchParams(window.location.search).get("theme");
-      if (requested === "light" || requested === "dark") return requested;
-      const stored = localStorage.getItem("theme");
-      return (stored as Theme) || defaultTheme;
-    }
-    return defaultTheme;
-  });
-
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const root = document.documentElement;
-    if (theme === "dark") {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
+    root.classList.add("dark");
+    root.dataset.theme = "dark";
+    root.style.colorScheme = "dark";
+    // A theme chosen while the app was still switchable would otherwise win on
+    // the next load. Dark is the only theme now, so the preference is dropped.
+    try {
+      localStorage.removeItem("theme");
+    } catch {
+      /* storage can be unavailable in private/locked-down contexts */
     }
+  }, []);
 
-    if (switchable) {
-      localStorage.setItem("theme", theme);
-    }
-  }, [theme, switchable]);
-
-  const toggleTheme = switchable
-    ? () => {
-        setTheme(prev => (prev === "light" ? "dark" : "light"));
-      }
-    : undefined;
-
-  return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, switchable }}>
-      {children}
-    </ThemeContext.Provider>
-  );
+  return <ThemeContext.Provider value={DARK_THEME}>{children}</ThemeContext.Provider>;
 }
 
 export function useTheme() {

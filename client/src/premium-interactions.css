@@ -377,3 +377,188 @@
   .day-trade-row:hover { transform: none; }
   .sidebar-nav button.active::before { animation: none; }
 }
+
+/* ===========================================================================
+   RESPONSIVE CONTRACT · 320 / 375 / 390 / 430 and up
+   ---------------------------------------------------------------------------
+   Mobile is a layout of its own, not a shrunken desktop. Three rules keep that
+   honest everywhere:
+
+     1. Intrinsic sizing — no track or card is ever wider than its container, and
+        long unbroken data (tickets, symbols, emails) wraps instead of pushing.
+     2. Dense data scrolls inside its own panel (trade log, control table, MT5
+        history, heatmap, week grid) instead of widening the page.
+     3. Pointer- and width-aware behaviour — effects that need a fine pointer or
+        a wide viewport switch off, and touch targets grow on coarse pointers.
+
+   Only sizing, spacing and paint are touched here: no layout thrash, no filters
+   on large surfaces, no continuous animation.
+   =========================================================================== */
+
+/* 1 · NOTHING MAY WIDEN THE VIEWPORT -------------------------------------- */
+
+/* Fixed track minimums become "never wider than the container", so an open
+   position card or a two-column analysis panel can never force a 320px phone
+   into horizontal scrolling. */
+.mt5-position-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr)); }
+.analysis-grid,
+.mentor-grid,
+.mt5-grid {
+  grid-template-columns: minmax(0, 1.45fr) minmax(min(100%, 17rem), .75fr);
+}
+.query-error.session-recovery {
+  grid-template-columns: auto minmax(0, 1fr) minmax(min(100%, 13rem), .55fr);
+}
+
+/* Long single-token data wraps rather than widening a panel. */
+.panel,
+.stat-card,
+.goal-card,
+.dev-panel,
+.dev-stat,
+.control-summary-card,
+.mt5-position-card,
+.mt5-account-card,
+.day-trade-body,
+.pnl-week-row,
+.account-hero,
+.insight-panel,
+.automation-card,
+.trade-detail,
+.trade-table td,
+.control-table td,
+.mt5-table td {
+  overflow-wrap: anywhere;
+}
+
+/* Charts, media and canvases are sized by their container, never by content. */
+img, video, canvas { max-width: 100%; }
+.chart-panel,
+.chart-panel > div,
+.recharts-responsive-container {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* 2 · DENSE DATA SCROLLS, THE PAGE DOESN'T -------------------------------- */
+.trade-table-wrap,
+.control-table-wrap,
+.mt5-table-wrap,
+.edge-table-wrap,
+.heatmap-table,
+.pnl-week-calendar {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+/* 3 · TOUCH ERGONOMICS ---------------------------------------------------- */
+@media (hover: none), (pointer: coarse) {
+  .button,
+  .icon-button,
+  .mobile-topbar button,
+  .mobile-bottom-nav button,
+  .pill-options button,
+  .gate-grid button,
+  .period-filter button,
+  .plan-status-options button,
+  .taxonomy-group button { min-height: 2.5rem; }
+  .icon-button { min-width: 2.5rem; }
+  .row-actions button,
+  .row-control-actions button,
+  .delete-mini { min-width: 2.5rem; min-height: 2.5rem; }
+  .gj-shell input:not([type="checkbox"]):not([type="radio"]),
+  .gj-shell select,
+  .gj-shell textarea { min-height: 2.625rem; }
+  .mobile-bottom-nav button { min-height: 3.375rem; }
+}
+
+/* 4 · TABLET -------------------------------------------------------------- */
+@media (max-width: 1024px) {
+  .trade-header,
+  .section-heading { align-items: flex-start; }
+  .analysis-overview-grid,
+  .mt5-account-grid,
+  .mt5-stream-freshness { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 5 · PHONE SHELL --------------------------------------------------------- */
+@media (max-width: 760px) {
+  /* The fixed bars own their safe areas, so nothing hides under a notch. */
+  .mobile-topbar {
+    height: calc(3.9375rem + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+  }
+  .gj-sidebar { padding-top: env(safe-area-inset-top); }
+  .pagebar-actions { flex-wrap: wrap; row-gap: .5rem; }
+  .goal-editor-grid,
+  .plan-layout,
+  .trade-detail,
+  .manager-create-row { grid-template-columns: minmax(0, 1fr); }
+  /* Charts keep a readable height on a phone without dominating the screen. */
+  .chart-panel { min-height: 17.5rem; }
+  .insight-number { font-size: 2.125rem; }
+  .pnl-day-card { min-height: 3.625rem; }
+}
+
+/* 6 · NARROW PHONE (430 · 390 · 375 · 360) -------------------------------- */
+@media (max-width: 480px) {
+  .chart-panel { min-height: 15rem; }
+  .stat-card { min-height: 5.75rem; }
+  .trade-title h2,
+  .section-heading h2 { font-size: 1.1875rem; }
+  /* Floating actions become square icons: same reach, far less coverage. */
+  .account-rename-fab,
+  .mt5-import-fab,
+  .options-fab {
+    justify-content: center;
+    max-width: 3.25rem;
+    padding: .625rem;
+    border-radius: .75rem;
+    overflow: hidden;
+  }
+  .account-rename-fab span,
+  .mt5-import-fab span,
+  .options-fab span { display: none; }
+  /* Dialogs may use the full height, and their actions clear the home bar. */
+  [data-slot="dialog-content"],
+  .trade-dialog,
+  .trade-view-dialog,
+  .day-trades-dialog { max-height: 100dvh !important; }
+  .dialog-actions { padding-bottom: calc(env(safe-area-inset-bottom) + .75rem); }
+  .day-trade-row { gap: .5rem; }
+  /* Dense calculator / filter grids go single-column before they go unreadable. */
+  .risk-calculator-grid,
+  .risk-result-grid,
+  .analysis-filter-grid,
+  .analysis-compare-fields,
+  .recovery-workbench,
+  .mt5-stream-freshness,
+  .field-grid,
+  .pdf-date-range { grid-template-columns: minmax(0, 1fr); }
+  /* Non-full-bleed dialogs keep a visible margin instead of touching the edges. */
+  [data-slot="dialog-content"]:not(.trade-dialog):not(.trade-view-dialog):not(.day-trades-dialog) {
+    width: calc(100vw - 1.25rem) !important;
+    max-width: calc(100vw - 1.25rem) !important;
+  }
+}
+
+/* 7 · SMALLEST PHONE (320) ------------------------------------------------ */
+@media (max-width: 400px) {
+  .stats-grid,
+  .stats-grid.compact { grid-template-columns: minmax(0, 1fr); }
+  .stat-card { min-height: 5.125rem; }
+  .gj-main { padding-inline: .625rem; }
+  .trade-header,
+  .section-heading { gap: .75rem; margin: .875rem 0 .75rem; }
+  .empty-state { min-height: 13.5rem; padding: 1.375rem 1rem; }
+  .header-actions .button { min-width: calc(50% - .375rem); }
+}
+
+/* 8 · SHORT · LANDSCAPE: the decorative layer steps aside ------------------ */
+@media (max-height: 34rem) and (orientation: landscape) {
+  .account-hero-3d,
+  .premium-3d,
+  .gold-canvas,
+  .view-hero-3d-canvas { display: none !important; }
+  .account-hero { padding: 1rem; }
+}

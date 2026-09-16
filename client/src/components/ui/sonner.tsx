@@ -1,12 +1,14 @@
-import { useTheme } from "next-themes";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 
+/**
+ * Gold Journal is dark-only, so the toast surface is pinned to dark rather than
+ * following a (non-existent) theme preference. Colours still come from the
+ * semantic tokens, so toasts match whatever view they appear over.
+ */
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme();
-
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme="dark"
       className="toaster group"
       style={
         {

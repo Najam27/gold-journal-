@@ -111,8 +111,7 @@ a:focus-visible {
   background: var(--gj-control);
   color: var(--gj-text);
 }
-.gj-shell select { color-scheme: light; }
-.dark .gj-shell select { color-scheme: dark; }
+.gj-shell select { color-scheme: dark; }
 .gj-shell select option { background: var(--gj-control-option); color: var(--gj-control-text); }
 .gj-shell select option:checked { background: var(--gj-control-active); color: var(--gj-control-text); }
 .gj-shell select:focus { border-color: var(--ring); box-shadow: 0 0 0 3px var(--gj-control-focus); }
