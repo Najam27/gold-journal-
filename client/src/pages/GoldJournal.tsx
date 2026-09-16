@@ -50,6 +50,9 @@ import {
 import { beginAccountSwitchForApp, invalidateAccountScopedQueries, payloadBelongsToAccount, refreshCurrentAccount, resolveActiveAccount } from "@/lib/accountScope";
 import { classifyApiError } from "@/lib/apiErrors";
 import { JournalQueryError, SwitchingAccount } from "@/components/QueryError";
+import { AccountHero } from "@/components/premium/AccountHero";
+import { AmbientField } from "@/components/premium/AmbientField";
+import { Premium3DBackground } from "@/components/premium/Premium3DBackground";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { OFFLINE_CASH_REQUEST_EVENT } from "@/lib/offlineMutationQueue";
 import { useLocalJournal } from "@/lib/journal/useLocalJournal";
@@ -199,6 +202,7 @@ const navItems: { id: View; label: string; icon: typeof BookOpen }[] = [
 // Every other view stays reachable from the sidebar drawer.
 const mobileNavIds: View[] = ["trades", "analysis", "goals", "psychology", "calendar", "mt5"];
 export const JOURNAL_RETRY_EVENT = "gold-journal:retry";
+const NAV_GROUP_LABELS: Record<string, string> = { trades: "Journal", missed: "Journal", analysis: "Journal", calendar: "Journal", goals: "Discipline", psychology: "Discipline", plan: "Discipline", mentor: "Intelligence", mt5: "Intelligence", risk: "Intelligence", options: "Workspace" };
 const isJournalView = (value: unknown): value is View =>
   navItems.some(item => item.id === value);
 const defaultRules = [
@@ -1180,7 +1184,30 @@ export default function GoldJournal() {
     } else setInstallHelp(true);
   };
   const pagedTrades = tradeListQuery.data?.trades ?? [];
+  // Today's result for the hero, derived from the same trade rows the Trade Log
+  // and the P&L calendar already render — no separate query, no new math.
+  const today = useMemo(() => {
+    const todayKey = getPktDateInput();
+    const rows = trades.filter(
+      (trade: any) => getPktDateInput(trade.tradeDate) === todayKey
+    );
+    const pnl = rows.reduce(
+      (total: number, trade: any) => total + toNumber(trade.pnl),
+      0
+    );
+    const wins = rows.filter((trade: any) => trade.result === "WIN").length;
+    const closed = rows.filter((trade: any) => trade.result !== "OPEN").length;
+    return {
+      pnl,
+      count: rows.length,
+      winRate: closed ? (wins / closed) * 100 : 0,
+    };
+  }, [trades]);
   const authGate = getAuthGate(authStatus);
+  // The splash and login screens already own a lazy gold Three.js hero
+  // (GoldCanvas + its static CSS fallback), so they are not wrapped again here:
+  // one WebGL context per surface, and the auth screens keep their own
+  // premium gradient treatment.
   if (authGate === "splash") return <SplashScreen />;
   if (authGate === "auth-error")
     return (
@@ -1227,7 +1254,8 @@ export default function GoldJournal() {
     </>
   );
   return (
-    <div className="gj-shell">
+    <div className="gj-shell" data-view={view}>
+      <AmbientField />
       <>
         {!isOnline && (
           <div className="offline-banner">
@@ -1336,6 +1364,37 @@ export default function GoldJournal() {
                 <button type="button" onClick={() => setView("psychology")}>Review development</button>
               </section>
             )}
+            {view === "trades" && account && (
+              <AccountHero
+                accountName={account.name || "Active account"}
+                balanceLabel={
+                  activeMt5Connection?.balance != null
+                    ? "MT5 balance"
+                    : "Journal balance"
+                }
+                balance={toNumber(
+                  activeMt5Connection?.balance ?? stats.balance
+                )}
+                equity={
+                  activeMt5Connection?.equity != null
+                    ? toNumber(activeMt5Connection.equity)
+                    : null
+                }
+                floatingPnl={
+                  activeMt5Connection?.floatingPnl != null
+                    ? toNumber(activeMt5Connection.floatingPnl)
+                    : null
+                }
+                todayPnl={today.pnl}
+                todayTrades={today.count}
+                todayWinRate={today.winRate}
+                winRate={stats.winRate}
+                totalTrades={stats.total}
+                online={isOnline}
+                mt5Connected={Boolean(activeMt5Connection)}
+                syncing={mt5Workspace.isFetching}
+              />
+            )}
             {view === "trades" && (
               <TradeLog
                 stats={stats}
@@ -1402,9 +1461,12 @@ export default function GoldJournal() {
               />
             )}
             {view === "analysis" && (
-              <React.Suspense fallback={<Loading />}>
-                <AnalysisDashboardLazy accountId={account?.id} />
-              </React.Suspense>
+              <div className="view-hero-3d">
+                <Premium3DBackground tone="blue" className="view-hero-3d-canvas" />
+                <React.Suspense fallback={<Loading />}>
+                  <AnalysisDashboardLazy accountId={account?.id} />
+                </React.Suspense>
+              </div>
             )}
             {view === "goals" && (
               <GoalsView
@@ -1489,12 +1551,15 @@ export default function GoldJournal() {
               />
             )}
             {view === "mentor" && (
-              <MentorView
-                trades={trades}
-                stats={stats}
-                account={account}
-                user={user}
-              />
+              <div className="view-hero-3d ai-surface-pad">
+                <Premium3DBackground tone="violet" className="view-hero-3d-canvas" />
+                <MentorView
+                  trades={trades}
+                  stats={stats}
+                  account={account}
+                  user={user}
+                />
+              </div>
             )}
             {view === "mt5" && (
               <Mt5LiveView

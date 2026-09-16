@@ -187,6 +187,50 @@ function AccountMetric({
   );
 }
 
+/**
+ * Top-level terminal status. The detailed wording still comes from
+ * `connectionState()` in the connection cards; this banner only states the
+ * overall state a trader checks before reading any position list.
+ *
+ * It deliberately repeats no existing label, amount or symbol so the MT5 Live
+ * surface keeps exactly one authoritative place for each fact.
+ */
+function Mt5StatusBanner({
+  tone,
+  syncing,
+  onRefresh,
+}: {
+  tone: string;
+  syncing: boolean;
+  onRefresh: () => void;
+}) {
+  const stateClass =
+    tone === "live" ? "connected" : tone === "warning" ? "idle" : tone === "offline" ? "disconnected" : "waiting";
+  const stateWord =
+    tone === "live" ? "CONNECTED" : tone === "warning" ? "DEGRADED" : tone === "offline" ? "DISCONNECTED" : "WAITING";
+  return (
+    <section className={`mt5-status-banner ${stateClass}`} aria-label="MT5 terminal status">
+      <div className="mt5-status-state">
+        <i>
+          <Radio size={19} />
+          {tone === "live" && <b />}
+        </i>
+        <div>
+          <strong>{stateWord}</strong>
+          <small>
+            Read-only journal bridge · {syncing ? "checking the terminal now" : "polling every 2.5 seconds"}
+          </small>
+        </div>
+      </div>
+      <div className="mt5-status-actions">
+        <Button variant="outline" size="sm" onClick={onRefresh}>
+          <RefreshCcw size={14} /> Refresh now
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 export function Mt5LiveView({ account, accounts, onJournalNow, onSwitchAccount }: any) {
   const accountInput = useMemo(
     () => (account?.id ? { accountId: account.id } : undefined),
@@ -325,8 +369,19 @@ export function Mt5LiveView({ account, accounts, onJournalNow, onSwitchAccount }
           : activeConnection.lastHistoryAttempt
             ? `${healthPrefix} · ${activeConnection.lastHistoryMessage || "History batch received."} Waiting for completion.`
             : `${healthPrefix} · No historical batch has reached Gold Journal yet.`;
+  const activeState = activeConnection ? connectionState(activeConnection) : null;
   return (
     <section className="mt5-live-view">
+      {activeState && (
+        <Mt5StatusBanner
+          tone={activeState.tone}
+          syncing={workspace.isFetching}
+          onRefresh={() => {
+            void workspace.refetch();
+            void history.refetch();
+          }}
+        />
+      )}
       <header className="section-heading mt5-heading">
         <div>
           <span className="eyebrow">DIRECT MT5 SYNC</span>
@@ -815,6 +870,7 @@ export function Mt5LiveView({ account, accounts, onJournalNow, onSwitchAccount }
                   <span>
                     {position.lots} lots · {pkt(position.openTime)} PKT
                   </span>
+                  <span className="mt5-ticket">Ticket {position.ticket}</span>
                 </footer>
               </article>
             ))}

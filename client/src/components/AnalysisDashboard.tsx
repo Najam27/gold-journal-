@@ -839,7 +839,7 @@ export function AnalysisDashboard({ accountId }: Props) {
         </div>
         <p>{analysis.mfeMae.message}</p>
       </section>
-      <section className="panel">
+      <section className="panel ai-surface">
         <div className="panel-title">
           <div>
             <span>AI EDGE ANALYST</span>
@@ -891,7 +891,7 @@ export function AnalysisDashboard({ accountId }: Props) {
           )}
         </div>
         {aiRunning && (
-          <div className="analysis-ai-empty">
+          <div className="analysis-ai-empty ai-loading" role="status">
             <Bot size={20} />
             <p>
               This browser is calling Google AI directly. Nothing is sent to

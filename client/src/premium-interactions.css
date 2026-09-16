@@ -1,0 +1,379 @@
+/*
+ * Companion to premium-terminal.css: interaction and component-detail rules that
+ * complete the premium design system. Kept small on purpose — the system itself
+ * lives in premium-terminal.css and every color comes from the tokens declared
+ * in index.css (`--accent-*`, `--surface-*`, `--tone`).
+ */
+
+/* ---------------------------------------------------------------------------
+   TILT WRAPPER (transform only; never affects layout)
+   --------------------------------------------------------------------------- */
+.gj-tilt {
+  display: block;
+  transform-style: preserve-3d;
+  transition: transform var(--gj-dur-base) var(--gj-ease);
+}
+@media (hover: none), (pointer: coarse) {
+  .gj-tilt { transform: none !important; }
+}
+
+/* ---------------------------------------------------------------------------
+   NAVIGATION DETAILS
+   The rail markup carries a bare inline icon, so the lit "icon container" and
+   the animated active indicator are produced from it directly.
+   --------------------------------------------------------------------------- */
+.sidebar-nav button > svg:first-child {
+  flex: 0 0 auto;
+  box-sizing: content-box;
+  width: 15px;
+  height: 15px;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 9px;
+  background: var(--surface-panel);
+  color: var(--text-muted);
+  box-shadow: inset 0 1px 0 var(--hairline-top);
+  transition: inherit;
+}
+.sidebar-nav button:hover > svg:first-child {
+  border-color: color-mix(in srgb, var(--tone) 44%, var(--border));
+  color: var(--tone);
+  box-shadow: inset 0 1px 0 var(--hairline-top), 0 8px 18px -10px color-mix(in srgb, var(--tone) 70%, transparent);
+}
+.sidebar-nav button.active > svg:first-child {
+  border-color: color-mix(in srgb, var(--tone) 58%, transparent);
+  background: linear-gradient(150deg, color-mix(in srgb, var(--tone) 28%, var(--surface-panel)), color-mix(in srgb, var(--tone) 8%, var(--surface-panel)));
+  color: var(--tone);
+  box-shadow: 0 10px 22px -12px color-mix(in srgb, var(--tone) 85%, transparent), inset 0 1px 0 var(--hairline-top);
+}
+/* Active indicator: appears on the destination you switch to, and animates in. */
+.sidebar-nav button.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 0 99px 99px 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tone) 55%, #fff), var(--tone));
+  box-shadow: 0 0 16px color-mix(in srgb, var(--tone) 75%, transparent);
+  animation: gj-nav-indicator var(--gj-dur-base) var(--gj-ease) both;
+}
+@keyframes gj-nav-indicator {
+  from { transform: scaleY(.25); opacity: 0; }
+  to { transform: scaleY(1); opacity: 1; }
+}
+.sidebar-nav button.active > span { letter-spacing: -.01em; }
+.gj-sidebar.is-collapsed .sidebar-nav button > svg:first-child { margin-inline: auto; }
+
+.mobile-bottom-nav button { position: relative; }
+.mobile-bottom-nav button > svg { transition: color var(--gj-dur-fast) ease, transform var(--gj-dur-fast) var(--gj-ease); }
+.mobile-bottom-nav button.active > svg { transform: translateY(-1px); }
+
+/* ---------------------------------------------------------------------------
+   AUTH GATE + VIEW HERO 3D SURFACES
+   The WebGL canvas sits behind the view, and the view keeps its own gradients
+   as a static fallback so the surface is never blank.
+   --------------------------------------------------------------------------- */
+.view-hero-3d {
+  position: relative;
+  isolation: isolate;
+}
+/* Scoped two-class selectors so the sizing/opacity win over the base
+   `.premium-3d` positioning rules in the main layer. */
+.view-hero-3d .view-hero-3d-canvas {
+  position: absolute;
+  inset: -1rem -1rem auto -1rem;
+  width: auto;
+  height: min(30rem, 60vh);
+  opacity: .55;
+  mask-image: radial-gradient(120% 90% at 82% 0%, #000 15%, transparent 76%);
+  -webkit-mask-image: radial-gradient(120% 90% at 82% 0%, #000 15%, transparent 76%);
+  pointer-events: none;
+}
+.view-hero-3d .view-hero-3d-canvas.is-ready { opacity: .55; }
+.account-hero .account-hero-3d {
+  inset: 0 0 0 auto;
+  width: 46%;
+  opacity: .5;
+}
+.account-hero .account-hero-3d.is-ready { opacity: .5; }
+@media (max-width: 900px) {
+  .view-hero-3d-canvas { display: none; }
+}
+.ai-surface-pad > .mentor-grid,
+.ai-surface-pad > .mentor-run,
+.ai-surface-pad > .trade-header { position: relative; z-index: 1; }
+
+/* ---------------------------------------------------------------------------
+   TOOLBAR FILTER CONTROL
+   --------------------------------------------------------------------------- */
+.toolbar-filter {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: .7rem;
+  background: var(--surface-input);
+  color: var(--text-muted);
+  box-shadow: var(--shadow-sm);
+}
+.toolbar-filter > svg { color: var(--text-dim); }
+.toolbar-filter:focus-within { border-color: color-mix(in srgb, var(--tone) 55%, var(--border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 16%, transparent); }
+.toolbar-filter select {
+  height: 34px;
+  padding: 0 22px 0 0;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--text-primary);
+  font-size: 11px;
+  box-shadow: none !important;
+}
+
+/* The P&L column carries a direction icon next to the number. */
+.trade-table td.pnl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.trade-table td.pnl svg { flex: 0 0 auto; }
+
+/* ---------------------------------------------------------------------------
+   P&L CALENDAR · intensity tint (value computed in the component)
+   --------------------------------------------------------------------------- */
+.pnl-day-card.populated.gain {
+  background: linear-gradient(165deg, color-mix(in srgb, var(--accent-emerald) var(--day-tint, 16%), var(--surface-panel)), var(--surface-panel));
+}
+.pnl-day-card.populated.loss {
+  background: linear-gradient(165deg, color-mix(in srgb, var(--accent-coral) var(--day-tint, 16%), var(--surface-panel)), var(--surface-panel));
+}
+
+/* ---------------------------------------------------------------------------
+   DAY DRILL-DOWN DIALOG
+   --------------------------------------------------------------------------- */
+.day-trades-dialog { border-color: var(--border); background: var(--surface-modal); color: var(--text-primary); }
+.day-dialog-head {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tone) 9%, transparent), transparent);
+}
+.day-dialog-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 9px; }
+.day-dialog-metrics > * {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  border-radius: 12px;
+  background: var(--surface-subtle);
+  box-shadow: var(--shadow-inset-top);
+}
+.day-dialog-trades { border-top: 1px solid color-mix(in srgb, var(--border) 80%, transparent); }
+.day-trade-row {
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 12px;
+  background: var(--surface-panel);
+  transition: transform var(--gj-dur-fast) var(--gj-ease), border-color var(--gj-dur-fast) ease, box-shadow var(--gj-dur-base) var(--gj-ease);
+}
+.day-trade-row:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--tone) 42%, var(--border));
+  box-shadow: var(--shadow-sm);
+}
+.day-behavior-card {
+  border: 1px solid color-mix(in srgb, var(--accent-violet) 26%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent-violet) 6%, var(--surface-panel));
+}
+
+/* ---------------------------------------------------------------------------
+   MT5 · STATUS BANNER ACTIONS + POSITION CARD DETAILS
+   --------------------------------------------------------------------------- */
+.mt5-status-actions { position: relative; z-index: 1; display: flex; gap: 8px; margin-left: auto; }
+.mt5-position-card header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 9px;
+}
+.mt5-position-card header h4 { margin: 0; font-size: 17px; letter-spacing: -.03em; color: var(--text-heading); }
+.mt5-position-card header > strong {
+  margin-left: auto;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -.04em;
+  font-variant-numeric: tabular-nums;
+}
+.mt5-position-card header .side-badge { font-size: 9.5px; letter-spacing: .1em; }
+.mt5-position-card .mt5-metrics span { color: var(--text-muted); }
+.mt5-position-card .mt5-metrics b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.mt5-position-card footer { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--text-muted); }
+.mt5-position-card .mt5-ticket {
+  color: var(--text-dim);
+  font-family: var(--gj-mono, monospace);
+  font-size: 9.5px;
+  letter-spacing: .05em;
+}
+
+/* ---------------------------------------------------------------------------
+   LEGACY SURFACE NORMALISATION
+   A few rules written for the original dark-only graphite UI still hardcode
+   colors that break light mode. They are normalised onto the semantic tokens
+   here so both themes read from one palette.
+   --------------------------------------------------------------------------- */
+.goal-card,
+.goal-card.met,
+.goal-card.breached,
+.goal-card.at.risk {
+  border-color: var(--border);
+  background: var(--surface-panel);
+}
+.goal-card.met { border-left-color: var(--accent-emerald); }
+.goal-card.breached {
+  border-left-color: var(--accent-coral);
+  background: linear-gradient(160deg, color-mix(in srgb, var(--accent-coral) 9%, var(--surface-panel)), var(--surface-panel));
+}
+.goal-card.at.risk { border-left-color: var(--accent-amber); }
+.goal-card-head p,
+.goal-card-head span,
+.goal-value span { color: var(--text-muted); }
+.goal-value b { color: var(--text-primary); }
+.progress-track { background: color-mix(in srgb, var(--border) 70%, transparent); }
+.progress-track i { background: var(--text-dim); }
+.goal-card.met .progress-track i { background: var(--accent-emerald); }
+.goal-card.breached .progress-track i { background: var(--accent-coral); }
+.goal-card.at.risk .progress-track i { background: var(--accent-amber); }
+.goal-footer button { color: var(--accent-gold-text); }
+.goal-footer .delete-mini { color: var(--accent-coral); }
+
+.calendar-weekdays span,
+.day-cell,
+.calendar-blank,
+.day-cell:nth-child(7n) {
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+.day-cell > span,
+.day-cell small { color: var(--text-dim); }
+.day-cell strong { color: var(--text-primary); }
+.day-cell.gain { background: color-mix(in srgb, var(--accent-emerald) 10%, transparent); }
+.day-cell.loss { background: color-mix(in srgb, var(--accent-coral) 10%, transparent); }
+.day-cell.gain strong { color: var(--accent-emerald); }
+.day-cell.loss strong { color: var(--accent-coral); }
+
+.rule-list label { color: var(--text-secondary); }
+.rule-list input { accent-color: var(--accent-gold); }
+.mini-day-grid button { background: var(--surface-control); color: var(--text-muted); border-color: transparent; }
+.mini-day-grid button.selected { background: var(--accent-gold); color: var(--primary-foreground); }
+
+.mentor-icon { color: var(--accent-violet); border-color: color-mix(in srgb, var(--accent-violet) 40%, var(--border)); background: color-mix(in srgb, var(--accent-violet) 12%, var(--surface-panel)); }
+.mentor-run p,
+.connection-card > p,
+.mt5-settings label,
+.setup-copy p { color: var(--text-muted); }
+.report-panel pre { color: var(--text-secondary); }
+.user-copy small { color: var(--text-dim); }
+.connection-indicator i { background: var(--text-dim); }
+.connection-indicator i.online { background: var(--accent-emerald); box-shadow: 0 0 11px color-mix(in srgb, var(--accent-emerald) 70%, transparent); }
+.connection-indicator i.offline { background: var(--accent-coral); box-shadow: 0 0 11px color-mix(in srgb, var(--accent-coral) 70%, transparent); }
+.connection-indicator span { color: var(--accent-gold-text); }
+.setup-copy { background: color-mix(in srgb, var(--accent-cyan) 8%, var(--surface-panel)); color: var(--text-secondary); }
+
+/* ---------------------------------------------------------------------------
+   GOALS (gold + cyan) · PSYCHOLOGY (violet + blue)
+   These desks already render through tokens; the layer below gives them the
+   same depth, accent language and progress treatment as the rest of the app.
+   --------------------------------------------------------------------------- */
+.control-summary-card,
+.dev-stat {
+  border-radius: 14px;
+  background: linear-gradient(165deg, color-mix(in srgb, var(--tone) 7%, var(--surface-panel)), var(--surface-panel) 74%);
+  box-shadow: var(--shadow-sm), var(--shadow-inset-top);
+  transition: transform var(--gj-dur-base) var(--gj-ease), box-shadow var(--gj-dur-base) var(--gj-ease), border-color var(--gj-dur-fast) ease;
+}
+.control-summary-card > span,
+.dev-stat > span,
+.dev-score > span {
+  color: var(--tone);
+  letter-spacing: .13em;
+}
+.control-summary-card strong,
+.dev-stat strong,
+.dev-score strong { font-variant-numeric: tabular-nums; letter-spacing: -.045em; }
+.control-summary-card.safe strong,
+.dev-stat.safe strong,
+.dev-score.safe strong { color: var(--accent-emerald); }
+.control-summary-card.risk strong,
+.dev-stat.risk strong,
+.dev-score.risk strong { color: var(--accent-coral); }
+.dev-stat.watch strong,
+.dev-score.watch strong { color: var(--accent-amber); }
+.control-summary-card.safe,
+.dev-stat.safe { border-color: color-mix(in srgb, var(--accent-emerald) 40%, var(--border)); }
+.control-summary-card.risk,
+.dev-stat.risk { border-color: color-mix(in srgb, var(--accent-coral) 44%, var(--border)); }
+.dev-stat.watch { border-color: color-mix(in srgb, var(--accent-amber) 42%, var(--border)); }
+.dev-score {
+  border-radius: 15px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--accent-violet) 10%, var(--surface-panel)), var(--surface-panel) 78%);
+  box-shadow: var(--shadow-sm), var(--shadow-inset-top);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .control-summary-card:hover,
+  .dev-stat:hover {
+    transform: translateY(-3px);
+    border-color: color-mix(in srgb, var(--tone) 40%, var(--border));
+    box-shadow: var(--shadow-elevated);
+  }
+}
+
+/* Progress: gold/emerald/coral ramp with a touch of glow, still a plain bar. */
+.progress-cell > i { height: 7px; background: color-mix(in srgb, var(--border) 70%, transparent); box-shadow: inset 0 1px 2px rgba(4, 12, 26, .14); }
+.progress-cell > i > b {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent-gold) 65%, transparent), var(--accent-gold));
+  box-shadow: 0 0 12px -2px color-mix(in srgb, var(--accent-gold) 70%, transparent);
+}
+.control-table tr.safe .progress-cell > i > b { background: linear-gradient(90deg, color-mix(in srgb, var(--accent-emerald) 70%, transparent), var(--accent-emerald)); box-shadow: 0 0 12px -2px color-mix(in srgb, var(--accent-emerald) 70%, transparent); }
+.control-table tr.risk .progress-cell > i > b { background: linear-gradient(90deg, color-mix(in srgb, var(--accent-coral) 70%, transparent), var(--accent-coral)); box-shadow: 0 0 12px -2px color-mix(in srgb, var(--accent-coral) 70%, transparent); }
+.status-chip {
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-subtle) 90%, transparent);
+  letter-spacing: .08em;
+}
+.status-chip.safe { border-color: color-mix(in srgb, var(--accent-emerald) 34%, var(--border)); background: color-mix(in srgb, var(--accent-emerald) 12%, transparent); color: var(--accent-emerald); }
+.status-chip.risk { border-color: color-mix(in srgb, var(--accent-coral) 34%, var(--border)); background: color-mix(in srgb, var(--accent-coral) 12%, transparent); color: var(--accent-coral); }
+.control-table-panel,
+.control-table-panel.panel { overflow: hidden; }
+.control-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: color-mix(in srgb, var(--surface-panel-elevated) 94%, var(--tone));
+  backdrop-filter: blur(8px);
+}
+.control-table tbody tr:hover { background: color-mix(in srgb, var(--tone) 8%, transparent); }
+
+/* Psychology: violet/blue calm treatment with static, legible warnings. */
+.dev-panel-head h3 { letter-spacing: -.035em; }
+.dev-panel-head-actions { color: var(--accent-violet); }
+.dev-cooldown,
+.dev-readiness {
+  border-radius: 13px;
+  background: linear-gradient(150deg, color-mix(in srgb, var(--accent-violet) 8%, var(--surface-panel)), var(--surface-panel) 78%);
+  box-shadow: var(--shadow-sm), var(--shadow-inset-top);
+}
+.dev-cooldown > svg,
+.dev-readiness > svg { color: var(--accent-violet); }
+.dev-cooldown.watch,
+.dev-readiness.watch { border-color: color-mix(in srgb, var(--accent-amber) 42%, var(--border)); }
+.dev-cooldown.risk,
+.dev-readiness.risk { border-color: color-mix(in srgb, var(--accent-coral) 46%, var(--border)); }
+.dev-cooldown.risk > svg,
+.dev-readiness.risk > svg { color: var(--accent-coral); }
+.dev-identity > strong { letter-spacing: -.05em; color: var(--text-heading); }
+
+@media (prefers-reduced-motion: reduce) {
+  .gj-tilt, .day-trade-row { transition: none; }
+  .control-summary-card, .dev-stat { transition: none; }
+  .day-trade-row:hover { transform: none; }
+  .sidebar-nav button.active::before { animation: none; }
+}

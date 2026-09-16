@@ -12,6 +12,10 @@ import { apiBaseUrl } from "./lib/apiBase";
 import "./index.css";
 import "./uiux-system.css";
 import "./theme-repair.css";
+// One consolidated premium layer, loaded last so it owns the finished look,
+// plus its small interaction companion.
+import "./premium-terminal.css";
+import "./premium-interactions.css";
 
 const redirectToLoginIfUnauthorized = (error: unknown) => {
   if (!(error instanceof TRPCClientError)) return;

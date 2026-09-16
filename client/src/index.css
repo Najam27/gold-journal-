@@ -1,13 +1,11 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "./gold-overrides.css";
-@import "./visual-upgrade.css";
-@import "./recovery-workstation.css";
-@import "./theme-audit.css";
 @import "./flexible-goals.css";
 @import "./mt5-live.css";
-@import "./premium-motion.css";
 @import "./behavioral-psychology.css";
+/* The premium terminal layer (surfaces, accents, depth, controls) loads last
+   from main.tsx so it is the single consolidated presentation authority. */
 
 @custom-variant dark (&:is(.dark *));
 
@@ -37,6 +35,14 @@
   --color-ring: var(--ring);
   --color-profit: var(--profit);
   --color-loss: var(--loss);
+  --color-info: var(--state-info);
+  --color-ai: var(--state-ai);
+  --color-accent-cyan: var(--accent-cyan);
+  --color-accent-violet: var(--accent-violet);
+  --color-accent-emerald: var(--accent-emerald);
+  --color-accent-amber: var(--accent-amber);
+  --color-accent-blue: var(--accent-blue);
+  --color-accent-coral: var(--accent-coral);
   --color-warning: var(--warning);
   --color-neutral: var(--neutral);
   --color-risk: var(--risk);
@@ -54,55 +60,62 @@
      SEMANTIC DESIGN TOKENS - LIGHT THEME
      ================================================ */
 
-  /* Surfaces - hierarchical depth system */
-  --surface-base: #f6f8fb;
-  --surface-sidebar: #ffffff;
-  --surface-header: #ffffff;
+  /* Surfaces - six-layer depth system (LIGHT)
+     base → workspace → panel → card → interactive → modal */
+  --surface-base: #e9eef7;
+  --surface-workspace: #f3f6fc;
+  --surface-glass: rgba(255, 255, 255, 0.72);
+  --surface-sidebar: #fdfefe;
+  --surface-header: rgba(255, 255, 255, 0.78);
   --surface-panel: #ffffff;
   --surface-panel-elevated: #ffffff;
   --surface-card: #ffffff;
-  --surface-card-hover: #fafbfc;
+  --surface-card-hover: #f7fafe;
   --surface-input: #ffffff;
   --surface-dropdown: #ffffff;
   --surface-modal: #ffffff;
-  --surface-tooltip: #ffffff;
-  --surface-overlay: rgba(16, 20, 26, 0.5);
-  --surface-subtle: #f8fafc;
+  --surface-tooltip: #10192b;
+  --surface-overlay: rgba(11, 22, 40, 0.44);
+  --surface-subtle: #f1f5fc;
+  --surface-tint: #eef3fb;
   --surface-control: #ffffff;
-  --surface-control-2: #edf2f6;
-  --surface-control-active: #edf2f6;
+  --surface-control-2: #e8eef9;
+  --surface-control-active: #dfe8f6;
 
   /* Text hierarchy */
-  --text-primary: #15202b;
-  --text-secondary: #293746;
-  --text-muted: #526273;
-  --text-disabled: #8d98a5;
+  --text-primary: #0c1626;
+  --text-secondary: #223044;
+  --text-muted: #4d5f78;
+  --text-disabled: #93a1b5;
   --text-inverse: #ffffff;
-  --text-heading: #15202b;
-  --text-data: #15202b;
-  --text-placeholder: #67788a;
-  --text-sub: #4e5f70;
-  --text-dim: #67788a;
+  --text-heading: #0a1322;
+  --text-data: #0c1626;
+  --text-placeholder: #67788f;
+  --text-sub: #46586f;
+  --text-dim: #67788f;
 
   /* Trading states - semantic meaning */
-  --state-profit: #13794b;
-  --state-profit-soft: rgba(19, 121, 75, 0.13);
-  --state-loss: #b43d39;
-  --state-loss-soft: rgba(180, 61, 57, 0.13);
-  --state-warning: #9c6411;
-  --state-warning-soft: rgba(156, 100, 17, 0.13);
-  --state-neutral: #526273;
-  --state-neutral-soft: rgba(82, 98, 115, 0.13);
-  --state-open: #236ca7;
-  --state-open-soft: rgba(35, 108, 167, 0.13);
-  --state-closed: #536274;
-  --state-connected: #13794b;
-  --state-connecting: #9c6411;
-  --state-disconnected: #b43d39;
-  --state-error: #b43d39;
-  --state-success: #13794b;
-  --state-danger: #b43d39;
-  --state-info: #236ca7;
+  --state-profit: #0b7f4f;
+  --state-profit-soft: rgba(11, 127, 79, 0.13);
+  --state-loss: #c33a30;
+  --state-loss-soft: rgba(195, 58, 48, 0.13);
+  --state-warning: #97620a;
+  --state-warning-soft: rgba(151, 98, 10, 0.14);
+  --state-neutral: #4d5f78;
+  --state-neutral-soft: rgba(77, 95, 120, 0.13);
+  --state-open: #1d63c4;
+  --state-open-soft: rgba(29, 99, 196, 0.13);
+  --state-closed: #4f6076;
+  --state-connected: #0b7f4f;
+  --state-connecting: #97620a;
+  --state-disconnected: #c33a30;
+  --state-error: #c33a30;
+  --state-success: #0b7f4f;
+  --state-danger: #c33a30;
+  --state-info: #0d7490;
+  --state-ai: #6438d4;
+  --state-analytics: #1d63c4;
+  --state-risk: #b45309;
 
   /* Shadcn-compatible aliases */
   --profit: var(--state-profit);
@@ -117,19 +130,44 @@
   --danger: var(--state-danger);
   --state-break-even: #65778a;
 
-  /* Accent system - gold primary, restrained secondary accents */
+  /* Accent system - one semantic accent per information domain.
+     gold = brand/actions · emerald = profit · coral = loss/danger ·
+     cyan = live data · blue = analytics · violet = AI · amber = risk */
   --accent-primary: #a56c13;
   --accent-primary-soft: rgba(165, 108, 19, 0.15);
-  --accent-primary-foreground: #fffaf0;
-  --accent-gold: #9b6915;
-  --accent-gold-text: #80530b;
-  --accent-gold-soft: rgba(155, 105, 21, 0.12);
-  --accent-cyan: #236ca7;
-  --accent-cyan-soft: rgba(35, 108, 167, 0.12);
-  --accent-emerald: #13794b;
-  --accent-emerald-soft: rgba(19, 121, 75, 0.12);
-  --accent-violet: #6d5acf;
-  --accent-violet-soft: rgba(109, 90, 207, 0.12);
+  --accent-primary-foreground: #fffaef;
+  --accent-gold: #a56c13;
+  --accent-gold-text: #855106;
+  --accent-gold-soft: rgba(165, 108, 19, 0.13);
+  --accent-cyan: #0d7490;
+  --accent-cyan-soft: rgba(13, 116, 144, 0.12);
+  --accent-emerald: #0b7f4f;
+  --accent-emerald-soft: rgba(11, 127, 79, 0.12);
+  --accent-coral: #c33a30;
+  --accent-coral-soft: rgba(195, 58, 48, 0.12);
+  --accent-blue: #1d63c4;
+  --accent-blue-soft: rgba(29, 99, 196, 0.12);
+  --accent-violet: #6438d4;
+  --accent-violet-soft: rgba(100, 56, 212, 0.12);
+  --accent-indigo: #4b45c9;
+  --accent-indigo-soft: rgba(75, 69, 201, 0.12);
+  --accent-amber: #a2610a;
+  --accent-amber-soft: rgba(162, 97, 10, 0.13);
+
+  /* Ambient + glass + glow: the lighting rig for the depth system. */
+  --ambient-1: rgba(165, 108, 19, 0.16);
+  --ambient-2: rgba(29, 99, 196, 0.14);
+  --ambient-3: rgba(13, 116, 144, 0.10);
+  --glass-border: rgba(255, 255, 255, 0.66);
+  --hairline-top: rgba(255, 255, 255, 0.9);
+  --border-strong: #c2cee0;
+  --glow-gold: 0 12px 34px -12px rgba(165, 108, 19, 0.55);
+  --glow-emerald: 0 12px 34px -12px rgba(11, 127, 79, 0.5);
+  --glow-coral: 0 12px 34px -12px rgba(195, 58, 48, 0.5);
+  --glow-cyan: 0 12px 34px -12px rgba(13, 116, 144, 0.5);
+  --glow-blue: 0 12px 34px -12px rgba(29, 99, 196, 0.5);
+  --glow-violet: 0 12px 34px -12px rgba(100, 56, 212, 0.5);
+  --glow-amber: 0 12px 34px -12px rgba(162, 97, 10, 0.5);
 
   /* UI tokens */
   --background: var(--surface-base);
@@ -183,12 +221,13 @@
   --gj-success: var(--state-success);
   --gj-danger: var(--state-danger);
 
-  /* Shadows - semantic depth */
-  --shadow-sm: 0 1px 3px rgba(15, 27, 39, 0.06), 0 1px 2px rgba(15, 27, 39, 0.04);
-  --shadow-card: 0 4px 12px rgba(15, 27, 39, 0.08), 0 2px 4px rgba(15, 27, 39, 0.04);
-  --shadow-elevated: 0 12px 32px rgba(15, 27, 39, 0.10), 0 4px 8px rgba(15, 27, 39, 0.06);
-  --shadow-modal: 0 24px 60px rgba(15, 27, 39, 0.16), 0 8px 16px rgba(15, 27, 39, 0.08);
-  --shadow-floating: 0 8px 24px rgba(15, 27, 39, 0.12);
+  /* Shadows - semantic depth ramp (light: soft, cool, layered) */
+  --shadow-sm: 0 1px 2px rgba(13, 28, 52, 0.06), 0 4px 12px -6px rgba(13, 28, 52, 0.10);
+  --shadow-card: 0 1px 2px rgba(13, 28, 52, 0.05), 0 10px 26px -14px rgba(13, 28, 52, 0.20);
+  --shadow-elevated: 0 2px 4px rgba(13, 28, 52, 0.05), 0 20px 44px -18px rgba(13, 28, 52, 0.26);
+  --shadow-modal: 0 32px 80px -24px rgba(9, 20, 40, 0.34), 0 6px 18px -8px rgba(9, 20, 40, 0.18);
+  --shadow-floating: 0 10px 30px -12px rgba(13, 28, 52, 0.24);
+  --shadow-inset-top: inset 0 1px 0 var(--hairline-top);
 
   /* Animations */
   --ease-premium: cubic-bezier(.23, 1, .32, 1);
@@ -203,56 +242,62 @@
      SEMANTIC DESIGN TOKENS - DARK THEME
      ================================================ */
 
-  /* Surfaces - hierarchical depth system */
-  --surface-base: #10141a;
-  --surface-sidebar: #151b22;
-  --surface-header: #171d24;
-  --surface-panel: #171d24;
-  --surface-panel-elevated: #1c232b;
-  --surface-card: #171d24;
-  --surface-card-hover: #1c232b;
-  --surface-input: #1a2129;
-  --surface-dropdown: #1b222b;
-  --surface-modal: #1b222b;
-  --surface-tooltip: #252f3a;
-  --surface-overlay: rgba(0, 0, 0, 0.6);
-  --surface-subtle: #141a21;
-  --surface-control: #141a20;
-  --surface-control-2: #252f3a;
-  --surface-control-active: #343f4b;
+  /* Surfaces - six-layer depth system (DARK, midnight navy terminal) */
+  --surface-base: #070c17;
+  --surface-workspace: #0a1120;
+  --surface-glass: rgba(16, 26, 46, 0.62);
+  --surface-sidebar: #0a1121;
+  --surface-header: rgba(9, 16, 31, 0.76);
+  --surface-panel: #101a2e;
+  --surface-panel-elevated: #152239;
+  --surface-card: #101a2e;
+  --surface-card-hover: #16233b;
+  --surface-input: #0e1830;
+  --surface-dropdown: #101b31;
+  --surface-modal: #101b31;
+  --surface-tooltip: #1b2a45;
+  --surface-overlay: rgba(3, 7, 15, 0.68);
+  --surface-subtle: #0c1424;
+  --surface-tint: #0e1729;
+  --surface-control: #0e1729;
+  --surface-control-2: #1b2a45;
+  --surface-control-active: #24365a;
 
   /* Text hierarchy */
-  --text-primary: #eef1f5;
-  --text-secondary: #d8dee5;
-  --text-muted: #8d98a5;
-  --text-disabled: #5c6773;
-  --text-inverse: #10141a;
-  --text-heading: #f0f3f6;
-  --text-data: #eef1f5;
-  --text-placeholder: #7e8a96;
-  --text-sub: #9aa6b1;
-  --text-dim: #7e8a96;
+  --text-primary: #f0f4fb;
+  --text-secondary: #cfdbec;
+  --text-muted: #8fa2bd;
+  --text-disabled: #5a6b87;
+  --text-inverse: #070c17;
+  --text-heading: #f6f9ff;
+  --text-data: #f0f4fb;
+  --text-placeholder: #7c8da8;
+  --text-sub: #9cadc7;
+  --text-dim: #7c8da8;
 
   /* Trading states - semantic meaning */
-  --state-profit: #74d9a2;
-  --state-profit-soft: rgba(116, 217, 162, 0.14);
-  --state-loss: #f38d88;
-  --state-loss-soft: rgba(243, 141, 136, 0.14);
-  --state-warning: #f0c96f;
-  --state-warning-soft: rgba(240, 201, 111, 0.14);
-  --state-neutral: #a2afbc;
-  --state-neutral-soft: rgba(162, 175, 188, 0.14);
-  --state-open: #7db7ef;
-  --state-open-soft: rgba(125, 183, 239, 0.14);
-  --state-closed: #b9c5d0;
-  --state-connected: #74d9a2;
-  --state-connecting: #f0c96f;
-  --state-disconnected: #f38d88;
-  --state-error: #f38d88;
-  --state-success: #74d9a2;
-  --state-danger: #f38d88;
-  --state-info: #7db7ef;
-  --state-break-even: #b0bdc8;
+  --state-profit: #3fe39b;
+  --state-profit-soft: rgba(63, 227, 155, 0.14);
+  --state-loss: #ff8590;
+  --state-loss-soft: rgba(255, 133, 144, 0.14);
+  --state-warning: #ffc857;
+  --state-warning-soft: rgba(255, 200, 87, 0.14);
+  --state-neutral: #a7b7d0;
+  --state-neutral-soft: rgba(167, 183, 208, 0.14);
+  --state-open: #6ea8ff;
+  --state-open-soft: rgba(110, 168, 255, 0.14);
+  --state-closed: #bccbe0;
+  --state-connected: #3fe39b;
+  --state-connecting: #ffc857;
+  --state-disconnected: #ff8590;
+  --state-error: #ff8590;
+  --state-success: #3fe39b;
+  --state-danger: #ff8590;
+  --state-info: #46d5f5;
+  --state-break-even: #b4c3da;
+  --state-ai: #b39bff;
+  --state-analytics: #6ea8ff;
+  --state-risk: #ffb057;
 
   /* Shadcn-compatible aliases */
   --profit: var(--state-profit);
@@ -266,19 +311,42 @@
   --success: var(--state-success);
   --danger: var(--state-danger);
 
-  /* Accent system */
-  --accent-primary: #e9b64b;
-  --accent-primary-soft: rgba(233, 182, 75, 0.16);
-  --accent-primary-foreground: #16120b;
-  --accent-gold: #e9b64b;
-  --accent-gold-text: #f0cf79;
-  --accent-gold-soft: rgba(233, 182, 75, 0.14);
-  --accent-cyan: #7db7ef;
-  --accent-cyan-soft: rgba(125, 183, 239, 0.12);
-  --accent-emerald: #74d9a2;
-  --accent-emerald-soft: rgba(116, 217, 162, 0.12);
-  --accent-violet: #9b8dff;
-  --accent-violet-soft: rgba(155, 141, 255, 0.12);
+  /* Accent system - gold brand plus one accent per information domain. */
+  --accent-primary: #f0c14e;
+  --accent-primary-soft: rgba(240, 193, 78, 0.16);
+  --accent-primary-foreground: #1a1206;
+  --accent-gold: #f0c14e;
+  --accent-gold-text: #f7d585;
+  --accent-gold-soft: rgba(240, 193, 78, 0.14);
+  --accent-cyan: #46d5f5;
+  --accent-cyan-soft: rgba(70, 213, 245, 0.13);
+  --accent-emerald: #3fe39b;
+  --accent-emerald-soft: rgba(63, 227, 155, 0.13);
+  --accent-coral: #ff8590;
+  --accent-coral-soft: rgba(255, 133, 144, 0.13);
+  --accent-blue: #6ea8ff;
+  --accent-blue-soft: rgba(110, 168, 255, 0.13);
+  --accent-violet: #b39bff;
+  --accent-violet-soft: rgba(179, 155, 255, 0.13);
+  --accent-indigo: #8f8bff;
+  --accent-indigo-soft: rgba(143, 139, 255, 0.13);
+  --accent-amber: #ffc857;
+  --accent-amber-soft: rgba(255, 200, 87, 0.13);
+
+  /* Ambient + glass + glow: the lighting rig for the depth system. */
+  --ambient-1: rgba(240, 193, 78, 0.16);
+  --ambient-2: rgba(110, 168, 255, 0.16);
+  --ambient-3: rgba(70, 213, 245, 0.12);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --hairline-top: rgba(255, 255, 255, 0.07);
+  --border-strong: #2c3f60;
+  --glow-gold: 0 14px 44px -14px rgba(240, 193, 78, 0.55);
+  --glow-emerald: 0 14px 44px -14px rgba(63, 227, 155, 0.5);
+  --glow-coral: 0 14px 44px -14px rgba(255, 133, 144, 0.5);
+  --glow-cyan: 0 14px 44px -14px rgba(70, 213, 245, 0.5);
+  --glow-blue: 0 14px 44px -14px rgba(110, 168, 255, 0.5);
+  --glow-violet: 0 14px 44px -14px rgba(179, 155, 255, 0.5);
+  --glow-amber: 0 14px 44px -14px rgba(255, 200, 87, 0.5);
 
   /* UI tokens */
   --background: var(--surface-base);
@@ -332,12 +400,13 @@
   --gj-success: var(--state-success);
   --gj-danger: var(--state-danger);
 
-  /* Shadows */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.15);
-  --shadow-card: 0 4px 12px rgba(0, 0, 0, 0.25), 0 2px 4px rgba(0, 0, 0, 0.15);
-  --shadow-elevated: 0 12px 32px rgba(0, 0, 0, 0.3), 0 4px 8px rgba(0, 0, 0, 0.2);
-  --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.4), 0 8px 16px rgba(0, 0, 0, 0.25);
-  --shadow-floating: 0 8px 24px rgba(0, 0, 0, 0.35);
+  /* Shadows - deeper ramp for the midnight canvas */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px -8px rgba(0, 0, 0, 0.5);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45), 0 14px 34px -16px rgba(0, 0, 0, 0.66);
+  --shadow-elevated: 0 2px 6px rgba(0, 0, 0, 0.45), 0 26px 56px -20px rgba(0, 0, 0, 0.72);
+  --shadow-modal: 0 40px 96px -28px rgba(0, 0, 0, 0.8), 0 10px 28px -10px rgba(0, 0, 0, 0.6);
+  --shadow-floating: 0 14px 38px -14px rgba(0, 0, 0, 0.7);
+  --shadow-inset-top: inset 0 1px 0 var(--hairline-top);
 }
 
 * { border-color: var(--border); }
