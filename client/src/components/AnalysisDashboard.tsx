@@ -856,10 +856,10 @@ export function AnalysisDashboard({ accountId }: Props) {
           <div className="analysis-ai-empty">
             <Bot size={20} />
             <div>
-              <strong>Google AI is not configured in this browser.</strong>
+              <strong>Groq is not configured in this browser.</strong>
               <p>
-                Add your own Google AI Studio key in Options. The key stays in
-                this browser and requests go straight to Google AI.
+                Add your own Groq API key in Options. The key stays in this
+                browser and requests go straight to Groq.
               </p>
               <Button
                 variant="outline"
@@ -894,7 +894,7 @@ export function AnalysisDashboard({ accountId }: Props) {
           <div className="analysis-ai-empty ai-loading" role="status">
             <Bot size={20} />
             <p>
-              This browser is calling Google AI directly. Nothing is sent to
+              This browser is calling Groq directly. Nothing is sent to
               Gold Journal servers, and you can cancel at any time.
             </p>
           </div>
@@ -913,12 +913,12 @@ export function AnalysisDashboard({ accountId }: Props) {
               )}
               {isModelError(aiOutcome?.errorCode) && (
                 <Button variant="outline" size="sm" onClick={() => openJournalView("options")}>
-                  Pick an available Gemini model
+                  Pick an available Groq model
                 </Button>
               )}
               {aiOutcome?.errorCode === "invalid_key" && (
                 <Button variant="outline" size="sm" onClick={() => openJournalView("options")}>
-                  Fix Gemini key
+                  Fix Groq key
                 </Button>
               )}
             </div>
@@ -928,13 +928,13 @@ export function AnalysisDashboard({ accountId }: Props) {
           <>
             {aiOutcome.modelRepairedFrom && (
               <p className="analysis-warning" role="status">
-                {aiOutcome.modelRepairedFrom} is no longer offered by Gemini. This
+                {aiOutcome.modelRepairedFrom} is no longer offered by Groq. This
                 report used {aiOutcome.model}, and that selection has been saved.
               </p>
             )}
             {aiOutcome.schemaFallback && (
               <p className="analysis-warning" role="status">
-                Gemini rejected the strict response schema for this model, so the
+                Groq rejected the strict response schema for this model, so the
                 analysis was retried in JSON mode and validated locally before it
                 was accepted.
               </p>

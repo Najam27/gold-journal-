@@ -5,7 +5,8 @@ describe("AI Mentor public privacy notice", () => {
   it("explains the browser-only boundary without exposing an implementation storage key", () => {
     expect(MENTOR_LOCAL_KEY_NOTICE).toContain("stays in this browser only");
     expect(MENTOR_LOCAL_KEY_NOTICE).toContain("never sent to Gold Journal servers");
-    expect(MENTOR_LOCAL_KEY_NOTICE).toContain("call Google AI directly");
+    expect(MENTOR_LOCAL_KEY_NOTICE).toContain("call Groq directly");
+    expect(MENTOR_LOCAL_KEY_NOTICE).not.toMatch(/gemini|google ai|openrouter|openai/i);
     expect(MENTOR_LOCAL_KEY_NOTICE).not.toMatch(/localStorage|gj_/i);
   });
 

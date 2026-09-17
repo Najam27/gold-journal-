@@ -1,20 +1,22 @@
 /**
  * Types for the browser-only AI layer.
  *
- * The Google AI Studio (Gemini) credential lives exclusively in this browser.
- * Nothing in this module is ever sent to the Gold Journal backend.
+ * The Groq credential lives exclusively in this browser. Nothing in this module
+ * is ever sent to the Gold Journal backend.
  */
 
 /**
- * Stable internal error codes. Every Gemini HTTP status, network failure, and
- * local validation failure is normalized onto exactly one of these so the UI
- * can explain the real cause instead of a generic "provider error".
+ * Stable internal error codes. Every Groq HTTP status, network failure, and
+ * local validation failure is normalized onto exactly one of these so the UI can
+ * explain the real cause instead of a generic "provider error".
  */
 export type AiErrorCode =
   | "not_configured"
   | "invalid_key"
+  | "unauthorized"
   | "model_not_found"
   | "model_unsupported"
+  | "model_unavailable"
   | "rate_limited"
   | "quota_exceeded"
   | "network_error"
@@ -27,7 +29,7 @@ export type AiErrorCode =
   | "malformed_response"
   | "ungrounded_response";
 
-/** Normalized failure thrown by the Gemini client and AI service. */
+/** Normalized failure thrown by the Groq client and AI service. */
 export class AiError extends Error {
   readonly code: AiErrorCode;
   readonly status: number | null;
@@ -53,7 +55,7 @@ export type AiSettings = { apiKey: string; model: string; updatedAt: number };
 export type AiSettingsView = {
   configured: boolean;
   model: string | null;
-  /** Masked identifier such as `AIzaSy••••••••abcd`. Never the full key. */
+  /** Masked identifier such as `gsk_••••••••abcd`. Never the full key. */
   maskedKey: string | null;
   updatedAt: number | null;
   /** True when this browser cannot persist settings (private mode etc.). */
@@ -67,8 +69,10 @@ export type AiUiState =
   | "analyzing"
   | "success"
   | "invalid_key"
+  | "unauthorized"
   | "model_not_found"
   | "model_unsupported"
+  | "model_unavailable"
   | "rate_limited"
   | "quota_exceeded"
   | "network_error"
@@ -83,8 +87,10 @@ export function uiStateForErrorCode(code: AiErrorCode | null | undefined): AiUiS
   switch (code) {
     case "not_configured": return "not_configured";
     case "invalid_key": return "invalid_key";
+    case "unauthorized": return "unauthorized";
     case "model_not_found": return "model_not_found";
     case "model_unsupported": return "model_unsupported";
+    case "model_unavailable": return "model_unavailable";
     case "rate_limited": return "rate_limited";
     case "quota_exceeded": return "quota_exceeded";
     case "network_error": return "network_error";
@@ -94,7 +100,7 @@ export function uiStateForErrorCode(code: AiErrorCode | null | undefined): AiUiS
     case "schema_error": return "schema_error";
     case "blocked": return "blocked";
     // Local validation rejections (bad JSON, schema mismatch, ungrounded
-    // numbers) are distinct from a Gemini outage: no report was produced, and
+    // numbers) are distinct from a Groq outage: no report was produced, and
     // retrying or changing model is the fix.
     case "malformed_response":
     case "ungrounded_response": return "schema_error";
@@ -114,5 +120,5 @@ export function uiStateForError(error: unknown): AiUiState {
  * the UI can offer the model picker instead of a pointless retry.
  */
 export function isModelError(code: AiErrorCode | null | undefined): boolean {
-  return code === "model_not_found" || code === "model_unsupported";
+  return code === "model_not_found" || code === "model_unsupported" || code === "model_unavailable";
 }

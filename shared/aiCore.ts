@@ -19,112 +19,132 @@ export const MIN_AI_TIMEOUT_MS = 5_000;
 
 /**
  * Bumped whenever the AI request contract changes. It participates in the AI
- * result cache key so a contract change can never serve a stale shape.
+ * result cache key so a contract change can never serve a stale shape. The move
+ * to Groq deliberately invalidated every report cached by a retired provider.
  */
-export const AI_SERVICE_VERSION = "2026-09-gemini-v2";
+export const AI_SERVICE_VERSION = "2026-09-groq-v1";
+
+/** The one and only AI provider in this application. */
+export const AI_PROVIDER_ID = "groq";
 
 /**
- * Provider: Google AI Studio (Gemini) only. There is no OpenRouter/OpenAI path.
+ * Provider: Groq only. It is the single provider in the active execution path.
  *
  * `DEFAULT_AI_MODEL` is a *preference*, never an assumption: the app lists the
- * models the user's own key can actually call, resolves this preference against
- * that live list, and repairs the saved selection when the preferred id is no
- * longer offered. Google retires model ids, so a hardcoded id must never be
- * sent to `generateContent` unverified.
+ * models the user's own key can actually call through Groq's
+ * `GET /openai/v1/models`, resolves this preference against that live list, and
+ * repairs the saved selection when the preferred id is retired.
  */
-export const DEFAULT_AI_MODEL = "gemini-3.8-flash";
+export const DEFAULT_AI_MODEL = "openai/gpt-oss-120b";
 
-export const AI_PROVIDER_LABEL = "Gemini";
-export const AI_PROVIDER_URL = "https://aistudio.google.com/apikey";
+export const AI_PROVIDER_LABEL = "Groq";
+export const AI_PROVIDER_URL = "https://console.groq.com/keys";
 
 /**
- * Ordered best-first fallbacks. Only ids that Google currently documents are
- * listed here; anything missing from the live model list is skipped, so a
- * retired entry degrades to the next available generation model.
+ * Ordered best-first fallbacks. Every id here is a Groq production model that
+ * answers chat completions; anything missing from the live model list is
+ * skipped, so a retired entry degrades to the next usable chat model.
  */
 export const AI_MODEL_PREFERENCES: ReadonlyArray<string> = [
-  "gemini-3.8-flash",
-  "gemini-3.7-flash",
-  "gemini-3.6-flash",
-  "gemini-3.5-flash",
-  "gemini-3.5-flash-lite",
-  "gemini-3.1-flash-lite",
-  "gemini-3.1-pro-preview",
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
-  "gemini-2.5-pro",
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+  "qwen/qwen3.8-27b",
+  "groq/compound",
+  "groq/compound-mini",
 ];
 
 /** Short list offered before the live model list is known. */
 export const AI_MODEL_SUGGESTIONS: ReadonlyArray<{ id: string; label: string }> = [
-  { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash (recommended)" },
-  { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash" },
-  { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
-  { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite (lowest cost)" },
-  { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro (most capable)" },
-  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash (legacy)" },
+  { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B (recommended · strict JSON)" },
+  { id: "openai/gpt-oss-20b", label: "GPT-OSS 20B (fastest · strict JSON)" },
+  { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B Versatile" },
+  { id: "llama-3.1-8b-instant", label: "Llama 3.1 8B Instant" },
+  { id: "qwen/qwen3.8-27b", label: "Qwen 3.8 27B (preview)" },
 ];
 
 /**
- * Models that answer `generateContent` but do not produce reviewable text
- * (image, speech, audio, video, embedding, translation). They are filtered out
- * so the picker and the automatic repair never select an unusable model.
+ * Groq models that support **strict** structured output (`strict: true`, which
+ * uses constrained decoding). Every other chat model is driven through
+ * `response_format: { type: "json_object" }` and validated locally instead.
  */
-const NON_TEXT_MODEL_PATTERN = /(?:^|[-._])(?:image|images|imagen|tts|audio|native|live|transcribe|translation|translate|embedding|embed|veo|lyria|banana|omni|aqa|computer|robotics)(?:$|[-._])/i;
+export const GROQ_STRICT_SCHEMA_MODELS: ReadonlyArray<string> = [
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+  "qwen/qwen3.8-27b",
+];
 
-/**
- * Normalizes `models/gemini-3.8-flash`, `models/models/…`, or a stray leading
- * slash into the single canonical id Google expects in the request path. Called
- * exactly once per request so `models/models/…` can never be built.
- */
-export function normalizeGeminiModelId(raw: string | null | undefined): string {
-  let id = String(raw ?? "").trim().replace(/^\/+/, "");
-  while (id.toLowerCase().startsWith("models/")) id = id.slice("models/".length).trim();
-  return id;
+/** Groq chat models that accept the `reasoning_effort` control. */
+export const GROQ_REASONING_EFFORT_MODELS: ReadonlyArray<string> = [
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+];
+
+/** True when this model may be asked for a strict `json_schema` response. */
+export function isStrictSchemaModel(raw: string | null | undefined): boolean {
+  return GROQ_STRICT_SCHEMA_MODELS.includes(normalizeGroqModelId(raw));
 }
 
-/** True when this model id can be used for a text `generateContent` call. */
-export function isUsableGeminiModelId(raw: string | null | undefined): boolean {
-  const id = normalizeGeminiModelId(raw);
+/** True when this model accepts `reasoning_effort`. */
+export function supportsReasoningEffort(raw: string | null | undefined): boolean {
+  return GROQ_REASONING_EFFORT_MODELS.includes(normalizeGroqModelId(raw));
+}
+
+/**
+ * Groq hosts audio, speech, guardrail, and embedding models on the same
+ * `/models` endpoint. They cannot produce a journal report, so they are filtered
+ * out of the picker and of every automatic model repair.
+ */
+const NON_CHAT_MODEL_PATTERN = /(whisper|orpheus|tts|prompt-guard|embedding|safeguard)/i;
+
+/**
+ * Groq model ids are used verbatim as the `/models` listing entry and as the
+ * `model` field of a chat completion, so normalization only trims whitespace and
+ * a stray leading slash.
+ */
+export function normalizeGroqModelId(raw: string | null | undefined): string {
+  return String(raw ?? "").trim().replace(/^\/+/, "");
+}
+
+/** True when this model id can be used for a chat completion. */
+export function isUsableGroqModelId(raw: string | null | undefined): boolean {
+  const id = normalizeGroqModelId(raw);
   if (!id || id.length > 160) return false;
-  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(id)) return false;
-  return !NON_TEXT_MODEL_PATTERN.test(id);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(id)) return false;
+  return !NON_CHAT_MODEL_PATTERN.test(id);
 }
 
 /**
- * De-duplicates, normalizes, and best-first sorts a model id list. Preferred
- * ids keep their declared order; anything else is ranked by generation number,
- * stable before preview, and flash before pro.
+ * De-duplicates, normalizes, and best-first sorts a Groq model id list.
+ * Preferred ids keep their declared order; anything else follows alphabetically
+ * so the picker stays stable between loads.
  */
-export function rankGeminiModels(models: ReadonlyArray<string>): string[] {
+export function rankGroqModels(models: ReadonlyArray<string>): string[] {
   const seen = new Set<string>();
   const ids: string[] = [];
   for (const raw of models) {
-    const id = normalizeGeminiModelId(raw);
-    if (!id || seen.has(id) || !isUsableGeminiModelId(id)) continue;
+    const id = normalizeGroqModelId(raw);
+    if (!id || seen.has(id) || !isUsableGroqModelId(id)) continue;
     seen.add(id);
     ids.push(id);
   }
   const rank = (id: string) => {
     const preferred = AI_MODEL_PREFERENCES.indexOf(id);
-    if (preferred >= 0) return preferred;
-    const version = Number(/(\d+(?:\.\d+)?)/.exec(id)?.[1] ?? 0);
-    const preview = /preview|exp\b/.test(id) ? 1 : 0;
-    const pro = /-pro/.test(id) ? 1 : 0;
-    return 1_000 + preview * 100 + pro * 10 - (Number.isFinite(version) ? version : 0);
+    return preferred >= 0 ? preferred : 1_000;
   };
   return ids.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
 }
 
 /**
  * Picks the model to actually use: the caller's choice when the live list still
- * offers it, otherwise the best available generation model. Returns `null` when
- * the key cannot reach any usable model at all.
+ * offers it, otherwise the best available chat model. Returns `null` when the
+ * key cannot reach any usable model at all.
  */
-export function pickPreferredGeminiModel(available: ReadonlyArray<string>, preferred?: string | null): string | null {
-  const ranked = rankGeminiModels(available);
+export function pickPreferredGroqModel(available: ReadonlyArray<string>, preferred?: string | null): string | null {
+  const ranked = rankGroqModels(available);
   if (!ranked.length) return null;
-  const wanted = normalizeGeminiModelId(preferred);
+  const wanted = normalizeGroqModelId(preferred);
   return wanted && ranked.includes(wanted) ? wanted : ranked[0];
 }
 
@@ -162,10 +182,10 @@ export function analysisDataFingerprint(analysis: AnalysisResult): string {
 
 const claimType = z.enum(["FACT", "HYPOTHESIS", "RECOMMENDATION FOR TESTING"]);
 /**
- * `metrics` is optional: it was a free-form key/number map that Gemini's strict
- * `responseSchema` cannot express, so the provider omits it. Every numeric
- * claim is still grounded through `hasOnlyGroundedNumbers` and the evidence
- * manifest equality checks, which never read `metrics`.
+ * `metrics` is optional: it is a free-form key/number map that a strict
+ * `json_schema` response format cannot express, so the provider omits it. Every
+ * numeric claim is still grounded through `hasOnlyGroundedNumbers` and the
+ * evidence manifest equality checks, which never read `metrics`.
  */
 const evidenceItem = z.object({ evidenceId: z.string().regex(/^ev-[a-f0-9]{16}$/), dimension: z.string().max(80), context: z.string().max(160), sample: z.number().finite().nonnegative(), wins: z.number().finite().nonnegative(), losses: z.number().finite().nonnegative(), expectancy: z.number().finite(), profitFactor: z.number().finite().nullable(), averageR: z.number().finite().nullable(), maxDrawdown: z.number().finite().nonnegative(), evidenceTier: z.string().max(80), label: z.string().max(160), claim: z.string().max(1_000), metrics: z.record(z.string(), z.number().finite()).optional(), evidence: z.string().max(1_000), confidence: z.enum(["HIGH", "MEDIUM", "LOW"]), claimType });
 const hypothesis = z.object({ title: z.string().max(160), statement: z.string().max(1_000), evidenceIds: z.array(z.string().regex(/^ev-[a-f0-9]{16}$/)).max(8), confidence: z.enum(["HIGH", "MEDIUM", "LOW"]), nextTest: z.string().max(500), claimType });
@@ -214,8 +234,12 @@ export function analysisUserPrompt(compact: unknown): string {
 }
 
 /* ------------------------------------------------------------------ *
- * JSON schemas for provider structured output (converted for Gemini's
- * `responseSchema`, which accepts only a strict subset of JSON Schema)
+ * JSON Schema for the provider's structured output.
+ *
+ * This is authored as plain JSON Schema with `additionalProperties: false` on
+ * every object and an explicit `required` list that names every property, which
+ * is exactly what Groq's `strict: true` structured outputs require. It is never
+ * generated blindly from the zod schema above.
  * ------------------------------------------------------------------ */
 
 const evidenceItemShape = { type: "object", additionalProperties: false, properties: { evidenceId: { type: "string", pattern: "^ev-[a-f0-9]{16}$" }, dimension: { type: "string" }, context: { type: "string" }, sample: { type: "number" }, wins: { type: "number" }, losses: { type: "number" }, expectancy: { type: "number" }, profitFactor: { type: ["number", "null"] }, averageR: { type: ["number", "null"] }, maxDrawdown: { type: "number" }, evidenceTier: { type: "string" }, label: { type: "string" }, claim: { type: "string" }, evidence: { type: "string" }, confidence: { type: "string", enum: ["HIGH", "MEDIUM", "LOW"] }, claimType: { type: "string", enum: ["FACT", "HYPOTHESIS", "RECOMMENDATION FOR TESTING"] } }, required: ["evidenceId", "dimension", "context", "sample", "wins", "losses", "expectancy", "profitFactor", "averageR", "maxDrawdown", "evidenceTier", "label", "claim", "evidence", "confidence", "claimType"] } as const;

@@ -23,11 +23,11 @@ describe("Options user AI provider settings", () => {
     expect(source).toContain("Local storage is readable by JavaScript running on this site.");
   });
 
-  it("names Gemini as the only provider and offers a live connection test", () => {
-    expect(source).toContain("Test Gemini Connection");
-    expect(source).toContain("checkGeminiConnection");
+  it("names Groq as the only provider and offers a real connection test", () => {
+    expect(source).toContain("Test Groq Connection");
+    expect(source).toContain("checkGroqConnection");
     expect(source).toContain("AI_PROVIDER_LABEL");
-    expect(source).not.toMatch(/openrouter|openai|anthropic/i);
+    expect(source).not.toMatch(/gemini|google ai|aistudio|openrouter|openai|anthropic/i);
   });
 
   it("offers only the models the key can actually call, and never renders or URL-carries the raw key", () => {

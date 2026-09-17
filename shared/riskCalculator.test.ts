@@ -298,9 +298,9 @@ describe("stale or missing broker data", () => {
 });
 
 describe("AI independence", () => {
-  it("has no AI, Gemini, or provider dependency in its own source", () => {
+  it("has no AI, provider, or Gemini dependency in its own source", () => {
     const source = readFileSync(fileURLToPath(new URL("./riskCalculator.ts", import.meta.url)), "utf8");
-    expect(source).not.toMatch(/gemini|coachRisk|useAiSettings|AI_UI_COPY|@\/lib\/ai/i);
+    expect(source).not.toMatch(/groq|gemini|openai|openrouter|coachRisk|useAiSettings|AI_UI_COPY|@\/lib\/ai/i);
   });
 
   it("calculates successfully with no key, no settings, and no network", () => {

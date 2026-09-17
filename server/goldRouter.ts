@@ -201,7 +201,7 @@ export const goldRouter = router({
     get: protectedProcedure.input(analysisInput).query(({ ctx, input }) => getAccountAnalysis(ctx.user.id, input.accountId, input.filters)),
     // AI inference runs in the user's browser. The server only stores the
     // finished report so history keeps working; no credential ever arrives
-    // here and no Google AI call is made server-side.
+    // here and no AI provider is called server-side.
     saveAiReport: protectedProcedure.input(analysisInput.extend({ model: z.string().trim().min(1).max(160), report: aiReportSchema })).mutation(async ({ ctx, input }) => {
       const analysis = await getAccountAnalysis(ctx.user.id, input.accountId, input.filters);
       const persisted = await persistAiReport(ctx.user.id, input.accountId, analysis, input.model, input.report);

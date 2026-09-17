@@ -1,5 +1,5 @@
 /**
- * Browser-local persistence for the user's own Google AI Studio (Gemini) key.
+ * Browser-local persistence for the user's own Groq API key.
  *
  * The key is stored in `localStorage` under a namespaced key exactly as the
  * product requires, but every read/write goes through this abstraction so the
@@ -9,14 +9,25 @@
  * Hard rules enforced here:
  *  - the key is never logged, never placed in a URL, never sent to any backend;
  *  - only a masked form is ever exposed to the UI after saving;
- *  - removing the key clears the record completely.
+ *  - removing the key clears the record completely;
+ *  - a previously stored Gemini (Google AI Studio) or OpenRouter credential is
+ *    deleted, never migrated: those keys cannot work against Groq.
  */
 import { DEFAULT_AI_MODEL } from "@shared/aiCore";
 import type { AiSettings, AiSettingsView } from "./aiTypes";
 
-export const AI_SETTINGS_STORAGE_KEY = "gold-journal.ai.google:v1";
-/** Pre-Gemini namespace; read once for migration, then removed. */
-const LEGACY_OPENROUTER_STORAGE_KEY = "gold-journal.ai.openrouter:v1";
+export const AI_SETTINGS_STORAGE_KEY = "gold-journal.ai.groq:v1";
+
+/**
+ * Retired provider namespaces. Their keys are purged on every read so a saved
+ * Gemini/OpenRouter credential can never be mis-used as a Groq key and no stale
+ * provider configuration survives the migration.
+ */
+export const LEGACY_AI_STORAGE_KEYS = [
+  "gold-journal.ai.google:v1",
+  "gold-journal.ai.openrouter:v1",
+] as const;
+
 export const AI_SETTINGS_EVENT = "gold-journal:ai-settings";
 
 export interface AiSettingsPersistence {
@@ -89,32 +100,30 @@ export function maskApiKey(key: string): string {
 
 export function assertValidApiKey(key: string): string {
   const clean = key.trim();
-  if (clean.length < 20 || clean.length > 512) throw new Error("Enter a valid Google AI Studio API key.");
+  if (clean.length < 20 || clean.length > 512) throw new Error("Enter a valid Groq API key.");
   return clean;
 }
 
 export function assertValidModel(model: string): string {
   const clean = model.trim();
-  if (!clean || clean.length > 160) throw new Error("Enter a valid Google AI model name.");
+  if (!clean || clean.length > 160) throw new Error("Enter a valid Groq model name.");
   return clean;
 }
 
 /**
- * One-time migration: a previously saved OpenRouter key cannot work against
- * Google's API, so it is discarded rather than mis-used. Its model choice is
- * also provider-specific and dropped with it.
+ * One-time cleanup: Gemini (Google AI Studio) and OpenRouter keys belong to
+ * different providers, so they are deleted rather than migrated. The user
+ * starts with "Groq not configured" until they add a Groq key.
  */
-function migrateLegacyOpenRouterSettings() {
+export function purgeLegacyProviderSettings() {
   try {
-    if (persistence.read() !== null) return;
     if (typeof window === "undefined") return;
-    const legacy = window.localStorage.getItem(LEGACY_OPENROUTER_STORAGE_KEY);
-    if (legacy !== null) window.localStorage.removeItem(LEGACY_OPENROUTER_STORAGE_KEY);
-  } catch { /* migration is best-effort and must never break startup */ }
+    for (const key of LEGACY_AI_STORAGE_KEYS) window.localStorage.removeItem(key);
+  } catch { /* cleanup is best-effort and must never break startup */ }
 }
 
 export function readAiSettings(): AiSettings | null {
-  migrateLegacyOpenRouterSettings();
+  purgeLegacyProviderSettings();
   const raw = persistence.read();
   if (!raw) return null;
   try {
@@ -151,7 +160,7 @@ export function saveAiSettings(input: { apiKey: string; model: string }): AiSett
 
 export function updateAiModel(model: string): AiSettingsView {
   const current = readAiSettings();
-  if (!current) throw new Error("Add your Google AI Studio API key before choosing a model.");
+  if (!current) throw new Error("Add your Groq API key before choosing a model.");
   return saveAiSettings({ apiKey: current.apiKey, model });
 }
 

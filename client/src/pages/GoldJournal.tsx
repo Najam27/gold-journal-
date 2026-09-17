@@ -218,7 +218,7 @@ const defaultRules = [
   "Take screenshot for every trade. No exceptions.",
 ];
 export const MENTOR_LOCAL_KEY_NOTICE =
-  "Your Google AI Studio key stays in this browser only, is never sent to Gold Journal servers or stored with journal data, and is read solely to call Google AI directly from this device.";
+  "Your Groq API key stays in this browser only, is never sent to Gold Journal servers or stored with journal data, and is read solely to call Groq directly from this device.";
 export function getMentorStorageKeys(_openId?: string | null) {
   return { storageKey: "", reportStorageKey: "" };
 }
@@ -2234,10 +2234,10 @@ function MentorView({ account }: any) {
           <div className="analysis-ai-empty">
             <Bot size={20} />
             <div>
-              <strong>Google AI is not configured in this browser.</strong>
+              <strong>Groq is not configured in this browser.</strong>
               <p>
-                Add your own Google AI Studio key in Options. The key stays in
-                this browser and requests go directly to Google AI.
+                Add your own Groq API key in Options. The key stays in
+                this browser and requests go directly to Groq.
               </p>
               <Button
                 variant="outline"
@@ -2315,7 +2315,7 @@ function MentorView({ account }: any) {
           <div className="analysis-ai-empty">
             <Bot size={20} />
             <p>
-              This browser is calling Google AI directly. Nothing is sent to
+              This browser is calling Groq directly. Nothing is sent to
               Gold Journal servers, and you can cancel at any time.
             </p>
           </div>

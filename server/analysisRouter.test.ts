@@ -43,14 +43,14 @@ describe("authenticated analysis procedures", () => {
 
   it("stores a browser-produced report without any server-side AI call", async () => {
     const caller = goldRouter.createCaller({ user } as any);
-    await expect(caller.analysis.saveAiReport({ accountId: 44, filters: {}, model: "gemini-3.8-flash", report: emptyReport as never })).resolves.toEqual({ success: true, reportId: 5, persisted: true });
-    expect(mocks.persistAiReport).toHaveBeenCalledWith(17, 44, deterministic, "gemini-3.8-flash", expect.objectContaining({ executiveSummary: "Evidence is limited." }));
+    await expect(caller.analysis.saveAiReport({ accountId: 44, filters: {}, model: "openai/gpt-oss-120b", report: emptyReport as never })).resolves.toEqual({ success: true, reportId: 5, persisted: true });
+    expect(mocks.persistAiReport).toHaveBeenCalledWith(17, 44, deterministic, "openai/gpt-oss-120b", expect.objectContaining({ executiveSummary: "Evidence is limited." }));
     expect(mocks.consumeRateLimit).not.toHaveBeenCalled();
   });
 
   it("rejects a malformed report shape before touching the database", async () => {
     const caller = goldRouter.createCaller({ user } as any);
-    await expect(caller.analysis.saveAiReport({ accountId: 44, filters: {}, model: "gemini-3.8-flash", report: { executiveSummary: "only a summary" } as never })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(caller.analysis.saveAiReport({ accountId: 44, filters: {}, model: "openai/gpt-oss-120b", report: { executiveSummary: "only a summary" } as never })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(mocks.persistAiReport).not.toHaveBeenCalled();
   });
 });

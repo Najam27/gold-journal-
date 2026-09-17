@@ -11,8 +11,8 @@
 # URL, add the same origin to Supabase Auth → URL Configuration → Redirect
 # URLs so email/magic-link callbacks return to the staging app.
 #
-# There is no OpenRouter secret and no AI job dispatcher on this Worker: AI
-# inference runs in the user's browser against their own key, so staging and
+# There is no AI provider secret and no AI job dispatcher on this Worker: AI
+# inference runs in the user's browser against their own Groq key, so staging and
 # production behave identically without any server-side AI credentials.
 
 name = "gold-journal-staging"
