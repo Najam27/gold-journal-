@@ -20,6 +20,7 @@ import { clearAccountJournalDataAtomic, recordGoalAlertsAtomic, removeAccountAto
 import { getAccountAnalysis } from "./analysisDb";
 import { listAiExperiments, listAiReports, persistAiReport, updateAiExperiment } from "./aiReportDb";
 import { aiReportSchema } from "@shared/aiCore";
+import { MAX_CUSTOM_RISK_PERCENT, MIN_CUSTOM_RISK_PERCENT, RISK_PROFILE_IDS } from "@shared/riskCalculator";
 import { compareAnalysis } from "@shared/analysisEngine";
 import { getPktDateKey, isPktDateKey, pktDateToTimestamp } from "@shared/pktDate";
 import { normalizeTradeOptionValue } from "@shared/tradeOptionCategories";
@@ -40,7 +41,19 @@ const optionalText = (max = 5000) => z.string().trim().max(max).optional().defau
 const money = (min = -MAX_MONEY) => z.number().finite().min(min).max(MAX_MONEY);
 const timestampInput = z.number().finite().int().positive().max(8_640_000_000_000_000);
 const accountIdInput = z.object({ accountId: z.number().int().positive() });
-const riskCalculatorInput = accountIdInput.extend({ basis: z.enum(["EQUITY", "BALANCE"]), riskPercent: z.number().finite().positive().max(10), entryPrice: z.number().finite().positive(), stopLoss: z.number().finite().positive() });
+// The calculator is deterministic and broker-aware. Nothing here is chosen by
+// AI: the client sends the user's own profile, direction, and price levels, and
+// the backend resolves every broker-sensitive value from the stored MT5
+// connection instead of trusting client-supplied contract parameters.
+const riskCalculatorInput = accountIdInput.extend({
+  basis: z.enum(["EQUITY", "BALANCE"]),
+  riskProfile: z.enum(RISK_PROFILE_IDS),
+  riskPercent: z.number().finite().min(MIN_CUSTOM_RISK_PERCENT).max(MAX_CUSTOM_RISK_PERCENT),
+  direction: z.enum(["BUY", "SELL"]).default("BUY"),
+  entryPrice: z.number().finite().positive(),
+  stopLoss: z.number().finite().positive(),
+  takeProfit: z.number().finite().positive().nullable().optional().default(null),
+});
 const mt5TicketInput = z.string().regex(/^\d+$/).max(20).optional();
 const clientMutationIdInput = z.string().regex(/^[A-Za-z0-9_-]{16,64}$/, "Invalid offline replay id.").optional();
 const pktDateInput = z.string().refine(isPktDateKey, "Use a valid PKT calendar date.");

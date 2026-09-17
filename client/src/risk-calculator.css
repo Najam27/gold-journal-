@@ -1,0 +1,195 @@
+/* ---------------------------------------------------------------------------
+   RISK CALCULATOR · deterministic, broker-aware position sizing
+   Loaded after premium-terminal.css so it can extend the terminal language with
+   the risk profile controls, warning panels, and the maths/broker detail blocks.
+   Every colour comes from the shared theme tokens, so the panel stays correct
+   in the dark shell and in any future theme.
+   --------------------------------------------------------------------------- */
+
+.risk-control-block { min-width: 0; }
+
+.risk-static-value {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: .7rem;
+  background: var(--surface-subtle);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: .02em;
+}
+
+/* Direction · a two-state segmented control, not a browser radio. */
+.risk-segment {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: .7rem;
+  background: var(--surface-input);
+}
+.risk-segment-option {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: .55rem;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: .08em;
+  cursor: pointer;
+  transition: background-color var(--gj-dur-fast) ease, color var(--gj-dur-fast) ease, border-color var(--gj-dur-fast) ease;
+}
+.risk-segment-option:hover { color: var(--text-primary); border-color: color-mix(in srgb, var(--border) 80%, transparent); }
+.risk-segment-option:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent-gold) 55%, transparent); outline-offset: 2px; }
+.risk-segment-option.buy.active {
+  border-color: color-mix(in srgb, var(--accent-emerald) 42%, var(--border));
+  background: color-mix(in srgb, var(--accent-emerald) 16%, var(--surface-input));
+  color: var(--accent-emerald);
+}
+.risk-segment-option.sell.active {
+  border-color: color-mix(in srgb, var(--accent-coral) 42%, var(--border));
+  background: color-mix(in srgb, var(--accent-coral) 16%, var(--surface-input));
+  color: var(--accent-coral);
+}
+
+/* Risk profiles · six presets plus custom, readable but not flashy. */
+.risk-profile-fieldset { margin: 1rem 0 0; padding: 0; border: 0; min-width: 0; }
+.risk-profile-fieldset legend {
+  padding: 0;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.risk-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.risk-profile-option {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 11px;
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--gj-dur-fast) ease, background-color var(--gj-dur-fast) ease, transform var(--gj-dur-fast) ease;
+}
+.risk-profile-option:hover { border-color: color-mix(in srgb, var(--accent-gold) 38%, var(--border)); background: var(--surface-control-2); }
+.risk-profile-option:active { transform: scale(.985); }
+.risk-profile-option:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent-gold) 55%, transparent); outline-offset: 2px; }
+.risk-profile-option.active {
+  border-color: color-mix(in srgb, var(--accent-gold) 52%, var(--border));
+  background: linear-gradient(160deg, color-mix(in srgb, var(--accent-gold) 13%, var(--surface-panel)), var(--surface-panel));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent-gold) 18%, transparent);
+}
+.risk-profile-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.risk-profile-label { color: var(--text-heading); font-size: 12px; font-weight: 750; }
+.risk-profile-value { color: var(--accent-gold); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.risk-profile-option:not(.active) .risk-profile-value { color: var(--text-muted); }
+.risk-profile-detail { color: var(--text-dim); font-size: 10px; }
+.risk-profile-note { margin: .6rem 0 0; color: var(--text-dim); font-size: 10.5px; line-height: 1.6; }
+
+.risk-custom-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  align-items: end;
+  gap: 12px;
+  margin-top: .85rem;
+}
+.risk-custom-hint { margin: 0 0 8px; color: var(--text-muted); font-size: 10.5px; }
+.risk-custom-hint.invalid { color: var(--accent-coral); }
+
+/* Warnings and cautions · static, legible, never directional. */
+.risk-warning-panel {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 1rem;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent-coral) 42%, var(--border));
+  border-left-width: 4px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent-coral) 8%, var(--surface-panel));
+  color: var(--text-primary);
+}
+.risk-warning-panel.caution {
+  border-color: color-mix(in srgb, var(--accent-amber) 42%, var(--border));
+  background: color-mix(in srgb, var(--accent-amber) 8%, var(--surface-panel));
+}
+.risk-warning-panel svg { flex: 0 0 auto; margin-top: 1px; color: var(--accent-coral); }
+.risk-warning-panel.caution svg { color: var(--accent-amber); }
+.risk-warning-panel strong { display: block; margin-bottom: 3px; color: var(--text-heading); font-size: 11px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.risk-warning-panel p { margin: 0; color: var(--text-secondary); font-size: 11.5px; line-height: 1.55; }
+.risk-warning-panel .risk-warning-detail { margin-top: 3px; color: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+/* Collapsible maths trail and broker facts. */
+.risk-explanation {
+  margin-top: .75rem;
+  padding: 0 .9rem;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 12px;
+  background: var(--surface-subtle);
+}
+.risk-explanation summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: .7rem 0;
+  color: var(--text-muted);
+  font-size: 9.5px;
+  font-weight: 750;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  list-style: none;
+}
+.risk-explanation summary::-webkit-details-marker { display: none; }
+.risk-explanation summary::before { content: "+"; color: var(--accent-gold); font-size: 13px; font-weight: 700; line-height: 1; }
+.risk-explanation[open] summary::before { content: "–"; }
+.risk-explanation summary:hover { color: var(--text-primary); }
+.risk-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 4px 16px; padding: 2px 0 .6rem; }
+.risk-detail-grid span { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px dashed color-mix(in srgb, var(--border) 72%, transparent); color: var(--text-muted); font-size: 10.5px; }
+.risk-detail-grid b { color: var(--text-primary); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.risk-detail-note { display: flex; align-items: flex-start; gap: 6px; margin: 0; padding: .2rem 0 .8rem; color: var(--text-dim); font-size: 10.5px; line-height: 1.6; }
+.risk-detail-note svg { flex: 0 0 auto; margin-top: 2px; }
+
+/* Tablet: the setup grid drops to two columns and profiles stay scannable. */
+@media (max-width: 900px) {
+  .risk-profile-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+  .risk-detail-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Phone: profiles become a horizontally scrollable rail, results stack cleanly. */
+@media (max-width: 640px) {
+  .risk-profile-grid {
+    grid-template-columns: repeat(6, minmax(132px, 1fr));
+    overflow-x: auto;
+    padding-bottom: 8px;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+  .risk-profile-option { scroll-snap-align: start; }
+  .risk-custom-row { grid-template-columns: minmax(0, 1fr); }
+  .risk-custom-hint { margin: 0; }
+  .risk-warning-panel { padding: 11px 12px; }
+  .risk-calculator-badge { align-self: flex-start; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .risk-segment-option,
+  .risk-profile-option { transition: none; }
+  .risk-profile-option:active { transform: none; }
+}

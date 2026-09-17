@@ -12,7 +12,7 @@ import {
   setAiSettingsPersistence,
   subscribeAiSettings,
 } from "./aiStorage";
-import { analyzeJournal, checkGeminiConnection, clearAiCache, coachRisk, getAvailableGeminiModels, isAiConfigured, resolveCompatibleModel, testAiConnection } from "./aiService";
+import { analyzeJournal, checkGeminiConnection, clearAiCache, getAvailableGeminiModels, isAiConfigured, resolveCompatibleModel, testAiConnection } from "./aiService";
 import { isModelError, uiStateForErrorCode } from "./aiTypes";
 
 const KEY = "AIza-test-only-key-0123456789abcdef";
@@ -38,7 +38,6 @@ const report = {
   dataQuality: { missing: [], warnings: [] }, warnings: [],
 };
 
-const calculation = { valid: true, basis: "EQUITY" as const, capital: 10_000, freeMargin: 9_900, riskPercent: 1, riskAmount: 100, stopDistance: 5, stopTicks: 50, lossPerLot: 500, rawLots: 0.2, lots: 0.2, actualRisk: 100, riskBudgetUtilization: 100, freeMarginRiskPercent: 1.01, symbol: "XAUUSDm", currency: "USD", warnings: [], verification: ["Confirm broker values."] };
 
 function providerResponse(content: unknown, status = 200) {
   return new Response(
@@ -399,40 +398,6 @@ describe("browser key verification", () => {
 
   it("refuses to test without a configured key", async () => {
     await expect(testAiConnection()).rejects.toMatchObject({ code: "not_configured" });
-  });
-});
-
-describe("browser risk coach", () => {
-  it("requires local configuration", async () => {
-    const outcome = await coachRisk({ calculation });
-    expect(outcome.available).toBe(false);
-    expect(outcome.errorCode).toBe("not_configured");
-  });
-
-  it("accepts a cautious review and sends no credential", async () => {
-    saveAiSettings({ apiKey: KEY, model: MODEL });
-    const { postCalls } = stubGemini(() => providerResponse({ readiness: "CAUTION", summary: "Verify broker margin.", cautions: ["Margin is unconfirmed."], verificationSteps: ["Check free margin in MT5."] }));
-    const outcome = await coachRisk({ calculation });
-    expect(outcome.available).toBe(true);
-    expect(outcome.coach?.readiness).toBe("CAUTION");
-    expect(JSON.stringify(JSON.parse(String(postCalls()[0][1]!.body)))).not.toContain(KEY);
-  });
-
-  it("repairs a retired model for the coach too, so one configuration serves every surface", async () => {
-    saveAiSettings({ apiKey: KEY, model: "gemini-2.0-flash" });
-    const { postCalls } = stubGemini(() => providerResponse({ readiness: "VERIFY", summary: "Verify broker margin.", cautions: [], verificationSteps: ["Confirm margin."] }));
-    const outcome = await coachRisk({ calculation, model: "gemini-2.0-flash" });
-    expect(outcome.model).toBe("gemini-3.8-flash");
-    expect(outcome.modelRepairedFrom).toBe("gemini-2.0-flash");
-    expect(postCalls()[0][0]).toContain("models/gemini-3.8-flash:");
-  });
-
-  it("rejects a review that tries to give a trade direction", async () => {
-    saveAiSettings({ apiKey: KEY, model: MODEL });
-    stubGemini(() => providerResponse({ readiness: "VERIFY", summary: "Buy now with a tighter stop.", cautions: [], verificationSteps: ["Confirm margin."] }));
-    const outcome = await coachRisk({ calculation });
-    expect(outcome.available).toBe(false);
-    expect(outcome.errorCode).toBe("ungrounded_response");
   });
 });
 

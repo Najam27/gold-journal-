@@ -1,6 +1,10 @@
 /**
- * The single browser AI service used by Analyze My Trade, AI Mentor, Risk
- * Coach, and AI settings.
+ * The single browser AI service used by Analyze My Trade, the AI Mentor, AI
+ * reports, and AI settings.
+ *
+ * The Risk Calculator is deliberately absent from this module: position sizing
+ * is deterministic and broker-aware, and it must keep working when no key is
+ * configured, Gemini is unreachable, or the internet is offline.
  *
  * Provider: Google AI Studio (Gemini) — exclusively. There is no OpenRouter or
  * OpenAI path anywhere in the active execution path. This module is the one
@@ -29,28 +33,20 @@ import {
   ANALYSIS_SYSTEM_PROMPT,
   DEFAULT_AI_MODEL,
   MAX_AI_TIMEOUT_MS,
-  RISK_COACH_RESPONSE_SCHEMA,
-  RISK_COACH_SYSTEM_PROMPT,
   aiReportSchema,
   analysisDataFingerprint,
   analysisUserPrompt,
   buildAnalysisPromptPayload,
   buildEvidenceManifest,
-  buildRiskCoachPayload,
   hasOnlyGroundedNumbers,
-  isSafeRiskCoachReview,
   normalizeGeminiModelId,
   pickPreferredGeminiModel,
   resolveAiTimeoutMs,
-  riskCoachSchema,
-  riskCoachUserPrompt,
   stableHash16,
   validateEvidenceReport,
   type AiReport,
-  type RiskCoachReview,
 } from "@shared/aiCore";
 import type { AnalysisResult } from "@shared/analysisEngine";
-import type { RiskCalculation } from "@shared/riskCalculator";
 import { maskApiKey, readAiSettings, readAiSettingsView, subscribeAiSettings, updateAiModel } from "./aiStorage";
 import { AiError, type AiErrorCode, type AiSettings, type AiSettingsView, type AiUiState } from "./aiTypes";
 import { listGeminiModels, requestStructuredCompletion, type GeminiModelInfo, type KeyVerification } from "./geminiClient";
@@ -76,17 +72,6 @@ export type AiAnalysisOutcome = {
   /** Non-fatal note, e.g. the model list could not be verified. */
   warning?: string;
   /** True when Gemini rejected the strict schema and JSON-only mode was used. */
-  schemaFallback?: boolean;
-};
-
-export type AiRiskCoachOutcome = {
-  available: boolean;
-  coach: RiskCoachReview | null;
-  model: string | null;
-  message?: string;
-  errorCode?: AiErrorCode;
-  modelRepairedFrom?: string | null;
-  warning?: string;
   schemaFallback?: boolean;
 };
 
@@ -258,7 +243,7 @@ export async function requestGeminiStructuredCompletion(request: {
 }
 
 /* ------------------------------------------------------------------ *
- * Analysis + risk coach
+ * Analysis
  * ------------------------------------------------------------------ */
 
 function removeExpiredCache() {
@@ -372,41 +357,6 @@ export async function analyzeJournal(input: { analysis: AnalysisResult; signal?:
     return outcome;
   } catch (error) {
     return { ...failure(error, model), modelRepairedFrom: repairedFrom, availableModels: available, warning };
-  }
-}
-
-/** Risk-process review over the deterministic calculator output. */
-export async function coachRisk(input: { calculation: RiskCalculation; signal?: AbortSignal; model?: string; timeoutMs?: number }): Promise<AiRiskCoachOutcome> {
-  const settings = getAiSettings();
-  if (!settings) return { available: false, coach: null, model: null, message: "AI Risk Coach is not configured. Add your Google AI Studio key in Options; the deterministic calculation remains available.", errorCode: "not_configured", modelRepairedFrom: null };
-  const requested = normalizeGeminiModelId(input.model ?? settings.model) || normalizeGeminiModelId(settings.model) || DEFAULT_AI_MODEL;
-
-  const resolution = await resolveModelForAnalysis({ apiKey: settings.apiKey, requested, signal: input.signal });
-  if (!resolution.ok) return { available: false, coach: null, model: requested, message: resolution.error.message, errorCode: resolution.error.code, modelRepairedFrom: null };
-  const { model, repairedFrom, warning } = resolution;
-  if (repairedFrom) persistModelRepair(model);
-
-  let schemaFallback = false;
-  try {
-    const raw = await requestGeminiStructuredCompletion({
-      apiKey: settings.apiKey,
-      model,
-      system: RISK_COACH_SYSTEM_PROMPT,
-      user: riskCoachUserPrompt(buildRiskCoachPayload(input.calculation)),
-      schemaName: "gold_journal_risk_coach",
-      schema: RISK_COACH_RESPONSE_SCHEMA as unknown as Record<string, unknown>,
-      temperature: 0,
-      timeoutMs: resolveAiTimeoutMs(input.timeoutMs, MAX_AI_TIMEOUT_MS),
-      signal: input.signal,
-      onSchemaFallback: () => { schemaFallback = true; },
-    });
-    const parsed = riskCoachSchema.safeParse(raw);
-    if (!parsed.success) throw new AiError("schema_error", "Gemini returned an invalid risk review. Please retry.");
-    if (!isSafeRiskCoachReview(parsed.data)) throw new AiError("ungrounded_response", "The risk review contained trading instructions, so it was rejected. Please retry.");
-    return { available: true, coach: parsed.data, model, modelRepairedFrom: repairedFrom, warning, schemaFallback };
-  } catch (error) {
-    const code = error instanceof AiError ? error.code : "provider_error";
-    return { available: false, coach: null, model, message: error instanceof Error ? error.message : "AI Risk Coach is temporarily unavailable.", errorCode: code, modelRepairedFrom: repairedFrom, warning };
   }
 }
 

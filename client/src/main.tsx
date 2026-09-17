@@ -16,6 +16,9 @@ import "./theme-repair.css";
 // plus its small interaction companion.
 import "./premium-terminal.css";
 import "./premium-interactions.css";
+// The deterministic risk calculator extends the premium layer; it owns no
+// global styling and only styles its own controls and panels.
+import "./risk-calculator.css";
 
 const redirectToLoginIfUnauthorized = (error: unknown) => {
   if (!(error instanceof TRPCClientError)) return;
