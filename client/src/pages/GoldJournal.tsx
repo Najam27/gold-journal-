@@ -54,6 +54,7 @@ import { AccountStatusStrip } from "@/components/premium/AccountStatusStrip";
 import { AmbientField } from "@/components/premium/AmbientField";
 import { Premium3DBackground } from "@/components/premium/Premium3DBackground";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useIsDrawerNav } from "@/hooks/useMobile";
 import { OFFLINE_CASH_REQUEST_EVENT } from "@/lib/offlineMutationQueue";
 import { useLocalJournal } from "@/lib/journal/useLocalJournal";
 import { JOURNAL_LOCAL_EVENT } from "@/lib/journal/journalStore";
@@ -1653,10 +1654,36 @@ function AppSidebar({
 }: any) {
   const broker = mt5Summary;
   const hasBrokerBalance = broker?.balance != null;
+  /**
+   * Drawer geometry is asserted inline.
+   *
+   * Below 1024px the sidebar IS the navigation, so its open state must never be
+   * decided by a specificity contest: `index.css` (≤1120px and ≤760px) and
+   * `premium-terminal.css` both declare `.gj-sidebar` widths, and the collapsed
+   * rail preference is remembered in `localStorage` across reloads. A drawer
+   * that resolves to the 76px rail, or stays at `translateX(-104%)` behind a
+   * scrim while the body is scroll-locked, looks like a frozen app. Inline wins
+   * deterministically over all of them, and `z-index` above every in-app layer
+   * (floating action stack 148-151, bottom nav 40, topbar 30) keeps the menu on
+   * top wherever it is opened from. Above 1024px the rail stays pure CSS so the
+   * collapse animation is unaffected.
+   */
+  const drawerMode = useIsDrawerNav();
+  const drawerStyle: React.CSSProperties | undefined = drawerMode
+    ? {
+        width: "min(20rem, 86vw)",
+        transform: open ? "translateX(0)" : "translateX(-104%)",
+        visibility: open ? "visible" : "hidden",
+        pointerEvents: open ? "auto" : "none",
+        zIndex: 300,
+      }
+    : undefined;
   return (
     <>
       <aside
         className={`gj-sidebar ${open ? "is-open" : ""} ${collapsed ? "is-collapsed" : ""}`}
+        data-nav={open ? "open" : "closed"}
+        style={drawerStyle}
       >
         <div className="sidebar-brand">
           <GoldMark />

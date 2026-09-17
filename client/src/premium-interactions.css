@@ -438,9 +438,17 @@ img, video, canvas { max-width: 100%; }
 .mt5-table-wrap,
 .edge-table-wrap,
 .heatmap-table,
-.pnl-week-calendar {
+.pnl-week-calendar,
+.analysis-table-panel {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
+  /* The x axis is asserted here rather than inherited: `premium-terminal.css`
+     loads after `gold-overrides.css` and resets `.pnl-week-calendar` and
+     `.analysis-table-panel` to `overflow: hidden`. Their content is 860-1000px
+     wide, so on a phone or tablet every column past the viewport was clipped
+     with no scrollbar to reach it — the calendar looked empty and the Analysis
+     table looked truncated. */
+  overflow-x: auto;
 }
 
 /* 3 · TOUCH ERGONOMICS ---------------------------------------------------- */
@@ -579,6 +587,18 @@ img, video, canvas { max-width: 100%; }
   inset-block: 0;
   inset-inline-start: 0;
   width: var(--gj-sidebar-w);
+  /*
+   * Stacking is not optional here. `premium-terminal.css` also declares a
+   * `.gj-sidebar, .gj-main` group rule (`position: relative; z-index: 1`), and
+   * every in-app overlay is competing for the same slot: the floating action
+   * stack sits at 148-151, the mobile bottom nav at 40 and the sticky topbar at
+   * 30. The navigation rail/drawer must outrank all of them — without this the
+   * menu can open UNDER the scrim or under the page, which reads as a frozen
+   * app because the body is scroll-locked at the time. Radix surfaces are
+   * portalled to `document.body` after an `isolation: isolate` shell, so they
+   * still paint above this on their own.
+   */
+  z-index: 300;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -617,18 +637,42 @@ img, video, canvas { max-width: 100%; }
     transition: transform var(--gj-dur-base) var(--gj-ease);
     box-shadow: 1.5rem 0 3.75rem -1.875rem rgba(0, 0, 0, .68);
     padding-bottom: env(safe-area-inset-bottom);
+    /* Closed means gone: the off-canvas panel must never intercept a tap that
+       belonged to the page behind it. `AppSidebar` also asserts these inline. */
+    visibility: hidden;
+    pointer-events: none;
   }
   .gj-sidebar.is-open,
-  .gj-shell .gj-sidebar.is-collapsed.is-open { transform: translateX(0); }
+  .gj-shell .gj-sidebar.is-collapsed.is-open {
+    transform: translateX(0);
+    visibility: visible;
+    pointer-events: auto;
+  }
   /* A collapsed desktop rail must never open as an icon-only drawer, and the
      rail toggle has nothing to toggle out here. */
   .gj-shell .gj-sidebar .collapse-button { display: none; }
+  /*
+   * The page must not reserve space for an off-canvas menu — but `index.css`
+   * ships `.gj-sidebar.is-collapsed + .gj-main { margin-left: 76px }` (0-2-0),
+   * which simply outbids a plain `.gj-main { margin-left: 0 }` (0-1-0). With the
+   * remembered rail preference collapsed (`gj:sidebar-rail` is written on every
+   * desktop collapse and survives reloads) the whole page below 1024px was laid
+   * out 76px to the right behind an empty gutter. It also made opening the menu
+   * shift the page: the scrim is only mounted while the drawer is open, so it
+   * inserted itself between the two siblings and silently switched the sibling
+   * rule off. Matching at 0-3-0 removes both effects. Verified in Chromium at
+   * 375/960/1023px: closed and open now both report margin-left: 0.
+   */
+  .gj-shell .gj-sidebar + .gj-main,
   .gj-main { margin-left: 0; padding-bottom: 14rem; }
   .desktop-pagebar { display: none; }
   .drawer-scrim {
     position: fixed;
     inset: 0;
-    z-index: 45;
+    /* Below the drawer (300) so the menu reads as above its own scrim, and above
+       every other in-app layer (floating action stack 148-151, bottom nav 40,
+       topbar 30). */
+    z-index: 290;
     display: block;
     border: 0;
     background: color-mix(in srgb, var(--surface-overlay) 100%, transparent);
@@ -637,7 +681,9 @@ img, video, canvas { max-width: 100%; }
   .mobile-topbar {
     position: sticky;
     top: 0;
-    z-index: 30;
+    /* Above the floating action stack (148-151): the menu button is the only way
+       into navigation on a phone or tablet, so nothing may cover it. */
+    z-index: 200;
     display: flex;
     align-items: center;
     justify-content: space-between;

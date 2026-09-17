@@ -70,10 +70,17 @@ describe("responsive contract", () => {
   });
 
   it("gives every dense data surface its own scroll instead of widening the page", () => {
-    for (const wrap of [".trade-table-wrap", ".control-table-wrap", ".mt5-table-wrap", ".edge-table-wrap", ".heatmap-table", ".pnl-week-calendar"]) {
+    for (const wrap of [".trade-table-wrap", ".control-table-wrap", ".mt5-table-wrap", ".edge-table-wrap", ".heatmap-table", ".pnl-week-calendar", ".analysis-table-panel"]) {
       expect(interactionsCss).toContain(wrap);
     }
     expect(interactionsCss).toContain("overscroll-behavior-x: contain");
+    // `premium-terminal.css` loads after `gold-overrides.css` and set both of
+    // these back to `overflow: hidden`; their content is 860-1000px wide, so the
+    // columns past the viewport were clipped with no scrollbar to reach them.
+    // Verified in Chromium at 375px: the calendar reaches scrollLeft 459 and the
+    // analysis panel 567.
+    expect(interactionsCss).toMatch(/[\.\w-]*\.analysis-table-panel \{[\s\S]*?overflow-x: auto;/);
+    expect(read("./premium-terminal.css")).toContain(".analysis-table-panel { margin-top: 14px; overflow: hidden; }");
   });
 
   it("wraps long data and sizes charts from their container", () => {
@@ -133,7 +140,7 @@ describe("sidebar shell", () => {
   });
 
   it("becomes an off-canvas drawer under 1024px with a way out", () => {
-    expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*?\.gj-sidebar\.is-open[^{]*\{ transform: translateX\(0\); \}/);
+    expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*?\.gj-sidebar\.is-open,[\s\S]*?\.gj-shell \.gj-sidebar\.is-collapsed\.is-open \{\n\s*transform: translateX\(0\);/);
     expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*\.drawer-scrim \{/);
     expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*\.mobile-topbar \{/);
     // The rail toggle is meaningless off-canvas; an explicit exit replaces it.
@@ -142,12 +149,55 @@ describe("sidebar shell", () => {
     expect(shell).toContain('aria-label="Close navigation"');
   });
 
+  it("paints the drawer above its scrim, the action stack and the page", () => {
+    // `premium-terminal.css` loads after `index.css` and carries the group rule
+    // below, which reset the rail's stacking to 1: the open drawer rendered
+    // behind the dimmed page with the body still scroll-locked.
+    expect(terminalCss).toContain(".gj-sidebar,\n.gj-main { position: relative; z-index: 1; }");
+    expect(interactionsCss).toMatch(/\n\.gj-sidebar \{[^}]*z-index: 300;/);
+    // 300 (drawer) > 290 (scrim) > 200 (topbar) > 151-148 (floating action
+    // stack) > 40 (bottom nav) > 1 (page).
+    expect(interactionsCss).toMatch(/\.drawer-scrim \{[^}]*z-index: 290;/);
+    expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*?\.mobile-topbar \{[\s\S]*?z-index: 200;/);
+    expect(read("./gold-overrides.css")).toContain("z-index: 151");
+  });
+
+  it("cannot intercept a tap while it is closed", () => {
+    // The off-canvas panel is parked 104% to the left, but a stray stacking or
+    // width regression used to leave it over the page; hidden + inert makes that
+    // impossible to feel as a frozen app.
+    expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*?\.gj-shell \.gj-sidebar\.is-collapsed \{[\s\S]*?visibility: hidden;[\s\S]*?pointer-events: none;/);
+    expect(interactionsCss).toMatch(/\.gj-shell \.gj-sidebar\.is-collapsed\.is-open \{[\s\S]*?visibility: visible;[\s\S]*?pointer-events: auto;/);
+  });
+
+  it("asserts the open drawer's geometry inline instead of trusting the cascade", () => {
+    // Three stylesheets declare competing `.gj-sidebar` widths and the rail
+    // preference survives reloads, so the open state must not depend on winning
+    // a specificity contest. `useIsDrawerNav` gates it to the drawer range.
+    expect(shell).toContain("const drawerMode = useIsDrawerNav();");
+    expect(shell).toContain('width: "min(20rem, 86vw)"');
+    expect(shell).toContain('transform: open ? "translateX(0)" : "translateX(-104%)"');
+    expect(shell).toContain('data-nav={open ? "open" : "closed"}');
+    expect(read("./hooks/useMobile.tsx")).toContain("export function useIsDrawerNav()");
+  });
+
+  it("never reserves page space for the off-canvas drawer", () => {
+    // `index.css` ships `.gj-sidebar.is-collapsed + .gj-main { margin-left: 76px }`
+    // at 0-2-0, which outbids a plain `.gj-main { margin-left: 0 }` (0-1-0). With
+    // the remembered rail preference collapsed, every viewport below 1024px laid
+    // the page out 76px to the right — and opening the menu removed the rule
+    // (the scrim is mounted between the two siblings), so the page shifted.
+    // Chromium at 375/960/1023px reports margin-left: 0 in both states now.
+    expect(indexCss).toContain(".gj-sidebar.is-collapsed + .gj-main { margin-left: 76px; }");
+    expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*?\.gj-shell \.gj-sidebar \+ \.gj-main,[\s\S]*?\.gj-main \{ margin-left: 0; padding-bottom: 14rem; \}/);
+  });
+
   it("opens the drawer at full width even while the rail preference is collapsed", () => {
     // `.gj-sidebar.is-collapsed { width: 76px }` is 0-2-0 in two earlier layers,
     // so it beat the drawer's 0-1-0 width and left a 76px sliver behind the
     // scrim — a menu that was technically open and completely unusable.
     expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*\.gj-shell \.gj-sidebar\.is-collapsed \{[\s\S]*?width: min\(20rem, 86vw\);/);
-    expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*\.gj-shell \.gj-sidebar\.is-collapsed\.is-open \{ transform: translateX\(0\); \}/);
+    expect(interactionsCss).toMatch(/@media \(max-width: 1023px\) \{[\s\S]*\.gj-shell \.gj-sidebar\.is-collapsed\.is-open \{\n\s*transform: translateX\(0\);/);
   });
 
   it("remembers the rail and closes the drawer on Escape without a scroll lock leaking", () => {
@@ -160,7 +210,7 @@ describe("sidebar shell", () => {
 
   it("reserves the fixed action stack instead of letting it cover the last row", () => {
     expect(interactionsCss).toMatch(/\.gj-main \{[^}]*padding-bottom: 12rem/);
-    expect(interactionsCss).toContain(".gj-main { padding-bottom: 14rem; }");
+    expect(interactionsCss).toMatch(/\.gj-main \{ margin-left: 0; padding-bottom: 14rem; \}/);
   });
 });
 

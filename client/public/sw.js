@@ -1,4 +1,6 @@
-const CACHE_NAME = "gold-journal-static-v25";
+// Bump on any shell/stylesheet change: the fetch handler is network-first, but a
+// stale cached bundle is what makes a shipped fix look like it never landed.
+const CACHE_NAME = "gold-journal-static-v26";
 const PRECACHE = ["/manifest.json", "/gold-journal-3d.svg"];
 
 self.addEventListener("install", event => {
