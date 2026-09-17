@@ -22,6 +22,18 @@ import { listAiExperiments, listAiReports, persistAiReport, updateAiExperiment }
 import { aiReportSchema } from "@shared/aiCore";
 import { compareAnalysis } from "@shared/analysisEngine";
 import { getPktDateKey, isPktDateKey, pktDateToTimestamp } from "@shared/pktDate";
+import { normalizeTradeOptionValue } from "@shared/tradeOptionCategories";
+import {
+  OPTION_COLUMNS,
+  ensureDefaultTradeOptions,
+  findOwnedTradeOption,
+  findTradeOptionByNormalizedValue,
+  listOwnedOptions,
+  requireTradeOptionCategory,
+  toTradeOptionView,
+  tradeOptionValueError,
+  type TradeOptionRow,
+} from "./tradeOptions";
 
 const MAX_MONEY = 999_999_999_999.99;
 const optionalText = (max = 5000) => z.string().trim().max(max).optional().default("");
@@ -427,22 +439,81 @@ export const goldRouter = router({
       return { success: true };
     }),
   }),
+  // Canonical Trade Log option store.
+  //
+  // Every reusable dropdown value lives here: the Gold Journal defaults (seeded
+  // once per user, and fully editable afterwards) plus the user's own options.
+  // Nothing is ever hard-deleted — `setActive` archives an option so a historical
+  // trade keeps its recorded label and can still be displayed and re-edited.
   optionLists: router({
     list: protectedProcedure.query(async ({ ctx }) => {
-      const db = await dbOrThrow();
-      const rows = await db.select().from(optionLists).where(eq(optionLists.userId, ctx.user.id)).orderBy(optionLists.category, optionLists.value).limit(500);
-      return rows.map(toSafeJournalRecord);
+      await ensureDefaultTradeOptions(ctx.user.id);
+      const rows = await listOwnedOptions(ctx.user.id);
+      return rows.map(toTradeOptionView);
     }),
-    add: protectedProcedure.input(z.object({ category: z.string().trim().min(1).max(80), value: z.string().trim().min(1).max(160) })).mutation(async ({ ctx, input }) => {
-      const db = await dbOrThrow();
-      await db.insert(optionLists).values({ userId: ctx.user.id, category: input.category, value: input.value }).onConflictDoUpdate({ target: [optionLists.userId, optionLists.category, optionLists.value], set: { active: true } });
-      return { success: true };
-    }),
-    setActive: protectedProcedure.input(z.object({ optionId: z.number().int().positive(), active: z.boolean() })).mutation(async ({ ctx, input }) => {
-      const db = await dbOrThrow();
-      await db.update(optionLists).set({ active: input.active }).where(and(eq(optionLists.id, input.optionId), eq(optionLists.userId, ctx.user.id)));
-      return { success: true };
-    }),
+    add: protectedProcedure
+      .input(z.object({ category: z.string().trim().min(1).max(80), value: z.string().trim().min(1).max(160), active: z.boolean().optional().default(true) }))
+      .mutation(async ({ ctx, input }) => {
+        const definition = requireTradeOptionCategory(input.category);
+        const value = input.value.trim();
+        const invalid = tradeOptionValueError(definition.category, value);
+        if (invalid) throw new TRPCError({ code: "BAD_REQUEST", message: invalid });
+        await ensureDefaultTradeOptions(ctx.user.id);
+        const normalizedValue = normalizeTradeOptionValue(value);
+        const existing = await findTradeOptionByNormalizedValue(ctx.user.id, definition.category, normalizedValue);
+        const db = await dbOrThrow();
+        if (existing) {
+          if (existing.active) {
+            throw new TRPCError({ code: "CONFLICT", message: `“${existing.value}” is already an active ${definition.label} option.` });
+          }
+          // Re-enable the archived option instead of creating a case-variant twin.
+          const restored = (await db.update(optionLists).set({ active: input.active, updatedAt: new Date() }).where(and(eq(optionLists.id, existing.id), eq(optionLists.userId, ctx.user.id))).returning(OPTION_COLUMNS)) as TradeOptionRow[];
+          return { success: true, option: toTradeOptionView(restored[0] ?? { ...existing, active: input.active }) };
+        }
+        const inserted = (await db
+          .insert(optionLists)
+          .values({ userId: ctx.user.id, category: definition.category, value, normalizedValue, isDefault: false, active: input.active })
+          .onConflictDoUpdate({ target: [optionLists.userId, optionLists.category, optionLists.value], set: { active: input.active, normalizedValue, updatedAt: new Date() } })
+          .returning(OPTION_COLUMNS)) as TradeOptionRow[];
+        const row = inserted[0] ?? { id: 0, category: definition.category, value, active: input.active, isDefault: false };
+        return { success: true, option: toTradeOptionView(row) };
+      }),
+    rename: protectedProcedure
+      .input(z.object({ optionId: z.number().int().positive(), value: z.string().trim().min(1).max(160) }))
+      .mutation(async ({ ctx, input }) => {
+        const existing = await findOwnedTradeOption(ctx.user.id, input.optionId);
+        if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "That option is no longer available. Reload the list and try again." });
+        const value = input.value.trim();
+        const invalid = tradeOptionValueError(existing.category, value);
+        if (invalid) throw new TRPCError({ code: "BAD_REQUEST", message: invalid });
+        const normalizedValue = normalizeTradeOptionValue(value);
+        const clash = await findTradeOptionByNormalizedValue(ctx.user.id, existing.category, normalizedValue, existing.id);
+        if (clash) throw new TRPCError({ code: "CONFLICT", message: `“${clash.value}” already uses that name in ${existing.category}.` });
+        const db = await dbOrThrow();
+        // Only the option label changes. Historical trades keep the label they
+        // were recorded with, and the Trade Log renders a recorded value that no
+        // longer matches an option as “<value> — Archived”, so old data is never
+        // rewritten or blanked by a rename.
+        const updated = (await db
+          .update(optionLists)
+          .set({ value, normalizedValue, updatedAt: new Date() })
+          .where(and(eq(optionLists.id, existing.id), eq(optionLists.userId, ctx.user.id)))
+          .returning(OPTION_COLUMNS)) as TradeOptionRow[];
+        return { success: true, option: toTradeOptionView(updated[0] ?? { ...existing, value }) };
+      }),
+    setActive: protectedProcedure
+      .input(z.object({ optionId: z.number().int().positive(), active: z.boolean() }))
+      .mutation(async ({ ctx, input }) => {
+        const existing = await findOwnedTradeOption(ctx.user.id, input.optionId);
+        if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "That option is no longer available. Reload the list and try again." });
+        const db = await dbOrThrow();
+        const updated = (await db
+          .update(optionLists)
+          .set({ active: input.active, updatedAt: new Date() })
+          .where(and(eq(optionLists.id, existing.id), eq(optionLists.userId, ctx.user.id)))
+          .returning(OPTION_COLUMNS)) as TradeOptionRow[];
+        return { success: true, option: toTradeOptionView(updated[0] ?? { ...existing, active: input.active }) };
+      }),
   }),
   notifications: router({
     get: protectedProcedure.input(z.object({ page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(50).default(50) }).optional()).query(async ({ ctx, input }) => {

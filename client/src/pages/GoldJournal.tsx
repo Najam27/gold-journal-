@@ -91,6 +91,7 @@ import { gsap } from "gsap";
 import { NotificationCenter } from "@/components/NotificationCenter";
 import { AccountRenameControl } from "@/components/AccountRenameControl";
 import { OptionListManager } from "@/components/OptionListManager";
+import { TradeOptionManager } from "@/components/TradeOptionManager";
 import { BulkPdfExporter } from "@/components/BulkPdfExporter";
 import { assessTraderGoal } from "@/lib/traderGoals";
 import { behaviorConfigFromProfile, buildTraderDevelopment, PRE_TRADE_GATE_ITEMS } from "@/lib/psychology";
@@ -2404,32 +2405,7 @@ export function OptionsView({
   onClear,
 }: any) {
   const [name, setName] = useState("");
-  const [category, setCategory] = useState("Trading rule");
-  const [optionValue, setOptionValue] = useState("");
   const [confirmClear, setConfirmClear] = useState(false);
-  const optionQuery = trpc.optionLists.list.useQuery();
-  const addOption = trpc.optionLists.add.useMutation();
-  const toggleOption = trpc.optionLists.setActive.useMutation();
-  const utils = trpc.useUtils();
-  const optionGroups = useMemo(
-    () =>
-      (optionQuery.data ?? []).reduce(
-        (result: Record<string, any[]>, item: any) => {
-          (result[item.category] ||= []).push(item);
-          return result;
-        },
-        {}
-      ),
-    [optionQuery.data]
-  );
-  const createOption = async () => {
-    const trimmed = optionValue.trim();
-    if (!trimmed) return;
-    await addOption.mutateAsync({ category, value: trimmed });
-    setOptionValue("");
-    await utils.optionLists.list.invalidate();
-    toast.success("Journal option saved.");
-  };
   return (
     <>
       <section className="section-heading">
@@ -2495,78 +2471,7 @@ export function OptionsView({
           </div>
         </section>
         <section className="panel list-manager">
-          <span className="section-label">RULES & DROPDOWNS</span>
-          <p>
-            Create custom rules and values for future trade, plan, and review
-            entries. Disabling an item keeps existing records intact.
-          </p>
-          <div className="inline-form option-page-create">
-            <select
-              value={category}
-              onChange={event => setCategory(event.target.value)}
-            >
-              {[
-                "Trading rule",
-                "Session",
-                "Level",
-                "Timeframe",
-                "Setup quality",
-                "Execution type",
-                "Market condition",
-                "Mistake",
-                "Confirmation",
-              ].map(item => (
-                <option key={item}>{item}</option>
-              ))}
-            </select>
-            <Input
-              value={optionValue}
-              onChange={event => setOptionValue(event.target.value)}
-              placeholder="New rule or dropdown value"
-            />
-            <Button
-              disabled={addOption.isPending || !optionValue.trim()}
-              onClick={createOption}
-            >
-              <Plus size={15} /> Add
-            </Button>
-          </div>
-          <div className="option-page-groups">
-            {Object.keys(optionGroups).length ? (
-              Object.entries(optionGroups).map(([group, items]) => (
-                <div key={group}>
-                  <strong>{group}</strong>
-                  <div className="option-pills">
-                    {(items as any[]).map(item => (
-                      <label
-                        className={item.active ? "active" : "inactive"}
-                        key={item.id}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={item.active}
-                          disabled={toggleOption.isPending}
-                          onChange={async event => {
-                            await toggleOption.mutateAsync({
-                              optionId: item.id,
-                              active: event.target.checked,
-                            });
-                            await utils.optionLists.list.invalidate();
-                          }}
-                        />
-                        {item.value}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p className="muted">
-                No custom journal values yet. Add one above to make it available
-                for future entries.
-              </p>
-            )}
-          </div>
+          <TradeOptionManager />
         </section>
         <section className="panel danger-zone">
           <span className="section-label">DANGER ZONE</span>

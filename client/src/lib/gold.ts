@@ -1,8 +1,13 @@
 import { getPktDateKey } from "@shared/pktDate";
+import { tradeOptionDefaults } from "@shared/tradeOptionCategories";
 
-export const sessions = ["Pre-Asian", "Asian", "Post-Asian", "Pre-London", "London", "Post-London", "Pre-NY", "New York", "Post-NY"];
-export const levels = ["SBR/TJL1", "RBS/TJL1", "TJL2", "QML", "FIB", "LVL4", "LVL2"];
-export const executionTypes = ["Manual Direct", "Limit Order", "Stop Order", "Manual After Confirmation"];
+// These arrays are no longer a runtime option source. They expose the seeded
+// defaults of the canonical option registry so existing consumers (session
+// detection, plan editor, missed-trade logging) keep a single source of truth.
+// The Trade Log itself always reads managed options from `gj_option_lists`.
+export const sessions: readonly string[] = tradeOptionDefaults("Session");
+export const levels: readonly string[] = tradeOptionDefaults("Level");
+export const executionTypes: readonly string[] = tradeOptionDefaults("Execution type");
 export const results = ["WIN", "LOSS", "BREAK_EVEN", "OPEN"] as const;
 
 export function formatDate(value: Date | string | number | null | undefined) {
