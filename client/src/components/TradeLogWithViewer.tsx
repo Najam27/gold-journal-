@@ -106,6 +106,10 @@ function BaseTradeLogWithViewer({ stats, trades, allTrades, pagination, listLoad
   const total = pagination?.total ?? 0;
   const pageCount = pagination?.pageCount ?? 1;
   const linkedBrokerBalance = hasMt5Connection ? (mt5Summary?.balance ?? null) : null;
+  // Broker figures are only "live" while the terminal is actually talking to
+  // Gold Journal; otherwise they are the last snapshot the EA sent.
+  const mt5Live = String(mt5Summary?.syncHealth?.state ?? "").toUpperCase() === "CONNECTED";
+  const brokerValueDetail = mt5Live ? (mt5Syncing ? "Synchronizing Trade Log…" : "Live broker value") : "Last broker snapshot · MT5 not connected";
   const balanceForTrade = (trade: any) => hasMt5Connection ? linkedBrokerBalance : (balanceById.get(trade.id) || 0);
   const exportTrade = async (trade: any, action: "download" | "share") => {
     setExportingTradeId(trade.id);
@@ -142,7 +146,7 @@ function BaseTradeLogWithViewer({ stats, trades, allTrades, pagination, listLoad
       {mt5Summary?.balance != null ? <>
         <StatCard label="MT5 balance" icon={Banknote} value={<AnimatedNumber value={toNumber(mt5Summary.balance)} format={formatMoney} />} detail={mt5Summary.currency || "Broker account"} />
         <StatCard label="MT5 equity" icon={Gauge} value={<AnimatedNumber value={toNumber(mt5Summary.equity)} format={formatMoney} />} detail="Balance + floating P&L" tone="neutral" />
-        <StatCard label="MT5 floating P&L" icon={toNumber(mt5Summary.floatingPnl) >= 0 ? TrendingUp : TrendingDown} value={<AnimatedNumber value={toNumber(mt5Summary.floatingPnl)} format={formatMoney} />} detail={mt5Syncing ? "Synchronizing Trade Log…" : "Live broker value"} tone={toNumber(mt5Summary.floatingPnl) >= 0 ? "green" : "red"} />
+        <StatCard label="MT5 floating P&L" icon={toNumber(mt5Summary.floatingPnl) >= 0 ? TrendingUp : TrendingDown} value={<AnimatedNumber value={toNumber(mt5Summary.floatingPnl)} format={formatMoney} />} detail={brokerValueDetail} tone={toNumber(mt5Summary.floatingPnl) >= 0 ? "green" : "red"} />
       </> : <StatCard label="Journal balance" icon={Wallet} value={<AnimatedNumber value={stats.balance} format={formatMoney} />} detail="Starting balance + movements + P&L" />}
       <StatCard label="Win rate" icon={Target} value={`${stats.winRate.toFixed(1)}%`} detail={`${stats.wins} wins · ${stats.losses} losses`} tone={stats.winRate >= 50 ? "green" : "neutral"} />
       <StatCard label="Total P&L" icon={BarChart3} value={<AnimatedNumber value={stats.pnl} format={formatMoney} />} detail="Closed and open MT5 positions" tone={stats.pnl >= 0 ? "green" : "red"} />

@@ -1393,7 +1393,7 @@ export default function GoldJournal() {
             {view === "trades" && account && (
               <AccountStatusStrip
                 accountName={account.name || "Active account"}
-                mt5Connected={Boolean(activeMt5Connection)}
+                mt5Connection={activeMt5Connection}
                 online={isOnline}
                 syncing={mt5Workspace.isFetching}
               />

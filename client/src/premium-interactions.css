@@ -865,6 +865,7 @@ img, video, canvas { max-width: 100%; }
 .connection-pill.loss i { background: var(--accent-coral); box-shadow: 0 0 9px color-mix(in srgb, var(--accent-coral) 80%, transparent); }
 .connection-pill.live { border-color: color-mix(in srgb, var(--accent-cyan) 34%, var(--border)); color: var(--accent-cyan); }
 .connection-pill.warn { border-color: color-mix(in srgb, var(--accent-amber) 38%, var(--border)); color: var(--accent-amber); }
+.connection-pill.warn i { background: var(--accent-amber); }
 .connection-pill.muted { color: var(--text-dim); }
 @media (max-width: 560px) {
   .account-strip { align-items: flex-start; }
