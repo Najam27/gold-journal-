@@ -14,7 +14,9 @@ import { calculateAccountMt5Risk } from "./mt5Risk";
 import { toSafeAccount, toSafeAccountListItem, toSafeJournalRecord, toSafeTrade } from "./journalPrivacy";
 import { protectedProcedure, router } from "./_core/trpc";
 import { createPerfTrace } from "./perf";
-import { hasImageSignature, storageGetSignedUrl, storagePut } from "./storage";
+import { assertOwnedScreenshotPath, hasImageSignature, screenshotObjectKey, screenshotPathPrefix, storageGetSignedUrl, storagePut, storagePutAt, storageRemove, storageRemoveMany } from "./storage";
+import { hydrateSignedScreenshots } from "./journalScreenshots";
+import { logPersistenceEvent, withPersistenceDiagnostics } from "./persistenceDiagnostics";
 import { consumeRateLimit } from "./rateLimit";
 import { clearAccountJournalDataAtomic, recordGoalAlertsAtomic, removeAccountAtomic } from "./atomicOperations";
 import { getAccountAnalysis } from "./analysisDb";
@@ -56,6 +58,14 @@ const riskCalculatorInput = accountIdInput.extend({
 });
 const mt5TicketInput = z.string().regex(/^\d+$/).max(20).optional();
 const clientMutationIdInput = z.string().regex(/^[A-Za-z0-9_-]{16,64}$/, "Invalid offline replay id.").optional();
+const requiredClientMutationIdInput = z.string().regex(/^[A-Za-z0-9_-]{16,64}$/, "Invalid offline replay id.");
+const screenshotMimeInput = z.enum(["image/jpeg", "image/png", "image/webp"]);
+const screenshotBase64Input = z.string().trim().min(40).max(7_000_000).regex(/^(?:data:image\/(?:jpeg|png|webp);base64,)?[A-Za-z0-9+/]+={0,2}$/, "Invalid base64 image payload");
+// A screenshot reference the browser is asking to attach. It must be a private
+// object key inside the caller's own account folder (validated below); the
+// browser never gets to point a trade at arbitrary storage.
+const screenshotKeyInput = z.string().trim().min(1).max(500).nullable().optional();
+const screenshotNameInput = z.string().trim().min(1).max(255).nullable().optional();
 const pktDateInput = z.string().refine(isPktDateKey, "Use a valid PKT calendar date.");
 const analysisFiltersInput = z.object({ startDate: pktDateInput.nullable().optional(), endDate: pktDateInput.nullable().optional(), session: z.string().trim().max(40).nullable().optional(), timeframe: z.string().trim().max(20).nullable().optional(), level: z.string().trim().max(100).nullable().optional(), setup: z.string().trim().max(40).nullable().optional(), direction: z.enum(["BUY", "SELL"]).nullable().optional(), result: z.enum(["WIN", "LOSS", "BREAK_EVEN", "OPEN"]).nullable().optional() }).default({});
 const isFuturePktTimestamp = (timestamp: number, now = new Date()) => getPktDateKey(timestamp) > getPktDateKey(now);
@@ -104,9 +114,67 @@ const tradeInput = z.object({
   planChecklist: planChecklistInput,
   mt5Ticket: mt5TicketInput,
   clientMutationId: clientMutationIdInput,
+  // Screenshot evidence is part of the trade write, not a follow-up request.
+  // `screenshotRemoved` is the explicit "clear it" signal; an absent key means
+  // "leave whatever is already stored untouched".
+  screenshotKey: screenshotKeyInput,
+  screenshotName: screenshotNameInput,
+  screenshotRemoved: z.boolean().optional().default(false),
 });
 
 async function dbOrThrow() { const db = await getDb(); if (!db) throw new Error("Supabase database is unavailable. Please retry shortly."); return db; }
+
+const screenshotExtension = (mimeType: "image/jpeg" | "image/png" | "image/webp") => (mimeType === "image/png" ? "png" : mimeType === "image/webp" ? "webp" : "jpg");
+
+/** Size, emptiness, and magic-byte validation shared by every upload path. */
+function decodeScreenshotBase64(input: { base64: string; mimeType: "image/jpeg" | "image/png" | "image/webp" }) {
+  const base64 = input.base64.includes(",") ? input.base64.split(",")[1] : input.base64;
+  const bytes = Buffer.from(base64, "base64");
+  if (!bytes.byteLength) throw new Error("Screenshot payload is empty.");
+  if (bytes.byteLength > 5 * 1024 * 1024) throw new Error("Screenshot must be 5MB or smaller.");
+  if (!hasImageSignature(bytes, input.mimeType)) throw new Error("Screenshot content does not match its declared image type.");
+  return bytes;
+}
+
+/**
+ * Resolves the screenshot columns for a trade write.
+ *
+ * `undefined` means "the caller said nothing about the screenshot", which for an
+ * update must leave the stored evidence untouched. `null` means "it was removed".
+ * A supplied key is refused unless it lives inside the caller's own account
+ * folder, so a trade can never adopt another account's object.
+ */
+function resolveScreenshotForWrite(
+  authUid: string,
+  accountId: number,
+  input: { screenshotKey?: string | null; screenshotName?: string | null; screenshotRemoved?: boolean }
+): { key: string | null | undefined; name: string | null | undefined } {
+  if (input.screenshotRemoved) return { key: null, name: null };
+  const key = typeof input.screenshotKey === "string" ? input.screenshotKey.trim() : "";
+  if (!key) return { key: undefined, name: undefined };
+  assertOwnedScreenshotPath(key, authUid, accountId);
+  const name = typeof input.screenshotName === "string" ? input.screenshotName.trim() : "";
+  if (!name) throw new Error("A screenshot must include its original file name.");
+  return { key, name: name.slice(0, 255) };
+}
+
+/**
+ * Resolves the trade a queued update/delete is actually addressing.
+ *
+ * A trade the browser is still holding optimistically has a negative local id
+ * and no database row yet. Using that id directly used to fail input validation
+ * forever, which blocked every later queued write for the account. When the id
+ * is not a real row, the mutation's originating create id is used to find the
+ * row that create produced.
+ */
+async function resolveOwnedTradeForMutation(userId: number, input: { tradeId: number; originMutationId?: string | null }) {
+  if (Number.isInteger(input.tradeId) && input.tradeId > 0) return ownsTrade(userId, input.tradeId);
+  if (!input.originMutationId) throw new Error("This change targets a trade that has not reached the server yet.");
+  const db = await dbOrThrow();
+  const found = await db.select().from(trades).where(and(eq(trades.userId, userId), eq(trades.clientMutationId, input.originMutationId))).limit(1);
+  if (!found[0]) throw new Error("This change targets a trade that has not reached the server yet.");
+  return found[0];
+}
 
 async function ownGoal(userId: number, goalId: number) {
   const db = await dbOrThrow();
@@ -176,8 +244,39 @@ async function issueMt5ConnectionKey(input: { userId: number; accountId: number;
   return { id: inserted[0].id, connectionReference: mt5ConnectionReference(values.apiKey), apiKey, replaced: false };
 }
 
+/** How many rows a screenshot purge reads per page, and its hard ceiling. */
+const SCREENSHOT_PURGE_PAGE = 500;
+const SCREENSHOT_PURGE_MAX_ROWS = 20_000;
+
+/**
+ * Removes the stored screenshot objects that belonged to one account's trades.
+ *
+ * The atomic clear/removal transactions delete the rows that referenced these
+ * objects, so without this the images stay readable in the private bucket after
+ * the user asked for the journal to be emptied. It runs BEFORE the rows are
+ * deleted, while their stored keys are still readable, and it is best-effort:
+ * cleanup can never fail or block the destructive operation the user asked for.
+ */
+async function purgeAccountScreenshots(userId: number, accountId: number) {
+  try {
+    const db = await dbOrThrow();
+    const keys: string[] = [];
+    for (let offset = 0; offset < SCREENSHOT_PURGE_MAX_ROWS; offset += SCREENSHOT_PURGE_PAGE) {
+      const page = await db.select({ screenshotKey: trades.screenshotKey }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId))).limit(SCREENSHOT_PURGE_PAGE).offset(offset);
+      if (!page.length) break;
+      for (const row of page) if (row.screenshotKey) keys.push(row.screenshotKey);
+      if (page.length < SCREENSHOT_PURGE_PAGE) break;
+    }
+    if (keys.length) await storageRemoveMany(keys);
+  } catch {
+    // Best-effort: an orphaned object must never fail the clear or the removal.
+  }
+}
+
 async function clearAccountJournalData(userId: number, accountId: number) {
   await getOwnedAccount(userId, accountId);
+  // Evidence first, while the keys are still on the rows being deleted.
+  await purgeAccountScreenshots(userId, accountId);
   await clearAccountJournalDataAtomic(userId, accountId, new Date());
 }
 
@@ -241,6 +340,9 @@ export const goldRouter = router({
     }),
     remove: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), confirmed: z.literal(true) })).mutation(async ({ ctx, input }) => {
       await getOwnedAccount(ctx.user.id, input.accountId);
+      // Deleting the account cascades its trades away; their evidence must go
+      // with them instead of staying readable in private storage.
+      await purgeAccountScreenshots(ctx.user.id, input.accountId);
       return removeAccountAtomic(ctx.user.id, input.accountId);
     }),
   }),
@@ -315,81 +417,179 @@ export const goldRouter = router({
       const pageCount = Math.max(1, Math.ceil(total / input.pageSize));
       const page = Math.min(input.page, pageCount);
       const rows = await db.select().from(trades).where(where).orderBy(desc(trades.tradeDate), desc(trades.id)).limit(input.pageSize).offset((page - 1) * input.pageSize);
-      const hydratedRows = await Promise.all(rows.map(async trade => ({ ...trade, screenshotUrl: trade.screenshotKey ? await storageGetSignedUrl(trade.screenshotKey).catch(() => null) : null })));
+      // A signed URL is minted per read, with bounded concurrency and a hard
+      // time box: one stalled storage call can no longer hold the entire Trade
+      // Log open, and the expiring URL is never the persisted source of truth
+      // (the stable object key in `screenshotKey` is).
+      const hydratedRows = await hydrateSignedScreenshots(rows, storageGetSignedUrl);
       return { trades: hydratedRows.map(toSafeTrade), total, page, pageSize: input.pageSize, pageCount };
     }),
     create: protectedProcedure.input(tradeInput).mutation(async ({ ctx, input }) => {
-      if (isFuturePktTimestamp(input.tradeDate)) throw new TRPCError({ code: "BAD_REQUEST", message: "Future trade dates are not allowed." });
-      await getOwnedAccount(ctx.user.id, input.accountId);
-      const db = await dbOrThrow();
-      if (input.clientMutationId) {
-        const existing = await db.select({ id: trades.id }).from(trades).where(and(eq(trades.userId, ctx.user.id), eq(trades.accountId, input.accountId), eq(trades.clientMutationId, input.clientMutationId))).limit(1);
-        if (existing[0]) return { id: existing[0].id, replayed: true };
-      }
-      if (input.mt5Ticket) {
-        const linked = await db.select({ id: mt5LivePositions.id }).from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, input.accountId), eq(mt5LivePositions.ticket, BigInt(input.mt5Ticket)), eq(mt5LivePositions.status, "CLOSED"))).limit(1);
-        if (!linked[0]) throw new Error("The selected MT5 ticket is not an unjournaled closed position for this account.");
-      }
-      const inserted = await db.insert(trades).values({
-        userId: ctx.user.id, accountId: input.accountId, tradeDate: new Date(input.tradeDate), session: input.session,
-        direction: input.direction, result: input.result, level: input.level, timeframe: input.timeframe,
-        setupQuality: input.setupQuality, executionType: input.executionType, marketCondition: input.marketCondition,
-        biasAlignment: input.biasAlignment, confirmationType: input.confirmationType, slPlacement: input.slPlacement,
-        tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality, patienceScore: input.patienceScore,
-        risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null, pnl: input.pnl.toFixed(2),
-        notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
-        planStatus: input.planStatus, planChecklist: input.planChecklist,
-        mt5Ticket: input.mt5Ticket ? BigInt(input.mt5Ticket) : null, clientMutationId: input.clientMutationId ?? null,
-      }).returning({ id: trades.id });
-      return { id: inserted[0].id, replayed: false };
-    }),
-    update: protectedProcedure.input(tradeInput.extend({ tradeId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
-      const current = await ownsTrade(ctx.user.id, input.tradeId);
-      if (current.accountId !== input.accountId) throw new Error("A trade cannot be moved between journal accounts.");
-      const nextTicket = input.mt5Ticket ? BigInt(input.mt5Ticket) : current.mt5Ticket;
-      if (input.mt5Ticket && input.mt5Ticket !== current.mt5Ticket?.toString()) {
+      return withPersistenceDiagnostics({ stage: "trade.create", userId: ctx.user.id, accountId: input.accountId, mutationId: input.clientMutationId }, async () => {
+        if (isFuturePktTimestamp(input.tradeDate)) throw new TRPCError({ code: "BAD_REQUEST", message: "Future trade dates are not allowed." });
+        await getOwnedAccount(ctx.user.id, input.accountId);
         const db = await dbOrThrow();
-        const linked = await db.select({ id: mt5LivePositions.id }).from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, current.accountId), eq(mt5LivePositions.ticket, nextTicket), eq(mt5LivePositions.status, "CLOSED"))).limit(1);
-        if (!linked[0]) throw new Error("The selected MT5 ticket is not an unjournaled closed position for this account.");
-        const alreadyJournaled = await db.select({ id: trades.id }).from(trades).where(and(eq(trades.accountId, current.accountId), eq(trades.mt5Ticket, nextTicket))).limit(1);
-        if (alreadyJournaled[0] && alreadyJournaled[0].id !== current.id) throw new Error("That MT5 ticket is already linked to another journal trade.");
-      }
-      const db = await dbOrThrow();
-      await db.update(trades).set({
-        tradeDate: new Date(input.tradeDate), session: input.session, direction: input.direction, result: input.result,
-        level: input.level, timeframe: input.timeframe, setupQuality: input.setupQuality, executionType: input.executionType,
-        marketCondition: input.marketCondition, biasAlignment: input.biasAlignment, confirmationType: input.confirmationType,
-        slPlacement: input.slPlacement, tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality,
-        patienceScore: input.patienceScore, risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null,
-        pnl: input.pnl.toFixed(2), notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
-        planStatus: input.planStatus, planChecklist: input.planChecklist,
-        mt5Ticket: nextTicket,
-      }).where(and(eq(trades.id, current.id), eq(trades.userId, ctx.user.id)));
-      return { success: true };
+        if (input.clientMutationId) {
+          const existing = await db.select().from(trades).where(and(eq(trades.userId, ctx.user.id), eq(trades.accountId, input.accountId), eq(trades.clientMutationId, input.clientMutationId))).limit(1);
+          // Replay of a mutation that is already stored. The canonical row is
+          // returned (not just its id) so a browser holding an optimistic
+          // placeholder can adopt the real database identity, which is what a
+          // later edit or delete has to address.
+          if (existing[0]) return { id: existing[0].id, replayed: true, trade: toSafeTrade(existing[0]) };
+        }
+        if (input.mt5Ticket) {
+          const linked = await db.select({ id: mt5LivePositions.id }).from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, input.accountId), eq(mt5LivePositions.ticket, BigInt(input.mt5Ticket)), eq(mt5LivePositions.status, "CLOSED"))).limit(1);
+          if (!linked[0]) throw new Error("The selected MT5 ticket is not an unjournaled closed position for this account.");
+        }
+        const screenshot = resolveScreenshotForWrite(ctx.user.openId, input.accountId, input);
+        const inserted = await db.insert(trades).values({
+          userId: ctx.user.id, accountId: input.accountId, tradeDate: new Date(input.tradeDate), session: input.session,
+          direction: input.direction, result: input.result, level: input.level, timeframe: input.timeframe,
+          setupQuality: input.setupQuality, executionType: input.executionType, marketCondition: input.marketCondition,
+          biasAlignment: input.biasAlignment, confirmationType: input.confirmationType, slPlacement: input.slPlacement,
+          tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality, patienceScore: input.patienceScore,
+          risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null, pnl: input.pnl.toFixed(2),
+          notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
+          planStatus: input.planStatus, planChecklist: input.planChecklist,
+          // The trade row and its evidence are committed by this one write, so a
+          // screenshot can never be half-attached.
+          screenshotKey: screenshot.key ?? null, screenshotName: screenshot.name ?? null,
+          mt5Ticket: input.mt5Ticket ? BigInt(input.mt5Ticket) : null, clientMutationId: input.clientMutationId ?? null,
+        }).returning({ id: trades.id });
+        const id = inserted[0].id;
+        const created = (await db.select().from(trades).where(and(eq(trades.id, id), eq(trades.userId, ctx.user.id))).limit(1))[0];
+        logPersistenceEvent("trade.create.persisted", { stage: "trade.create", userId: ctx.user.id, accountId: input.accountId, mutationId: input.clientMutationId ?? null, tradeId: id });
+        return { id, replayed: false, trade: created ? toSafeTrade(created) : { id, hasScreenshot: Boolean(screenshot.key) } };
+      });
     }),
-    delete: protectedProcedure.input(z.object({ tradeId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
-      const current = await ownsTrade(ctx.user.id, input.tradeId);
-      const db = await dbOrThrow();
-      await db.delete(trades).where(and(eq(trades.id, current.id), eq(trades.userId, ctx.user.id)));
-      return { success: true };
+    update: protectedProcedure.input(tradeInput.extend({
+      // A locally-queued trade has no database id yet, so it carries a negative
+      // placeholder. `originMutationId` names the create it belongs to, which is
+      // how the target row is found instead of failing input validation forever.
+      tradeId: z.number().int(),
+      originMutationId: clientMutationIdInput,
+    })).mutation(async ({ ctx, input }) => {
+      return withPersistenceDiagnostics({ stage: "trade.update", userId: ctx.user.id, accountId: input.accountId, mutationId: input.clientMutationId, tradeId: input.tradeId }, async () => {
+        const current = await resolveOwnedTradeForMutation(ctx.user.id, input);
+        if (current.accountId !== input.accountId) throw new Error("A trade cannot be moved between journal accounts.");
+        const nextTicket = input.mt5Ticket ? BigInt(input.mt5Ticket) : current.mt5Ticket;
+        if (input.mt5Ticket && input.mt5Ticket !== current.mt5Ticket?.toString()) {
+          const db = await dbOrThrow();
+          const linked = await db.select({ id: mt5LivePositions.id }).from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, current.accountId), eq(mt5LivePositions.ticket, nextTicket), eq(mt5LivePositions.status, "CLOSED"))).limit(1);
+          if (!linked[0]) throw new Error("The selected MT5 ticket is not an unjournaled closed position for this account.");
+          const alreadyJournaled = await db.select({ id: trades.id }).from(trades).where(and(eq(trades.accountId, current.accountId), eq(trades.mt5Ticket, nextTicket))).limit(1);
+          if (alreadyJournaled[0] && alreadyJournaled[0].id !== current.id) throw new Error("That MT5 ticket is already linked to another journal trade.");
+        }
+        const screenshot = resolveScreenshotForWrite(ctx.user.openId, current.accountId, input);
+        const db = await dbOrThrow();
+        await db.update(trades).set({
+          tradeDate: new Date(input.tradeDate), session: input.session, direction: input.direction, result: input.result,
+          level: input.level, timeframe: input.timeframe, setupQuality: input.setupQuality, executionType: input.executionType,
+          marketCondition: input.marketCondition, biasAlignment: input.biasAlignment, confirmationType: input.confirmationType,
+          slPlacement: input.slPlacement, tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality,
+          patienceScore: input.patienceScore, risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null,
+          pnl: input.pnl.toFixed(2), notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
+          planStatus: input.planStatus, planChecklist: input.planChecklist,
+          mt5Ticket: nextTicket,
+          // Omitted entirely when the caller said nothing about the screenshot,
+          // so an ordinary field edit can never silently drop the evidence.
+          ...(screenshot.key === undefined ? {} : { screenshotKey: screenshot.key, screenshotName: screenshot.name }),
+        }).where(and(eq(trades.id, current.id), eq(trades.userId, ctx.user.id)));
+        // The replaced object is now unreachable. Removal is best-effort and can
+        // never fail the write that already succeeded (storageRemove swallows
+        // its own errors), but it is awaited so the swap is deterministic.
+        if (screenshot.key !== undefined && current.screenshotKey && current.screenshotKey !== screenshot.key) await storageRemove(current.screenshotKey);
+        const saved = (await db.select().from(trades).where(and(eq(trades.id, current.id), eq(trades.userId, ctx.user.id))).limit(1))[0];
+        return { success: true, trade: saved ? toSafeTrade(saved) : undefined, screenshotCleared: screenshot.key === null };
+      });
+    }),
+    delete: protectedProcedure.input(z.object({
+      tradeId: z.number().int(),
+      originMutationId: clientMutationIdInput,
+      clientMutationId: clientMutationIdInput,
+    })).mutation(async ({ ctx, input }) => {
+      return withPersistenceDiagnostics({ stage: "trade.delete", userId: ctx.user.id, mutationId: input.clientMutationId, tradeId: input.tradeId }, async () => {
+        const db = await dbOrThrow();
+        let found: { id: number; accountId: number; screenshotKey: string | null } | undefined;
+        if (Number.isInteger(input.tradeId) && input.tradeId > 0) {
+          found = (await db.select().from(trades).where(and(eq(trades.id, input.tradeId), eq(trades.userId, ctx.user.id))).limit(1))[0];
+        } else if (input.originMutationId) {
+          found = (await db.select().from(trades).where(and(eq(trades.userId, ctx.user.id), eq(trades.clientMutationId, input.originMutationId))).limit(1))[0];
+        }
+        if (!found) {
+          // Idempotent replay. A queued delete whose response was lost (or whose
+          // request timed out after the server committed) is retried, and the
+          // row can never come back — so reporting failure here would block the
+          // durable queue permanently. The response is identical for a row that
+          // was never this user's, so nothing about other accounts is revealed.
+          logPersistenceEvent("trade.delete.replayed", { stage: "trade.delete", userId: ctx.user.id, tradeId: input.tradeId > 0 ? input.tradeId : null, mutationId: input.clientMutationId ?? null });
+          return { success: true, deleted: false, replayed: true };
+        }
+        await db.delete(trades).where(and(eq(trades.id, found.id), eq(trades.userId, ctx.user.id)));
+        // Deleting a trade must not leave its evidence readable in storage. This
+        // is best-effort and cannot fail the delete (storageRemove swallows its
+        // own errors), but it is awaited so the cleanup is deterministic.
+        if (found.screenshotKey) await storageRemove(found.screenshotKey);
+        return { success: true, deleted: true, replayed: false };
+      });
     }),
     clearAll: protectedProcedure.input(accountIdInput.extend({ confirmed: z.literal(true) })).mutation(async ({ ctx, input }) => {
       await clearAccountJournalData(ctx.user.id, input.accountId);
       return { success: true };
     }),
-    uploadScreenshot: protectedProcedure.input(z.object({ tradeId: z.number().int().positive(), fileName: z.string().trim().min(1).max(255), mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]), base64: z.string().trim().min(40).max(7_000_000).regex(/^(?:data:image\/(?:jpeg|png|webp);base64,)?[A-Za-z0-9+/]+={0,2}$/, "Invalid base64 image payload") })).mutation(async ({ ctx, input }) => {
-      if (!(await consumeRateLimit("screenshot", ctx.user.id, 20, 60_000))) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Screenshot upload limit reached. Please try again shortly." });
-      const trade = await ownsTrade(ctx.user.id, input.tradeId);
-      const base64 = input.base64.includes(",") ? input.base64.split(",")[1] : input.base64;
-      const bytes = Buffer.from(base64, "base64");
-      if (!bytes.byteLength) throw new Error("Screenshot payload is empty.");
-      if (bytes.byteLength > 5 * 1024 * 1024) throw new Error("Screenshot must be 5MB or smaller.");
-      if (!hasImageSignature(bytes, input.mimeType)) throw new Error("Screenshot content does not match its declared image type.");
-      const extension = input.mimeType === "image/png" ? "png" : input.mimeType === "image/webp" ? "webp" : "jpg";
-      const stored = await storagePut(`gold-journal/${ctx.user.openId}/trades/${trade.id}-${nanoid()}.${extension}`, bytes, input.mimeType);
-      const db = await dbOrThrow();
-      await db.update(trades).set({ screenshotKey: stored.key, screenshotName: input.fileName }).where(and(eq(trades.id, trade.id), eq(trades.userId, ctx.user.id)));
-      return { url: stored.url };
+    uploadScreenshot: protectedProcedure.input(z.object({ tradeId: z.number().int().positive(), fileName: z.string().trim().min(1).max(255), mimeType: screenshotMimeInput, base64: screenshotBase64Input })).mutation(async ({ ctx, input }) => {
+      return withPersistenceDiagnostics({ stage: "trade.screenshot.upload", userId: ctx.user.id, tradeId: input.tradeId }, async () => {
+        if (!(await consumeRateLimit("screenshot", ctx.user.id, 20, 60_000))) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Screenshot upload limit reached. Please try again shortly." });
+        const trade = await ownsTrade(ctx.user.id, input.tradeId);
+        const bytes = decodeScreenshotBase64(input);
+        const key = `${screenshotPathPrefix(ctx.user.openId, trade.accountId)}${trade.id}/${nanoid()}.${screenshotExtension(input.mimeType)}`;
+        const stored = await storagePut(key, bytes, input.mimeType);
+        const db = await dbOrThrow();
+        await db.update(trades).set({ screenshotKey: stored.key, screenshotName: input.fileName }).where(and(eq(trades.id, trade.id), eq(trades.userId, ctx.user.id)));
+        // Replacing an image must not leave the previous object readable forever.
+        if (trade.screenshotKey && trade.screenshotKey !== stored.key) void storageRemove(trade.screenshotKey);
+        // The private object key stays server-side; the browser only ever
+        // receives the short-lived signed URL it may render.
+        return { url: stored.url };
+      });
+    }),
+    /**
+     * Uploads the screenshot binary BEFORE the trade row exists.
+     *
+     * This is what makes screenshot evidence durable. The browser uploads the
+     * bytes, receives the stable private object key, and then sends that key
+     * inside the trade create/update payload — so the row and its image are
+     * committed by a single database write. If that write fails, the queued
+     * local trade already holds the key and the object is already in storage,
+     * so the retry completes the pair instead of losing the picture.
+     *
+     * Keyed by `clientMutationId` (a draft folder) because there is no trade id
+     * yet; the path is still fully scoped to the authenticated identity and the
+     * authorized account.
+     */
+    uploadScreenshotDraft: protectedProcedure.input(z.object({
+      accountId: z.number().int().positive(),
+      clientMutationId: requiredClientMutationIdInput,
+      fileName: z.string().trim().min(1).max(255),
+      mimeType: screenshotMimeInput,
+      base64: screenshotBase64Input,
+    })).mutation(async ({ ctx, input }) => {
+      return withPersistenceDiagnostics({ stage: "trade.screenshot.upload", userId: ctx.user.id, accountId: input.accountId, mutationId: input.clientMutationId }, async () => {
+        if (!(await consumeRateLimit("screenshot", ctx.user.id, 20, 60_000))) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Screenshot upload limit reached. Please try again shortly." });
+        // Ownership is proven before anything is written to storage.
+        await getOwnedAccount(ctx.user.id, input.accountId);
+        const bytes = decodeScreenshotBase64(input);
+        const stored = await storagePutAt(screenshotObjectKey({
+          authUid: ctx.user.openId,
+          accountId: input.accountId,
+          tradeRef: input.clientMutationId,
+          extension: screenshotExtension(input.mimeType),
+          draft: true,
+        }), bytes, input.mimeType);
+        // `key` is what the trade write must carry and persist. `url` is only a
+        // preview for the open dialog and is never stored.
+        return { key: stored.key, name: input.fileName, url: stored.url };
+      });
     }),
   }),
   cash: router({

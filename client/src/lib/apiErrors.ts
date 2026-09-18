@@ -139,7 +139,12 @@ export function classifyApiError(error: unknown, context: { accountId?: number; 
   const message = facts.message;
   const tagged = apiErrorCategory(error);
   const status = facts.status;
-  const correlationId = (error as { correlationId?: string } | null | undefined)?.correlationId;
+  // A transport-level correlation id is attached by trpcFetch; a persistence
+  // failure instead carries the server's id in `data.correlationId`, and both
+  // must reach the user as the same "Reference: …" line.
+  const wireData = (error as { data?: { correlationId?: unknown } } | null | undefined)?.data;
+  const serverCorrelationId = typeof wireData?.correlationId === "string" ? wireData.correlationId : undefined;
+  const correlationId = (error as { correlationId?: string } | null | undefined)?.correlationId ?? serverCorrelationId;
   const pick = (category: ApiErrorCategory): ApiErrorFacts => ({ ...API_ERROR_COPY[category], category, detail: message, status, correlationId });
 
   if (tagged) return pick(tagged);

@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ClipboardCheck, ImagePlus, ListChecks, Plus, Settings, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -312,8 +312,126 @@ function PlanLinkSection({ form, patch, context }: { form: any; patch: (field: s
   </Section>;
 }
 
+/**
+ * Screenshot evidence inside the trade dialog.
+ *
+ * Three states must stay distinguishable, because each means something different
+ * to the save:
+ *   - nothing stored and nothing chosen  -> the trade keeps no image;
+ *   - an image is already stored         -> an ordinary field edit must leave it
+ *                                           completely untouched, and it is
+ *                                           restorable from private storage on
+ *                                           every reload;
+ *   - an explicit replace or remove      -> the same write that saves the trade
+ *                                           swaps or clears the evidence.
+ *
+ * A bare file picker could not express "remove", which is why the previous flow
+ * could neither replace nor delete an existing screenshot.
+ */
+function ScreenshotEvidence({ screenshot, setScreenshot, editing, removeScreenshot, setRemoveScreenshot, progress, uploading, fileRef }: any) {
+  const storedUrl = !removeScreenshot && editing?.hasScreenshot ? editing?.screenshotUrl : undefined;
+  const pick = (file: File | undefined) => {
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      toast.error("Use a JPG, PNG, or WEBP screenshot.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Screenshot must be 5MB or smaller.");
+      return;
+    }
+    setScreenshot(file);
+    setRemoveScreenshot(false);
+  };
+  return (
+    <Section title="Screenshot">
+      <input
+        ref={fileRef}
+        hidden
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        onChange={event => pick(event.target.files?.[0])}
+      />
+      {storedUrl ? (
+        <div className="upload-box evidence-existing">
+          <img
+            src={storedUrl}
+            alt={editing?.screenshotName ? `Stored screenshot ${editing.screenshotName}` : "Stored trade screenshot"}
+          />
+          <div>
+            <strong>{editing?.screenshotName || "Stored screenshot"}</strong>
+            <span>Saved with this trade and restored on every reload.</span>
+          </div>
+          <div className="evidence-actions">
+            <Button variant="outline" size="sm" type="button" onClick={() => fileRef.current?.click()}>
+              Replace
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              className="danger-button"
+              onClick={() => {
+                setScreenshot(undefined);
+                setRemoveScreenshot(true);
+              }}
+            >
+              Remove
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {removeScreenshot && editing?.hasScreenshot && (
+            <div className="upload-box evidence-removed">
+              <div>
+                <strong>Screenshot will be removed when you save.</strong>
+                <span>The stored image is deleted only after the update is accepted.</span>
+              </div>
+              <div className="evidence-actions">
+                <Button variant="outline" size="sm" type="button" onClick={() => setRemoveScreenshot(false)}>
+                  Keep it
+                </Button>
+              </div>
+            </div>
+          )}
+          <div className="upload-box" onClick={() => fileRef.current?.click()}>
+            <ImagePlus size={20} />
+            <div>
+              <strong>
+                {screenshot
+                  ? screenshot.name
+                  : editing?.hasScreenshot
+                    ? "Choose a replacement image"
+                    : "Drag & drop or click to upload chart"}
+              </strong>
+              <span>
+                {uploading
+                  ? "Uploading to private storage…"
+                  : "JPG, PNG or WEBP · 5MB maximum · stored before the trade is saved"}
+              </span>
+            </div>
+          </div>
+        </>
+      )}
+      {progress > 0 && (
+        <div className="upload-progress">
+          <i style={{ width: `${progress}%` }} />
+        </div>
+      )}
+    </Section>
+  );
+}
+
 export function TradeDialogWithCustomOptions({ open, setOpen, form, setForm, editing, onSave, pending, screenshot, setScreenshot, progress, plans, dayTrades, behaviorConfig }: any) {
   const fileRef = useRef<HTMLInputElement>(null);
+  // Removal intent belongs to the dialog, because the dialog is the surface that
+  // knows which image is currently stored and whether the user asked to drop it.
+  // It travels back with the save so only an explicit removal clears evidence.
+  const [removeStoredScreenshot, setRemoveStoredScreenshot] = useState(false);
+  useEffect(() => {
+    if (!open) setRemoveStoredScreenshot(false);
+  }, [editing?.id, open]);
   const patch = (field: string, value: string) => setForm({ ...form, [field]: value });
   const selectDirection = form.direction || "";
   const selectResult = form.result || "";
@@ -326,10 +444,10 @@ export function TradeDialogWithCustomOptions({ open, setOpen, form, setForm, edi
     <Section title="Execution"><Field label="Execution type"><CustomSelect category="Execution type" value={form.executionType} onChange={value => patch("executionType", value)} store={store} onManage={setManageCategory} /></Field><Field label="Market conditions"><CustomSelect multi category="Market condition" value={form.marketCondition} onChange={value => patch("marketCondition", value)} store={store} onManage={setManageCategory} /></Field><Field label="Direction vs bias"><CustomSelect category="Bias alignment" value={form.biasAlignment} onChange={value => patch("biasAlignment", value)} store={store} onManage={setManageCategory} /></Field><Field label="SL placement"><CustomSelect category="SL placement" value={form.slPlacement} onChange={value => patch("slPlacement", value)} store={store} onManage={setManageCategory} /></Field><Field label="TP placement"><CustomSelect category="TP placement" value={form.tpPlacement} onChange={value => patch("tpPlacement", value)} store={store} onManage={setManageCategory} /></Field><Field label="Patience score (1–5)"><Input type="number" min="1" max="5" value={form.patienceScore} onChange={event => patch("patienceScore", event.target.value)} /></Field><Field label="Mistake / rule-break tags" className="field-span-full"><MistakeTaxonomy value={form.mistake || ""} onChange={value => patch("mistake", value)} store={store} onManage={setManageCategory} /></Field><Field label="Hold quality"><CustomSelect category="Hold quality" value={form.holdQuality} onChange={value => patch("holdQuality", value)} store={store} onManage={setManageCategory} /></Field></Section>
     <Section title="Risk"><Field label="Planned risk $"><Input type="number" min="0" step="0.01" value={form.risk} onChange={event => patch("risk", event.target.value)} /></Field><Field label="Planned reward $"><Input type="number" min="0" step="0.01" value={form.reward} onChange={event => patch("reward", event.target.value)} /></Field><Field label="Actual P&amp;L $"><Input type="number" step="0.01" value={form.pnl} placeholder="Realized profit/loss" onChange={event => patch("pnl", event.target.value)} /></Field><div className="rr-live"><span>PLANNED R:R</span><strong className="data-text">{formatRr(form.risk, form.reward)}</strong></div><div className="rr-live"><span>ACTUAL R</span><strong className="data-text">{formatActualR(form.risk, form.pnl)}</strong></div></Section>
     <PlanLinkSection form={form} patch={patch} context={planContext} />
-    <Section title="Screenshot"><div className="upload-box" onClick={() => fileRef.current?.click()}><ImagePlus size={20} /><div><strong>{screenshot ? screenshot.name : "Drag & drop or click to upload chart"}</strong><span>JPG, PNG or WEBP · 5MB maximum</span></div><input ref={fileRef} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { const file = event.target.files?.[0]; if (!file) return; if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { toast.error("Use a JPG, PNG, or WEBP screenshot."); return; } if (file.size > 5 * 1024 * 1024) { toast.error("Screenshot must be 5MB or smaller."); return; } setScreenshot(file); }} /></div>{progress > 0 && <div className="upload-progress"><i style={{ width: `${progress}%` }} /></div>}</Section>
+    <ScreenshotEvidence screenshot={screenshot} setScreenshot={setScreenshot} editing={editing} removeScreenshot={removeStoredScreenshot} setRemoveScreenshot={setRemoveStoredScreenshot} progress={progress} uploading={pending && Boolean(screenshot)} fileRef={fileRef} />
     <Section title="Notes"><Field label="Trade notes" className="field-span-full"><Textarea value={form.notes} rows={4} placeholder="What happened, how you felt, lessons…" onChange={event => patch("notes", event.target.value)} /></Field></Section>
     <Section title="Emotions"><Field label="Before trade" className="field-span-full"><Textarea value={form.emotionBefore} placeholder="How were you feeling before entering? e.g. calm, focused, dar raha tha, nervous about news…" onChange={event => patch("emotionBefore", event.target.value)} /></Field><Field label="During trade" className="field-span-full"><Textarea value={form.emotionDuring} placeholder="What were you thinking while in the trade? e.g. confident in setup, wanted to exit early…" onChange={event => patch("emotionDuring", event.target.value)} /></Field><Field label="After trade" className="field-span-full"><Textarea value={form.emotionAfter} placeholder="How did you feel after closing? e.g. satisfied, frustrated, gussa aya, should have held longer…" onChange={event => patch("emotionAfter", event.target.value)} /></Field></Section>
-  </div><div className="dialog-actions"><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button disabled={pending} onClick={onSave}>{pending ? "Saving…" : editing ? "Save changes" : "Save trade"}</Button></div>
+  </div><div className="dialog-actions"><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button disabled={pending} onClick={() => onSave({ removeScreenshot: removeStoredScreenshot })}>{pending ? "Saving…" : editing ? "Save changes" : "Save trade"}</Button></div>
     {manageCategory ? (
       <Dialog open onOpenChange={next => { if (!next) setManageCategory(null); }}>
         <DialogContent className="option-manager-dialog"><DialogHeader><DialogTitle>Manage options</DialogTitle><DialogDescription>Rename, disable, or add options for this field. Changes apply to every trade form immediately.</DialogDescription></DialogHeader><TradeOptionManager variant="dialog" initialCategory={manageCategory} onClose={() => setManageCategory(null)} /></DialogContent>

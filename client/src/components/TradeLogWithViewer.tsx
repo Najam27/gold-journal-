@@ -219,13 +219,23 @@ function BaseTradeLogWithViewer({ stats, trades, allTrades, pagination, listLoad
                   <th scope="col">Actual P&amp;L</th><th scope="col">Actual R</th><th scope="col"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
-              <tbody>
-                {trades.map((trade: any, index: number) => {
+              <tbody>                  {trades.map((trade: any, index: number) => {
                   const result = String(trade.result || "OPEN");
                   const positive = toNumber(trade.pnl) >= 0;
+                  // A row the backend has not acknowledged yet. It is rendered
+                  // from LOCAL state and is labelled as such, never presented as
+                  // a stored trade.
+                  const pendingSync = trade.localPending === true;
                   return (
-                    <tr key={trade.id}>
-                      <td className="muted">{total - ((page - 1) * pageSize + index)}</td>
+                    <tr key={trade.id} className={pendingSync ? "row-pending-sync" : undefined}>
+                      <td className="muted">
+                        {total - ((page - 1) * pageSize + index)}
+                        {pendingSync && (
+                          <span className="sync-pending-badge" title="Saved on this device and still syncing to your account">
+                            PENDING SYNC
+                          </span>
+                        )}
+                      </td>
                       <td className="data-text">{formatDate(trade.tradeDate)}</td>
                       <td>{trade.session}</td>
                       <td><span className={`side-badge ${String(trade.direction || "").toLowerCase()}`}>{trade.direction}</span></td>
@@ -247,7 +257,7 @@ function BaseTradeLogWithViewer({ stats, trades, allTrades, pagination, listLoad
                           <button title="Download trade card PNG" aria-label={`Download trade card PNG from ${formatDate(trade.tradeDate)}`} disabled={exportingTradeId === trade.id} onClick={() => void exportTrade(trade, "download")}><ImageDown size={16} /></button>
                           <button title="Share trade card" aria-label={`Share trade card from ${formatDate(trade.tradeDate)}`} disabled={exportingTradeId === trade.id} onClick={() => void exportTrade(trade, "share")}><Share2 size={16} /></button>
                           <button title="Edit trade" aria-label={`Edit trade from ${formatDate(trade.tradeDate)}`} onClick={() => onEdit(trade)}><Settings2 size={16} /></button>
-                          <button title="Delete trade" aria-label={`Delete trade from ${formatDate(trade.tradeDate)}`} onClick={() => onDelete(trade.id)}><Trash2 size={16} /></button>
+                          <button title="Delete trade" aria-label={`Delete trade from ${formatDate(trade.tradeDate)}`} onClick={() => onDelete(trade)}><Trash2 size={16} /></button>
                         </div>
                       </td>
                     </tr>

@@ -7,7 +7,11 @@ function withoutInternalScope<T extends RecordWithInternalScope>(record: T, extr
 }
 
 export function toSafeTrade<T extends RecordWithInternalScope>(trade: T): T & { hasScreenshot: boolean } {
-  const copy = withoutInternalScope(trade, ["screenshotKey", "screenshotName", "mt5Ticket"]);
+  // The storage KEY stays server-side: it is an internal private path, and the
+  // browser is handed a freshly signed, short-lived URL instead (minted per read
+  // by trades.list). The original filename is not sensitive and is needed to
+  // label the attachment in the UI, so it travels with the trade.
+  const copy = withoutInternalScope(trade, ["screenshotKey", "mt5Ticket"]);
   return { ...copy, hasScreenshot: Boolean(trade.screenshotKey) };
 }
 

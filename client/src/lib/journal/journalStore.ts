@@ -178,3 +178,33 @@ export function applyMutationToJournal(journal: Record<string, unknown>, mutatio
   }
   return journal;
 }
+
+/**
+ * Replaces an optimistic trade with the canonical record the server returned.
+ *
+ * This is the step that closes the local-first loop. Until it runs, a brand new
+ * trade is only addressable by its negative placeholder id, which the backend
+ * cannot resolve — so an edit or delete recorded before this point had no way to
+ * reach the real row. The canonical server identity (a positive id, plus the
+ * server's own field values) now becomes authoritative, and the local "pending"
+ * marking is dropped because the write is confirmed.
+ *
+ * Every optimistic copy of the mutation and any stale duplicate of the canonical
+ * id are removed first, so a replayed create can never render the trade twice.
+ */
+export function reconcileCanonicalTrade(
+  journal: Record<string, unknown>,
+  clientMutationId: string,
+  trade: Record<string, unknown>
+): Record<string, unknown> {
+  const canonical: Record<string, unknown> = { ...trade, clientMutationId };
+  const canonicalId = Number(canonical.id);
+  const superseded = (row: Record<string, unknown> | null | undefined) => {
+    if (!row) return false;
+    if (row.clientMutationId === clientMutationId) return true;
+    return Number.isFinite(canonicalId) && canonicalId > 0 && Number(row.id) === canonicalId;
+  };
+  const list = (Array.isArray(journal.trades) ? (journal.trades as Record<string, unknown>[]) : []).filter(row => !superseded(row));
+  const goalList = (Array.isArray(journal.goalTrades) ? (journal.goalTrades as Record<string, unknown>[]) : []).filter(row => !superseded(row));
+  return { ...journal, trades: [canonical, ...list], goalTrades: [canonical, ...goalList] };
+}

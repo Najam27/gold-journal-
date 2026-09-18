@@ -41,13 +41,48 @@ describe("Gold Journal account switching", () => {
 
     // The client half of "old account data must never reach the new account UI":
     // React Query placeholder data and late responses still carry the previous
-    // account's activeAccount.id, so both the server payload and the local
-    // snapshot are ownership-checked before they reach `data`.
+    // account's activeAccount.id, so the server payload, the reconciled payload,
+    // and the durable local snapshot are all ownership-checked before `data`.
     expect(source).toMatch(
       /const journalPayload = payloadBelongsToAccount\(journalQuery\.data, accountId\)/
     );
     expect(source).toMatch(/const localSnapshot = payloadBelongsToAccount\(/);
-    expect(source).toMatch(/const data = journalPayload \?\? localSnapshot \?\? undefined;/);
+    expect(source).toMatch(/const reconciledPayload = payloadBelongsToAccount\(/);
+    expect(source).toMatch(/const data =\s*reconciledPayload \?\? journalPayload \?\? localSnapshot \?\? undefined;/);
+  });
+
+  it("renders the server payload reconciled with still-queued local edits, not the raw server payload", () => {
+    const source = readJournal();
+
+    // A trade the user just logged must not vanish from the dashboard, calendar,
+    // goal math, or the Trade Log the instant the next journal read lands and
+    // before the queue has drained. The reconciled payload is the server payload
+    // with the queued mutations overlaid, so server data stays the base and
+    // local intent is only ever layered on top of it.
+    expect(source).toContain("localJournal.reconciled");
+    expect(source).not.toMatch(/const data = journalPayload \?\? localSnapshot/);
+    // Pending (unacknowledged) trades are labelled in the table and queued
+    // deletes are hidden immediately, both driven by the queue itself.
+    expect(source).toContain("localJournal.pendingDeletedIds");
+    expect(source).toContain("localJournal.pendingTrades");
+    expect(source).toMatch(/const serverPageTrades = \(tradeListQuery\.data\?\.trades \?\? \[\]\)\.filter\(/);
+  });
+
+  it("writes, updates, and deletes trades through the durable queue and only reports success once the backend confirms", () => {
+    const source = readJournal();
+
+    expect(source).toMatch(/kind: editing \? "trade\.update" : "trade\.create"/);
+    expect(source).toMatch(/dispatch: async \(mutation: JournalMutation\) => \{[\s\S]*?canonicalTradeOutcome\(await createTrade\.mutateAsync\(payload\)\)/);
+    // A delete is a queued journal write like any other, so it survives a reload
+    // and is applied exactly once instead of being lost with one request.
+    expect(source).toMatch(/kind: "trade\.delete"/);
+    expect(source).not.toMatch(/await deleteTrade\.mutateAsync\(\{ tradeId: id \}\)/);
+    // The screenshot is uploaded to persistent storage FIRST and its stable key
+    // travels inside the trade payload, so the row and its evidence are one write.
+    expect(source).toMatch(/uploadScreenshotDraft\.mutateAsync\(\{/);
+    expect(source).toMatch(/evidence\.screenshotKey = uploaded\.key;/);
+    expect(source).toMatch(/evidence\.screenshotRemoved = true;/);
+    expect(source).not.toMatch(/Re-open it after sync to attach the screenshot/);
   });
 
   it("publishes every user-initiated switch through the shared account selection", () => {

@@ -58,10 +58,28 @@ import { useIsDrawerNav } from "@/hooks/useMobile";
 import { OFFLINE_CASH_REQUEST_EVENT } from "@/lib/offlineMutationQueue";
 import { useLocalJournal } from "@/lib/journal/useLocalJournal";
 import { JOURNAL_LOCAL_EVENT } from "@/lib/journal/journalStore";
+
+/** Only the canonical record matters when a queued write is acknowledged. */
+function canonicalTradeOutcome(result: unknown): JournalMutationOutcome {
+  const trade = (result as { trade?: Record<string, unknown> } | undefined)?.trade;
+  return trade ? { trade } : undefined;
+}
+
+/** Reads a selected File as a base64 data URL for the upload mutation. */
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("That image could not be read. Try selecting it again."));
+    reader.readAsDataURL(file);
+  });
+}
 import {
   isOnline,
+  newJournalMutationId,
   queuedJournalMutationCount,
   type JournalMutation,
+  type JournalMutationOutcome,
   type JournalSyncState,
 } from "@/lib/journal/journalSync";
 import { PlanExecutionEditor } from "@/components/PlanExecutionEditor";
@@ -596,7 +614,7 @@ export default function GoldJournal() {
   const createTrade = trpc.trades.create.useMutation();
   const updateTrade = trpc.trades.update.useMutation();
   const deleteTrade = trpc.trades.delete.useMutation();
-  const uploadScreenshot = trpc.trades.uploadScreenshot.useMutation();
+  const uploadScreenshotDraft = trpc.trades.uploadScreenshotDraft.useMutation();
   const clearAll = trpc.trades.clearAll.useMutation();
   const createCash = trpc.cash.create.useMutation();
   const createGoal = trpc.goals.create.useMutation();
@@ -617,18 +635,26 @@ export default function GoldJournal() {
     accountId,
     subject: authUserId,
     journal: journalQuery.data as Record<string, unknown> | undefined,
+    // Each branch reports the canonical record the backend stored. A queue item
+    // is removed only after this resolves, so "saved" always means "persisted",
+    // and the browser adopts the real trade id instead of a local placeholder.
     dispatch: async (mutation: JournalMutation) => {
       const payload = mutation.payload as any;
-      if (mutation.kind === "trade.create")
-        await createTrade.mutateAsync(payload);
-      else if (mutation.kind === "trade.update")
-        await updateTrade.mutateAsync(payload);
-      else if (mutation.kind === "trade.delete")
+      if (mutation.kind === "trade.create") return canonicalTradeOutcome(await createTrade.mutateAsync(payload));
+      if (mutation.kind === "trade.update") return canonicalTradeOutcome(await updateTrade.mutateAsync(payload));
+      if (mutation.kind === "trade.delete") {
         await deleteTrade.mutateAsync(payload);
-      else if (mutation.kind === "cash.create")
+        return undefined;
+      }
+      if (mutation.kind === "cash.create") {
         await createCash.mutateAsync(payload);
+        return undefined;
+      }
+      return undefined;
     },
     onSynced: () => {
+      // The backend confirmed canonical data, so every account-scoped read is
+      // refetched — dashboard, PnL, calendar, analysis and summaries included.
       void invalidateAccountScopedQueries(utils);
     },
   });
@@ -796,13 +822,24 @@ export default function GoldJournal() {
   const journalPayload = payloadBelongsToAccount(journalQuery.data, accountId)
     ? (journalQuery.data as any)
     : undefined;
+  // The reconciled payload IS the server payload with the still-queued local
+  // edits overlaid in queue order. Preferring the raw server payload would make
+  // a trade the user just logged vanish from the dashboard, calendar and goal
+  // math the instant the next journal read landed, until the sync caught up.
+  const reconciledPayload = payloadBelongsToAccount(
+    localJournal.reconciled,
+    accountId
+  )
+    ? (localJournal.reconciled as any)
+    : undefined;
   const localSnapshot = payloadBelongsToAccount(
     localJournal.localSnapshot,
     accountId
   )
     ? (localJournal.localSnapshot as any)
     : undefined;
-  const data = journalPayload ?? localSnapshot ?? undefined;
+  const data =
+    reconciledPayload ?? journalPayload ?? localSnapshot ?? undefined;
   // The account the UI acts on is always the one the user selected. A server
   // echo for a different id (a previous account kept alive by placeholder data)
   // must never win, because that is what silently reverted a switch. Both the
@@ -938,6 +975,7 @@ export default function GoldJournal() {
   // Account-scoped writes and manual refreshes still invalidate normally; only
   // the account SWITCH uses the cancel/drop transaction above.
   const refresh = () => refreshCurrentAccount(utils);
+
   // A switch ends as soon as the critical read for the new account settles, so
   // the secondary surfaces are enabled again by real data, not by a timer. The
   // failsafe only exists so a failed critical read cannot disable them forever.
@@ -1053,10 +1091,14 @@ export default function GoldJournal() {
       planChecklist: Array.isArray(trade.planChecklist) ? (trade.planChecklist as { id?: string; checked?: boolean }[]).filter(item => item?.checked && item.id).map(item => String(item.id)).join("|") : "",
       mt5Ticket: trade.mt5Ticket ? String(trade.mt5Ticket) : "",
     });
+    // The stored image is left completely untouched until the user either picks
+    // a replacement or explicitly removes it.
     setScreenshot(undefined);
     setTradeDialog(true);
   };
-  const submitTrade = async () => {
+  // The dialog reports an explicit "remove the stored screenshot" intent with the
+  // save, because only an explicit signal may clear stored evidence.
+  const submitTrade = async (options?: { removeScreenshot?: boolean }) => {
     if (!account) return;
     if (!tradeForm.direction || !tradeForm.result) {
       toast.error(
@@ -1107,74 +1149,101 @@ export default function GoldJournal() {
         : null,
       mt5Ticket: tradeForm.mt5Ticket || undefined,
     };
-    // A new trade with a screenshot while online is saved directly so the image
-    // attaches to a real record id in one step. Every other write is local-first:
-    // it is stored and shown immediately, then synchronized with retry.
-    const needsServerIdForScreenshot = Boolean(screenshot && !editing && isOnline);
-    if (authUserId && !needsServerIdForScreenshot) {
-      try {
-        await localJournal.queueMutation({
-          kind: editing ? "trade.update" : "trade.create",
-          payload: editing
-            ? { ...payload, tradeId: editing.id }
-            : { ...payload, accountId: account.id },
-        });
-        if (screenshot)
-          toast.warning(
-            "Trade saved locally. Re-open it after sync to attach the screenshot."
-          );
-        else
-          toast.success(
-            isOnline
-              ? "Trade saved locally and syncing now."
-              : "Trade saved locally. It will sync automatically when you are online."
-          );
-        setTradeDialog(false);
-        return;
-      } catch {
+    // ---- Evidence first, and transactionally ------------------------------
+    //
+    // The image is uploaded to private storage BEFORE anything is written, and
+    // the resulting stable object key travels INSIDE the trade payload, so the
+    // database row and its screenshot are committed by a single write. A trade
+    // can therefore never claim evidence it does not have, and a replaced or
+    // removed image is an explicit part of the same write.
+    //
+    // If the upload fails, the dialog stays open with the trade data intact and
+    // the user decides whether to retry or to save without the picture: the
+    // trade is never silently discarded, and it is never silently stripped of
+    // an image the user attached.
+    const evidence: {
+      screenshotKey?: string;
+      screenshotName?: string;
+      screenshotRemoved?: boolean;
+    } = {};
+    if (screenshot) {
+      if (!isOnline) {
         toast.error(
-          "This browser could not store the trade locally. Please retry."
+          "You are offline, so the screenshot cannot be uploaded yet. Save the trade and attach the image once you are back online."
         );
         return;
       }
-    }
-    try {
-      const result = editing
-        ? await updateTrade.mutateAsync({ ...payload, tradeId: editing.id })
-        : await createTrade.mutateAsync(payload);
-      const tradeId = editing?.id ?? ("id" in result ? result.id : undefined);
-      if (screenshot && tradeId) {
-        const fileData = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result));
-          reader.onerror = reject;
-          reader.readAsDataURL(screenshot);
+      try {
+        setUploadProgress(30);
+        const fileData = await readFileAsDataUrl(screenshot);
+        const uploaded = await uploadScreenshotDraft.mutateAsync({
+          accountId: account.id,
+          clientMutationId: newJournalMutationId(),
+          fileName: screenshot.name,
+          mimeType: screenshot.type as
+            | "image/jpeg"
+            | "image/png"
+            | "image/webp",
+          base64: fileData,
         });
-        setUploadProgress(50);
-        try {
-          await uploadScreenshot.mutateAsync({
-            tradeId,
-            fileName: screenshot.name,
-            mimeType: screenshot.type as
-              | "image/jpeg"
-              | "image/png"
-              | "image/webp",
-            base64: fileData,
-          });
-          setUploadProgress(100);
-        } catch {
-          toast.warning(
-            "Trade saved but screenshot upload failed. Re-upload from edit."
-          );
-        }
+        setUploadProgress(60);
+        evidence.screenshotKey = uploaded.key;
+        evidence.screenshotName = uploaded.name;
+      } catch (error: any) {
+        setUploadProgress(0);
+        toast.error(
+          error?.message ||
+            "The screenshot could not be uploaded, so the trade was not saved. Retry, or save without the image."
+        );
+        return;
       }
+    } else if (options?.removeScreenshot && editing) {
+      // Only an explicit removal clears stored evidence.
+      evidence.screenshotRemoved = true;
+    }
+
+    if (!authUserId) {
+      toast.error("Sign in before saving journal changes.");
+      return;
+    }
+
+    // A locally-queued trade still has a negative placeholder id. Naming the
+    // create it came from lets the backend resolve the real row, so an edit
+    // recorded in that window can never be lost and can never create a second
+    // trade.
+    const tradePayload: Record<string, unknown> = {
+      ...payload,
+      accountId: account.id,
+      ...evidence,
+    };
+    if (editing) {
+      tradePayload.tradeId = editing.id;
+      if (editing.clientMutationId)
+        tradePayload.originMutationId = editing.clientMutationId;
+    }
+
+    try {
+      await localJournal.queueMutation({
+        kind: editing ? "trade.update" : "trade.create",
+        payload: tradePayload,
+      });
+      setUploadProgress(100);
       toast.success(
-        editing ? "Trade updated." : "Trade saved and balance recalculated."
+        isOnline
+          ? editing
+            ? "Trade updated and syncing now."
+            : "Trade saved and syncing now."
+          : "Trade saved locally. It will sync automatically when you are online."
       );
       setTradeDialog(false);
-      refresh();
+      setScreenshot(undefined);
+      setUploadProgress(0);
     } catch (error: any) {
-      toast.error(error.message || "Trade could not be saved.");
+      setUploadProgress(0);
+      toast.error(
+        error?.message ||
+          "This browser could not store the trade locally. Please retry."
+      );
     }
   };
   const exportRows = trades.map((trade: any, index: number) => ({
@@ -1233,7 +1302,28 @@ export default function GoldJournal() {
       setInstallEvent(undefined);
     } else setInstallHelp(true);
   };
-  const pagedTrades = tradeListQuery.data?.trades ?? [];
+  // The Trade Log table is the canonical, paginated SERVER read. Two local
+  // overlays keep it honest without ever passing local state off as server
+  // state: trades saved in this tab that the backend has not acknowledged are
+  // shown (badged as pending), and rows this tab has queued a delete for are
+  // hidden immediately instead of lingering until a refetch.
+  const serverPageTrades = (tradeListQuery.data?.trades ?? []).filter(
+    (trade: any) => !localJournal.pendingDeletedIds.includes(Number(trade.id))
+  );
+  const pendingRowsForView = (
+    (localJournal.pendingTrades ?? []) as any[]
+  ).filter(trade => {
+    if (resultFilter !== "ALL" && trade.result !== resultFilter) return false;
+    const needle = debouncedSearch.trim().toLowerCase();
+    if (!needle) return true;
+    return [trade.session, trade.level, trade.notes].some(value =>
+      String(value ?? "").toLowerCase().includes(needle)
+    );
+  });
+  const pagedTrades =
+    tradePage === 1
+      ? [...pendingRowsForView, ...serverPageTrades]
+      : serverPageTrades;
   const authGate = getAuthGate(authStatus);
   // The splash and login screens already own a lazy gold Three.js hero
   // (GoldCanvas + its static CSS fallback), so they are not wrapped again here:
@@ -1430,16 +1520,41 @@ export default function GoldJournal() {
                 onNew={() => openNewTrade()}
                 onDuplicate={() => openNewTrade(trades[0])}
                 onEdit={openEdit}
-                onDelete={async (id: number) => {
+                onDelete={async (trade: any) => {
                   if (
                     !window.confirm(
                       "Delete this trade and remove its screenshot reference?"
                     )
                   )
                     return;
-                  await deleteTrade.mutateAsync({ tradeId: id });
-                  toast.success("Trade deleted.");
-                  refresh();
+                  const tradeId = Number(trade?.id);
+                  if (!account || !Number.isFinite(tradeId)) return;
+                  // Deletes travel through the durable queue like every other
+                  // journal write: the row disappears immediately, the delete is
+                  // applied exactly once on the server (a retried delete is
+                  // idempotent), and it survives a reload or an offline moment
+                  // instead of being lost with a single in-flight request.
+                  try {
+                    await localJournal.queueMutation({
+                      kind: "trade.delete",
+                      payload: {
+                        tradeId,
+                        accountId: account.id,
+                        ...(tradeId < 0 && trade?.clientMutationId
+                          ? { originMutationId: trade.clientMutationId }
+                          : {}),
+                      },
+                    });
+                    toast.success(
+                      isOnline
+                        ? "Trade deleted."
+                        : "Trade deleted locally. It will sync when you are online."
+                    );
+                  } catch {
+                    toast.error(
+                      "This browser could not store the delete. Please retry."
+                    );
+                  }
                 }}
                 onCash={setCashDialog}
                 onCsv={exportCsv}

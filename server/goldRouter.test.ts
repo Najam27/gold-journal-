@@ -9,6 +9,10 @@ const mocks = vi.hoisted(() => ({
   getOwnedAccount: vi.fn(),
   ownsTrade: vi.fn(),
   storagePut: vi.fn(),
+  storagePutAt: vi.fn(),
+  storageRemove: vi.fn(),
+  screenshotObjectKey: vi.fn((input: { tradeRef: string | number }) => `screenshot-owner/accounts/12/trades/${input.tradeRef}/generated.jpg`),
+  screenshotPathPrefix: vi.fn((authUid: string, accountId: number) => `${authUid}/accounts/${accountId}/trades/`),
   hasImageSignature: vi.fn(() => true),
   syncStoredMt5: vi.fn(),
   removeAccountAtomic: vi.fn(),
@@ -23,7 +27,17 @@ vi.mock("./goldDb", () => ({
   getOwnedAccount: mocks.getOwnedAccount,
   ownsTrade: mocks.ownsTrade,
 }));
-vi.mock("./storage", () => ({ storagePut: mocks.storagePut, hasImageSignature: mocks.hasImageSignature }));
+vi.mock("./storage", () => ({
+  storagePut: mocks.storagePut,
+  storagePutAt: mocks.storagePutAt,
+  storageRemove: mocks.storageRemove,
+  screenshotObjectKey: mocks.screenshotObjectKey,
+  screenshotPathPrefix: mocks.screenshotPathPrefix,
+  storageGetSignedUrl: vi.fn(),
+  assertOwnedScreenshotPath: vi.fn(),
+  isOwnedScreenshotPath: vi.fn(() => true),
+  hasImageSignature: mocks.hasImageSignature,
+}));
 vi.mock("./mt5Db", () => ({ getMt5History: vi.fn(), getMt5Workspace: vi.fn(), syncStoredMt5PositionsToTradeLog: mocks.syncStoredMt5 }));
 vi.mock("./atomicOperations", () => ({ removeAccountAtomic: mocks.removeAccountAtomic, clearAccountJournalDataAtomic: mocks.clearAccountJournalDataAtomic, recordGoalAlertsAtomic: mocks.recordGoalAlertsAtomic }));
 
@@ -124,8 +138,8 @@ describe("Gold Journal protected server workflows", () => {
 
   it("does not return the internal storage key after an owned screenshot upload", async () => {
     const where = vi.fn().mockResolvedValue(undefined);
-    mocks.ownsTrade.mockResolvedValue({ id: 11, userId: 7 });
-    mocks.storagePut.mockResolvedValue({ key: "gold-journal/7/trades/internal-key.jpg", url: "https://signed.example.test/screenshot" });
+    mocks.ownsTrade.mockResolvedValue({ id: 11, userId: 7, accountId: 12 });
+    mocks.storagePut.mockResolvedValue({ key: "journal-owner/accounts/12/trades/11/internal-key.jpg", url: "https://signed.example.test/screenshot" });
     mocks.getDb.mockResolvedValue({ update: () => ({ set: () => ({ where }) }) });
     const caller = goldRouter.createCaller({ user } as any);
 

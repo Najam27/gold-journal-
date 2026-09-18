@@ -131,7 +131,38 @@ async function recordAttempt(mutation: JournalMutation, error: unknown) {
   notifyJournalLocal();
 }
 
-export type FlushResult = { synced: number; pending: number; failed: number; state: JournalSyncState };
+/**
+ * What a dispatch reports back after the backend accepted the write.
+ *
+ * A create/update returns the canonical stored trade so the browser can replace
+ * its optimistic placeholder with the real database identity.
+ */
+export type JournalMutationOutcome = { trade?: Record<string, unknown>; tradeId?: number } | void;
+
+/**
+ * Thrown by a dispatcher when a queued item can never be applied — for example
+ * a change that targets a trade the server never saw.
+ *
+ * Such an item is discarded rather than retried forever: retrying something
+ * that cannot succeed kept the whole FIFO queue blocked behind it, so every
+ * later write for the account silently never reached the backend.
+ */
+export class JournalMutationDiscarded extends Error {
+  constructor(message = "This queued change can no longer be applied and was discarded.") {
+    super(message);
+    this.name = "JournalMutationDiscarded";
+  }
+}
+
+export type FlushResult = {
+  synced: number;
+  pending: number;
+  failed: number;
+  discarded: number;
+  state: JournalSyncState;
+  /** Canonical records the backend confirmed during this pass. */
+  confirmed: Array<{ mutationId: string; trade: Record<string, unknown> }>;
+};
 
 /**
  * Flushes queued journal edits in order.
@@ -139,12 +170,13 @@ export type FlushResult = { synced: number; pending: number; failed: number; sta
  * A failure stops the run so a later edit cannot overtake an earlier one, the
  * failed item stays queued with a backoff deadline, and local data is never
  * removed. The server's `clientMutationId` check makes replaying a
- * partially-applied item idempotent.
+ * partially-applied item idempotent. A queue item is only removed after the
+ * backend confirmed it — never on the strength of a local assumption.
  */
 export async function flushJournalMutations(input: {
   subject: string | null | undefined;
   accountId?: number;
-  dispatch: (mutation: JournalMutation) => Promise<void>;
+  dispatch: (mutation: JournalMutation) => Promise<JournalMutationOutcome>;
   now?: number;
   online?: boolean;
 }): Promise<FlushResult> {
@@ -152,19 +184,28 @@ export async function flushJournalMutations(input: {
   const online = input.online ?? isOnline();
   const subject = input.subject;
   const pending = await pendingJournalMutations(subject, input.accountId);
-  if (!pending.length) return { synced: 0, pending: 0, failed: 0, state: "synced" };
-  if (!online || !subject) return { synced: 0, pending: pending.length, failed: 0, state: "offline" };
+  const confirmed: Array<{ mutationId: string; trade: Record<string, unknown> }> = [];
+  if (!pending.length) return { synced: 0, pending: 0, failed: 0, discarded: 0, state: "synced", confirmed };
+  if (!online || !subject) return { synced: 0, pending: pending.length, failed: 0, discarded: 0, state: "offline", confirmed };
 
   notifyJournalLocal();
   let synced = 0;
   let failed = 0;
+  let discarded = 0;
   for (const mutation of pending) {
     if (mutation.nextAttemptAt > now) continue;
     try {
-      await input.dispatch(mutation);
+      const outcome = await input.dispatch(mutation);
+      if (outcome && outcome.trade) confirmed.push({ mutationId: mutation.id, trade: outcome.trade });
       await removeJournalMutation(mutation.id);
       synced += 1;
     } catch (error) {
+      if (error instanceof JournalMutationDiscarded) {
+        console.warn("[journal] discarded an unreplayable queued change", mutation.kind, mutation.id, error.message);
+        await removeJournalMutation(mutation.id);
+        discarded += 1;
+        continue;
+      }
       await recordAttempt(mutation, error);
       failed += 1;
       break;
@@ -172,7 +213,29 @@ export async function flushJournalMutations(input: {
   }
   const remaining = await pendingJournalMutations(subject, input.accountId);
   const state: JournalSyncState = remaining.length === 0 ? "synced" : failed ? "failed" : "pending";
-  return { synced, pending: remaining.length, failed, state };
+  return { synced, pending: remaining.length, failed, discarded, state, confirmed };
+}
+
+/**
+ * Folds an edit of a trade that has not reached the server yet into the queued
+ * create it belongs to.
+ *
+ * A locally-queued trade carries a negative placeholder id, so queueing the edit
+ * as a separate `trade.update` would address a row that does not exist — and can
+ * never exist. Merging keeps exactly one backend create per trade, carrying the
+ * user's final values. A delete of a still-queued create cancels it outright,
+ * which is signalled by returning `null`.
+ */
+export function foldTradeEditIntoPendingCreate(
+  create: JournalMutation,
+  edit: { kind: "trade.update" | "trade.delete"; payload: Record<string, unknown> }
+): JournalMutation | null {
+  if (edit.kind === "trade.delete") return null;
+  const fields: Record<string, unknown> = { ...edit.payload };
+  delete fields.tradeId;
+  delete fields.clientMutationId;
+  const createMutationId = typeof create.payload.clientMutationId === "string" ? create.payload.clientMutationId : create.id;
+  return { ...create, payload: { ...create.payload, ...fields, clientMutationId: createMutationId } };
 }
 
 /** Next moment at which some queued item becomes eligible for a retry. */
