@@ -251,6 +251,29 @@ describe("request planning at every journal size", () => {
     expect(huge.stats.estimatedInputTokens).toBeLessThanOrEqual(small.stats.estimatedInputTokens * 2);
   });
 
+  it("holds every journal size — 10, 50, 100, 500 and 1000 trades — inside one request", () => {
+    for (const size of [10, 50, 100, 500, 1_000]) {
+      const trades = journal(size);
+      const analysis = buildAnalysis(trades);
+      const plan = planAiRequest({
+        analysis,
+        trades: selectRepresentativeTrades(trades, 12),
+        model: "openai/gpt-oss-120b",
+        allowanceTokens: AI_TOKEN_POLICY.assumedTpmFloorTokens,
+      });
+      // One measured request at every size, never a growing payload.
+      expect(plan.mode).toBe("single");
+      expect(plan.stats.estimatedTotalTokens).toBeLessThanOrEqual(plan.policy.allowanceTokens);
+      // Complete statistics for the whole period regardless of size…
+      expect(plan.payload!.totals.closedTrades).toBe(analysis.overview.sample);
+      // …and still no raw notes, screenshot keys or database metadata.
+      const sent = serialized(plan.payload);
+      expect(sent).not.toContain("PRIVATE_NOTE");
+      expect(sent).not.toContain("shots/");
+      expect(sent.length).toBeLessThan(AI_TOKEN_POLICY.inputCeilingTokens * 4);
+    }
+  });
+
   it("still covers complete statistics on the tightest tier that can carry a request", () => {
     const trades = journal(1_000);
     const analysis = buildAnalysis(trades);
