@@ -81,7 +81,12 @@ import {
   analyzeJournal,
   type AiAnalysisOutcome,
 } from "@/lib/ai/aiService";
-import { uiStateForErrorCode, type AiUiState } from "@/lib/ai/aiTypes";
+import {
+  isModelError,
+  isRequestSizeError,
+  uiStateForErrorCode,
+  type AiUiState,
+} from "@/lib/ai/aiTypes";
 import { useAiSettings } from "@/lib/ai/useAiSettings";
 import type { AnalysisResult } from "@shared/analysisEngine";
 import { MissedTradesView } from "@/components/MissedTradesView";
@@ -2172,6 +2177,7 @@ function MentorView({ account }: any) {
   const saveAiReport = trpc.analysis.saveAiReport.useMutation();
   const [ai, setAi] = useState<AiAnalysisOutcome | null>(null);
   const [mentorUiState, setMentorUiState] = useState<AiUiState>("ready");
+  const [mentorStage, setMentorStage] = useState<string | null>(null);
   const mentorAbortRef = useRef<AbortController | null>(null);
   const pending = mentorUiState === "analyzing";
   const run = async () => {
@@ -2181,11 +2187,28 @@ function MentorView({ account }: any) {
     mentorAbortRef.current = controller;
     setAi(null);
     setMentorUiState("analyzing");
+    setMentorStage(null);
+    const mentorEvidence = behaviorEvidence.data as unknown as AnalysisResult & {
+      representativeTrades?: readonly any[];
+    };
     const outcome = await analyzeJournal({
-      analysis: behaviorEvidence.data as unknown as AnalysisResult,
+      analysis: mentorEvidence,
+      trades: mentorEvidence.representativeTrades,
+      feature: "mentor",
       signal: controller.signal,
       model: aiSettings.model ?? undefined,
+      onProgress: progress => {
+        if (controller.signal.aborted) return;
+        setMentorStage(
+          progress.phase === "chunk"
+            ? `Analyzing your journal in batches (${progress.index} of ${progress.total})…`
+            : progress.phase === "synthesis"
+              ? "Synthesizing the batch summaries…"
+              : "Preparing compact journal evidence…"
+        );
+      },
     });
+    setMentorStage(null);
     if (controller.signal.aborted) {
       setMentorUiState("cancelled");
       return;
@@ -2216,8 +2239,10 @@ function MentorView({ account }: any) {
           <span className="eyebrow">BEHAVIORAL INTELLIGENCE</span>
           <h2>AI Edge Analyst</h2>
           <p>
-            Interpretation runs from compact deterministic aggregates. No key,
-            JWT, screenshot, or raw journal note is sent from this browser.
+            Interpretation runs from compact deterministic aggregates plus a small
+            representative set of structured trade fields. No key, JWT, screenshot,
+            or raw journal note is sent from this browser, and every request is
+            measured against the model's token budget before it is sent.
           </p>
         </div>
       </section>
@@ -2315,8 +2340,9 @@ function MentorView({ account }: any) {
           <div className="analysis-ai-empty">
             <Bot size={20} />
             <p>
-              This browser is calling Groq directly. Nothing is sent to
-              Gold Journal servers, and you can cancel at any time.
+              {mentorStage ?? "Analyzing in your browser…"} This browser is
+              calling Groq directly, nothing is sent to Gold Journal servers, and
+              you can cancel at any time.
             </p>
           </div>
         )}
@@ -2331,11 +2357,57 @@ function MentorView({ account }: any) {
                   Retry
                 </Button>
               )}
+              {isModelError(ai.errorCode) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openJournalView("options")}
+                >
+                  Pick an available Groq model
+                </Button>
+              )}
+              {isRequestSizeError(ai.errorCode) && (
+                <p className="muted">
+                  This journal period holds more data than one AI request may
+                  carry. Narrow the date range and retry, or retry now and the app
+                  will re-plan the request in smaller batches.
+                </p>
+              )}
             </div>
           </div>
         )}
         {report && (
           <div className="analysis-ai-report">
+            {ai?.reducedAfterTooLarge && (
+              <p className="analysis-warning" role="status">
+                That journal period needed more tokens than one request may carry,
+                so the evidence was reduced to a representative set and the request
+                was re-sent. The statistics still cover every trade in the
+                selected period.
+              </p>
+            )}
+            {ai?.requestMode === "chunked" && (
+              <p className="analysis-warning" role="status">
+                This journal has more distinct contexts than one request can carry,
+                so the contexts were summarized in batches and then synthesized
+                into this report. The statistics still cover every trade.
+              </p>
+            )}
+            {ai?.requestStats && (
+              // Measured before the request was sent: sizes and counts only, never
+              // the key and never the journal contents.
+              <p className="muted" role="status">
+                Request measured against {ai.model}:{" "}
+                {ai.requestStats.inputCharacters.toLocaleString()} characters · ~
+                {ai.requestStats.estimatedInputTokens.toLocaleString()} input tokens
+                (prompt budget {ai.requestStats.inputTokenBudget.toLocaleString()}) ·{" "}
+                {ai.requestStats.outputTokenBudget.toLocaleString()} reserved output · ~
+                {ai.requestStats.estimatedTotalTokens.toLocaleString()} estimated total ·{" "}
+                {ai.requestStats.evidenceRows} evidence rows ·{" "}
+                {ai.requestStats.trades} representative trades of{" "}
+                {ai.requestStats.journalTrades.toLocaleString()}.
+              </p>
+            )}
             <div className="analysis-ai-summary">
               <span className="section-label">DIRECT, EVIDENCE-BOUND VERDICT</span>
               <p>{report.executiveSummary}</p>

@@ -12,6 +12,8 @@ import {
   setAiSettingsPersistence,
   subscribeAiSettings,
 } from "./aiStorage";
+import { AI_TOKEN_POLICY, getWorkingTokenAllowance, resetWorkingTokenAllowance } from "@shared/aiBudget";
+import { selectRepresentativeTrades } from "@shared/aiPayload";
 import { analyzeJournal, checkGroqConnection, clearAiCache, getAvailableGroqModels, isAiConfigured, resolveCompatibleModel, testAiConnection } from "./aiService";
 import { GROQ_CHAT_COMPLETIONS_URL, GROQ_MODELS_URL } from "./groqClient";
 import { isModelError, uiStateForErrorCode } from "./aiTypes";
@@ -47,8 +49,8 @@ function providerResponse(content: unknown, status = 200) {
   );
 }
 
-function modelsResponse(data: unknown[] = MODELS, status = 200) {
-  return new Response(JSON.stringify({ data }), { status, headers: { "Content-Type": "application/json" } });
+function modelsResponse(data: unknown[] = MODELS, status = 200, headers: Record<string, string> = {}) {
+  return new Response(JSON.stringify({ data }), { status, headers: { "Content-Type": "application/json", ...headers } });
 }
 
 /**
@@ -83,9 +85,42 @@ beforeEach(() => {
 
 afterEach(() => {
   resetAiSettingsPersistence();
+  resetWorkingTokenAllowance();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+
+/**
+ * A journal large enough that the payload builder has to choose what to send, so
+ * a request-size or rate-limit response exercises the real re-planning path
+ * rather than a payload that already fits.
+ */
+function journalRows(count: number) {
+  const sessions = ["London", "New York", "Asia"];
+  const setups = ["A", "B", "C", "D"];
+  return Array.from({ length: count }, (_, index) => ({
+      tradeDate: `2026-01-${String((index % 27) + 1).padStart(2, "0")}`,
+      result: index % 3 ? "WIN" : "LOSS",
+      pnl: index % 3 ? 40 + (index % 7) * 5 : -(20 + (index % 5) * 3),
+      risk: 20 + (index % 4) * 5,
+      session: sessions[index % sessions.length],
+      timeframe: index % 2 ? "M5" : "M15",
+      level: index % 3 ? "Support" : "Resistance",
+      setupQuality: setups[index % setups.length],
+      direction: index % 2 ? "SELL" : "BUY",
+      mistake: index % 11 === 0 ? "Revenge entry" : "",
+      notes: `PRIVATE_NOTE_${index}`,
+      screenshotKey: `shots/${index}.png`,
+    }));
+}
+
+/** The compact, AI-bound view of a large journal, exactly as the server sends it. */
+function largeJournal(count: number) {
+  const rows = journalRows(count);
+  return { analysis: buildAnalysis(rows), trades: selectRepresentativeTrades(rows, 12) };
+}
+
+const largeAnalysisForDedupe = largeJournal(600).analysis;
 
 describe("browser AI settings storage", () => {
   it("reports not configured until the user stores their own key", () => {
@@ -385,12 +420,13 @@ describe("browser analysis", () => {
     expect(postCalls()).toHaveLength(2);
   });
 
-  it("never retries more than once, and reports the provider error", async () => {
+  it("gives up after the bounded number of transient attempts, and reports the provider error", async () => {
     const { postCalls } = stubGroq(() => providerResponse({}, 503));
     const outcome = await analyzeJournal({ analysis });
     expect(outcome.available).toBe(false);
     expect(outcome.errorCode).toBe("provider_error");
-    expect(postCalls()).toHaveLength(2);
+    // Explicit and small: the initial attempt plus two retries, then a failure.
+    expect(postCalls()).toHaveLength(3);
   });
 
   it("surfaces a model rejected at generation time as a model error with no retry loop", async () => {
@@ -418,6 +454,117 @@ describe("browser analysis", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
     const outcome = await analyzeJournal({ analysis });
     expect(outcome.errorCode).toBe("network_error");
+  });
+});
+
+describe("Groq request size control", () => {
+  beforeEach(() => {
+    saveAiSettings({ apiKey: KEY, model: MODEL });
+  });
+
+  const tooLargeBody = (limit: number) =>
+    JSON.stringify({
+      error: {
+        code: "rate_limit_exceeded",
+        message: `Request too large for model \`openai/gpt-oss-120b\` in organization \`org_01kk2z7cakegntd5ss48khte3r\` service tier \`on_demand\` on tokens per minute (TPM): Limit ${limit}, Requested 12000, please reduce your message size and try again.`,
+        type: "tokens",
+      },
+    });
+
+  const tooLarge = (limit = 8_000) =>
+    new Response(tooLargeBody(limit), { status: 413, headers: { "Content-Type": "application/json" } });
+
+  it("bounds a thousand-trade request instead of sending the whole journal", async () => {
+    const { analysis, trades } = largeJournal(1_000);
+    const { postCalls } = stubGroq(() => providerResponse(signedReport()));
+    const outcome = await analyzeJournal({ analysis, trades });
+    expect(outcome.available).toBe(true);
+    expect(postCalls()).toHaveLength(1);
+    const body = JSON.parse(String(postCalls()[0][1]!.body));
+    // One measured request: prompt plus reserved output inside the model's own
+    // per-minute allowance, whatever the journal size.
+    expect(outcome.requestStats!.journalTrades).toBe(1_000);
+    expect(outcome.requestStats!.estimatedTotalTokens).toBeLessThanOrEqual(AI_TOKEN_POLICY.assumedTpmFloorTokens);
+    expect(body.max_completion_tokens).toBe(AI_TOKEN_POLICY.maxOutputTokens);
+    expect(String(postCalls()[0][1]!.body).length).toBeLessThan(16_000);
+    // Representative structured trades only — never raw notes or screenshots.
+    const sent = body.messages.map((message: { content: string }) => message.content).join("\n");
+    expect(sent).not.toContain("PRIVATE_NOTE");
+    expect(sent).not.toContain("shots/");
+    expect(sent).toContain('"trades"');
+    expect(outcome.requestStats!.trades).toBeGreaterThan(0);
+  });
+
+  it("rebuilds a smaller request once after a 413 and reports that it did", async () => {
+    const { analysis, trades } = largeJournal(800);
+    const { postCalls } = stubGroq(callIndex => (callIndex === 0 ? tooLarge() : providerResponse(signedReport())));
+    const outcome = await analyzeJournal({ analysis, trades });
+    expect(outcome.available).toBe(true);
+    expect(outcome.reducedAfterTooLarge).toBe(true);
+    // Exactly one retry: a 413 is never resent unchanged and never looped.
+    expect(postCalls()).toHaveLength(2);
+    const first = String(postCalls()[0][1]!.body);
+    const second = String(postCalls()[1][1]!.body);
+    expect(second.length).toBeLessThan(first.length);
+    // The learned allowance is now smaller, so the next request is sized to fit.
+    expect(getWorkingTokenAllowance()).toBeLessThan(AI_TOKEN_POLICY.assumedTpmFloorTokens);
+  });
+
+  it("adopts the tighter allowance Groq states in the 413 body instead of discounting the same fact twice", async () => {
+    const { analysis, trades } = largeJournal(800);
+    stubGroq(callIndex => (callIndex === 0 ? tooLarge(4_000) : providerResponse(signedReport())));
+    await analyzeJournal({ analysis, trades });
+    // 4000 stated (below the 8K assumption), adopted at face value: the headroom
+    // is the estimate margin every request is already sized with, so the reported
+    // number is not discounted a second time.
+    expect(getWorkingTokenAllowance()).toBe(4_000);
+  });
+
+  it("adopts the live rate-limit header so a roomier tier is not throttled by a guess", async () => {
+    const { analysis, trades } = largeJournal(300);
+    stubGroq(
+      () => providerResponse(signedReport()),
+      () => modelsResponse(MODELS, 200, { "x-ratelimit-limit-tokens": "70000" }),
+    );
+    await analyzeJournal({ analysis, trades });
+    expect(getWorkingTokenAllowance()).toBe(70_000);
+  });
+
+  it("fails a genuinely oversized request with a clear state instead of looping", async () => {
+    const { analysis, trades } = largeJournal(1_000);
+    const { postCalls } = stubGroq(() => tooLarge(8_000));
+    const outcome = await analyzeJournal({ analysis, trades });
+    expect(outcome.available).toBe(false);
+    expect(outcome.errorCode).toBe("request_too_large");
+    expect(postCalls().length).toBeLessThanOrEqual(2);
+    // Groq's internal organization id never reaches the user.
+    expect(outcome.message ?? "").not.toMatch(/org_/);
+    expect(outcome.message ?? "").toMatch(/batches|date range/i);
+  });
+
+  it("joins an identical in-flight request instead of spending the same tokens twice", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => { release = () => resolve(); });
+    const { postCalls } = stubGroq(async () => {
+      await gate;
+      return providerResponse(signedReport());
+    });
+    const first = analyzeJournal({ analysis: largeAnalysisForDedupe, feature: "analysis" });
+    const second = analyzeJournal({ analysis: largeAnalysisForDedupe, feature: "analysis" });
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    expect(a.available).toBe(true);
+    expect(b.available).toBe(true);
+    expect(postCalls()).toHaveLength(1);
+    // One of the two callers joined the other's request rather than starting one.
+    expect([a, b].filter(call => call.deduplicated).length).toBe(1);
+  });
+
+  it("keeps a different dataset a genuinely separate request", async () => {
+    const { postCalls } = stubGroq(() => providerResponse(signedReport()));
+    await analyzeJournal({ analysis });
+    await analyzeJournal({ analysis: largeJournal(120).analysis });
+    expect(postCalls()).toHaveLength(2);
   });
 });
 

@@ -19,6 +19,7 @@ export type AiErrorCode =
   | "model_unavailable"
   | "rate_limited"
   | "quota_exceeded"
+  | "request_too_large"
   | "network_error"
   | "timeout"
   | "cancelled"
@@ -75,6 +76,7 @@ export type AiUiState =
   | "model_unavailable"
   | "rate_limited"
   | "quota_exceeded"
+  | "request_too_large"
   | "network_error"
   | "provider_error"
   | "timeout"
@@ -93,6 +95,7 @@ export function uiStateForErrorCode(code: AiErrorCode | null | undefined): AiUiS
     case "model_unavailable": return "model_unavailable";
     case "rate_limited": return "rate_limited";
     case "quota_exceeded": return "quota_exceeded";
+    case "request_too_large": return "request_too_large";
     case "network_error": return "network_error";
     case "timeout": return "timeout";
     case "cancelled": return "cancelled";
@@ -121,4 +124,12 @@ export function uiStateForError(error: unknown): AiUiState {
  */
 export function isModelError(code: AiErrorCode | null | undefined): boolean {
   return code === "model_not_found" || code === "model_unsupported" || code === "model_unavailable";
+}
+
+/**
+ * True when the fix is a smaller request rather than a different key or model,
+ * so the UI offers "reduce the date range" instead of a pointless retry.
+ */
+export function isRequestSizeError(code: AiErrorCode | null | undefined): boolean {
+  return code === "request_too_large";
 }

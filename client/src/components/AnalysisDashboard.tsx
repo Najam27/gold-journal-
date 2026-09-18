@@ -15,7 +15,7 @@ import { formatMoney } from "@/lib/gold";
 import { openJournalView } from "@/lib/journalViewNavigation";
 import { trpc } from "@/lib/trpc";
 import { AI_UI_COPY, analyzeJournal, type AiAnalysisOutcome } from "@/lib/ai/aiService";
-import { isModelError, uiStateForErrorCode, type AiUiState } from "@/lib/ai/aiTypes";
+import { isModelError, isRequestSizeError, uiStateForErrorCode, type AiUiState } from "@/lib/ai/aiTypes";
 import { useAiSettings } from "@/lib/ai/useAiSettings";
 import type {
   AnalysisFilters,
@@ -279,10 +279,12 @@ export function AnalysisDashboard({ accountId }: Props) {
   const aiSettings = useAiSettings();
   const [aiOutcome, setAiOutcome] = useState<AiAnalysisOutcome | null>(null);
   const [aiUiState, setAiUiState] = useState<AiUiState>("ready");
+  const [aiStage, setAiStage] = useState<string | null>(null);
   const aiRunning = aiUiState === "analyzing";
   const aiAbortRef = useRef<AbortController | null>(null);
   const saveAiReport = trpc.analysis.saveAiReport.useMutation();
   const analysis = query.data as AnalysisResult | undefined;
+  const representativeTrades = (query.data as { representativeTrades?: readonly any[] } | undefined)?.representativeTrades;
   const comparisonQuery = trpc.analysis.compare.useQuery(
     {
       accountId: accountId ?? 0,
@@ -325,11 +327,25 @@ export function AnalysisDashboard({ accountId }: Props) {
     aiAbortRef.current = controller;
     setAiOutcome(null);
     setAiUiState("analyzing");
+    setAiStage(null);
     const outcome = await analyzeJournal({
       analysis,
+      trades: representativeTrades,
+      feature: "analysis",
       signal: controller.signal,
       model: aiSettings.model ?? undefined,
+      onProgress: progress => {
+        if (controller.signal.aborted) return;
+        setAiStage(
+          progress.phase === "chunk"
+            ? `Analyzing your journal in batches (${progress.index} of ${progress.total})…`
+            : progress.phase === "synthesis"
+              ? "Synthesizing the batch summaries…"
+              : "Preparing compact journal evidence…"
+        );
+      },
     });
+    setAiStage(null);
     if (controller.signal.aborted) {
       setAiUiState("cancelled");
       return;
@@ -353,6 +369,7 @@ export function AnalysisDashboard({ accountId }: Props) {
   };
   const cancelAi = () => {
     aiAbortRef.current?.abort();
+    setAiStage(null);
     setAiUiState("cancelled");
   };
   if (!accountId)
@@ -848,9 +865,11 @@ export function AnalysisDashboard({ accountId }: Props) {
           <Bot size={18} />
         </div>
         <p>
-          AI receives aggregated metrics only. It does not receive credentials,
-          JWTs, screenshots, or raw journal notes, and it cannot produce market
-          signals.
+          AI receives complete aggregated metrics plus a small deterministic set
+          of structured trade fields. It never receives credentials, JWTs,
+          screenshots, or raw journal notes, and it cannot produce market
+          signals. Every request is measured against the model's token budget
+          before it is sent.
         </p>
         {!aiSettings.configured && (
           <div className="analysis-ai-empty">
@@ -894,8 +913,9 @@ export function AnalysisDashboard({ accountId }: Props) {
           <div className="analysis-ai-empty ai-loading" role="status">
             <Bot size={20} />
             <p>
-              This browser is calling Groq directly. Nothing is sent to
-              Gold Journal servers, and you can cancel at any time.
+              {aiStage ?? "Analyzing in your browser…"} This browser is calling
+              Groq directly, nothing is sent to Gold Journal servers, and you can
+              cancel at any time.
             </p>
           </div>
         )}
@@ -921,6 +941,12 @@ export function AnalysisDashboard({ accountId }: Props) {
                   Fix Groq key
                 </Button>
               )}
+              {isRequestSizeError(aiOutcome?.errorCode) && (
+                <p className="muted">
+                  Tip: narrow Start date / End date above, or retry — the app will
+                  re-plan the request in smaller batches.
+                </p>
+              )}
             </div>
           </div>
         )}
@@ -937,6 +963,36 @@ export function AnalysisDashboard({ accountId }: Props) {
                 Groq rejected the strict response schema for this model, so the
                 analysis was retried in JSON mode and validated locally before it
                 was accepted.
+              </p>
+            )}
+            {aiOutcome.reducedAfterTooLarge && (
+              <p className="analysis-warning" role="status">
+                That journal period needed more tokens than one request may carry,
+                so the evidence was reduced to a representative set and the request
+                was re-sent. The performance statistics still cover every trade in
+                the selected period.
+              </p>
+            )}
+            {aiOutcome.requestMode === "chunked" && (
+              <p className="analysis-warning" role="status">
+                This journal has more distinct contexts than one request can carry,
+                so the contexts were summarized in batches and then synthesized into
+                a single report. The statistics still cover every trade.
+              </p>
+            )}
+            {aiOutcome.requestStats && (
+              // Measured before the request was sent: sizes and counts only, never
+              // the key and never the journal contents.
+              <p className="muted" role="status">
+                Request measured against {aiOutcome.model}:{" "}
+                {aiOutcome.requestStats.inputCharacters.toLocaleString()} characters ·
+                ~{aiOutcome.requestStats.estimatedInputTokens.toLocaleString()} input tokens
+                (prompt budget {aiOutcome.requestStats.inputTokenBudget.toLocaleString()}) ·{" "}
+                {aiOutcome.requestStats.outputTokenBudget.toLocaleString()} reserved output ·{" "}
+                ~{aiOutcome.requestStats.estimatedTotalTokens.toLocaleString()} estimated total ·{" "}
+                {aiOutcome.requestStats.evidenceRows} evidence rows ·{" "}
+                {aiOutcome.requestStats.trades} representative trades of{" "}
+                {aiOutcome.requestStats.journalTrades.toLocaleString()}.
               </p>
             )}
             <AiReport result={{ ai: aiOutcome }} />

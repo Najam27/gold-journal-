@@ -1,12 +1,19 @@
 import { and, asc, eq, gt, gte, lt, or } from "./supabaseQuery";
 import { trades } from "../drizzle/schema";
 import { buildAnalysis, type AnalysisFilters, type AnalysisResult, type AnalysisTrade } from "@shared/analysisEngine";
+import { selectRepresentativeTrades, type CompactTrade } from "@shared/aiPayload";
 import { getDb } from "./db";
 import { getOwnedAccount } from "./goldDb";
 import { pktDateToTimestamp } from "@shared/pktDate";
 
 const ANALYSIS_PAGE_SIZE = 1_000;
 const ANALYSIS_MAX_TRADES = 10_000;
+/**
+ * Deterministically selected structured trades handed to the AI payload builder.
+ * Free-text notes are excluded here, so raw journal text never leaves the server
+ * for an AI request.
+ */
+export const ANALYSIS_REPRESENTATIVE_TRADES = 12;
 
 const analysisSelection = {
   id: trades.id,
@@ -49,7 +56,18 @@ function analysisWhere(userId: number, accountId: number, filters: AnalysisFilte
   return and(...parts);
 }
 
-export async function getAccountAnalysis(userId: number, accountId: number, filters: AnalysisFilters = {}): Promise<AnalysisResult & { truncated: boolean; sourceTradeCount: number }> {
+export type AccountAnalysisResult = AnalysisResult & {
+  truncated: boolean;
+  sourceTradeCount: number;
+  /**
+   * A deterministic, bounded subset of structured trade fields for the AI
+   * payload. The aggregates above always cover every trade; this is the
+   * representative detail that fits inside a provider token budget.
+   */
+  representativeTrades: CompactTrade[];
+};
+
+export async function getAccountAnalysis(userId: number, accountId: number, filters: AnalysisFilters = {}): Promise<AccountAnalysisResult> {
   await getOwnedAccount(userId, accountId);
   const db = await requireDb();
   const rows: AnalysisTrade[] = [];
@@ -69,7 +87,7 @@ export async function getAccountAnalysis(userId: number, accountId: number, filt
   }
   if (rows.length >= ANALYSIS_MAX_TRADES) truncated = true;
   const analysis = buildAnalysis(rows, filters);
-  return { ...analysis, truncated, sourceTradeCount: rows.length };
+  return { ...analysis, truncated, sourceTradeCount: rows.length, representativeTrades: selectRepresentativeTrades(rows, ANALYSIS_REPRESENTATIVE_TRADES) };
 }
 
 export const analysisLimits = { pageSize: ANALYSIS_PAGE_SIZE, maxTrades: ANALYSIS_MAX_TRADES } as const;

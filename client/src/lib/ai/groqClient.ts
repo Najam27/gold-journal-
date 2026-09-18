@@ -11,21 +11,27 @@
  * every AI feature shares.
  */
 import { isStrictSchemaModel, normalizeGroqModelId, rankGroqModels, supportsReasoningEffort } from "@shared/aiCore";
+import { observeReportedTokenAllowance, parseAllowanceHeader, parseReportedAllowanceTokens } from "@shared/aiBudget";
 import { AiError } from "./aiTypes";
 
 export const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 export const GROQ_MODELS_URL = `${GROQ_BASE_URL}/models`;
 export const GROQ_CHAT_COMPLETIONS_URL = `${GROQ_BASE_URL}/chat/completions`;
 
-/** Anything that looks like a provider credential must never reach an error string. */
+/**
+ * Anything that looks like a credential or an internal account identifier must
+ * never reach an error string. Groq's 413 body names the organization and the
+ * service tier, neither of which belongs in a user-facing message.
+ */
 const KEY_LIKE = /(?:gsk_|sk-|AIza)[A-Za-z0-9_-]{8,}/g;
+const ORG_LIKE = /org_[A-Za-z0-9]{6,}/g;
 
 /**
  * Credential-free, human-useful excerpt of Groq's own error text. Without it a
  * 400 is undiagnosable; with it the user sees Groq's actual complaint.
  */
 function sanitizeProviderMessage(message: string): string {
-  return message.replace(KEY_LIKE, "[redacted]").replace(/\s+/g, " ").trim().slice(0, 180);
+  return message.replace(KEY_LIKE, "[redacted]").replace(ORG_LIKE, "[redacted]").replace(/\s+/g, " ").trim().slice(0, 180);
 }
 
 const KEY_HINT = /api.?key|unauthorized|authentication|invalid.*token|bearer/i;
@@ -39,7 +45,22 @@ const MODEL_MISSING_HINT = /model[_ ]?(?:not[_ ]?found|decommission|deprecat|not
 const MODEL_UNSUPPORTED_HINT = /not supported|unsupported|does not support|don't support|only supports|not a chat model|requires a chat model/i;
 const QUOTA_HINT = /quota|billing|spending limit|insufficient|credit|payment required|per day|daily limit|exceeded your current|upgrade/i;
 const SCHEMA_HINT = /schema|response_format|json_schema|additionalproperties|constrained|invalid json payload|failed to parse/i;
-const TOO_LARGE_HINT = /too large|reduce the length|context length|maximum context|token limit|too many tokens/i;
+const TOO_LARGE_HINT = /too large|reduce the length|reduce your message|context length|maximum context|token limit|too many tokens|tokens per minute/i;
+
+/**
+ * Groq returns the account's live per-minute token allowance on every response
+ * (`x-ratelimit-limit-tokens`, documented as always present and always TPM).
+ * Reading it turns the request budget from an assumption into the provider's own
+ * number, so the payload builder sizes against the real tier — and only plans
+ * multi-request chunking on a tier that can genuinely absorb it.
+ */
+function adoptGroqTokenAllowance(response: Response): void {
+  try {
+    observeReportedTokenAllowance(parseAllowanceHeader(response.headers?.get?.("x-ratelimit-limit-tokens") ?? null));
+  } catch {
+    // A missing or unreadable header must never break a request.
+  }
+}
 
 function isKeyRejection(status: number, providerMessage: string): boolean {
   if (status === 401) return true;
@@ -53,6 +74,14 @@ function isKeyRejection(status: number, providerMessage: string): boolean {
  */
 function classifyStatus(status: number, providerMessage = ""): AiError {
   const detail = sanitizeProviderMessage(providerMessage);
+  // A 413 always means "this request does not fit the allowance", whatever else
+  // the body also says. Groq pairs it with `rate_limit_exceeded` and a TPM
+  // explanation, so it must be classified before the 429/quota families, and it
+  // must never be confused with a transient rate limit: retrying it unchanged
+  // would fail identically every time.
+  if (status === 413 || (TOO_LARGE_HINT.test(detail) && /request too large|tokens per minute|\(tpm\)/i.test(detail))) {
+    return new AiError("request_too_large", "This journal period holds more data than one AI request may carry. Retry with a narrower date range, or let the app analyze it in smaller batches.", status);
+  }
   if (isKeyRejection(status, detail)) {
     return new AiError("invalid_key", "Groq rejected this API key. Check the key in AI settings.", status);
   }
@@ -134,11 +163,17 @@ async function providerErrorMessage(response: Response): Promise<string> {
   try {
     const body = (await response.json()) as { error?: { message?: unknown; code?: unknown; type?: unknown } | string } | null;
     const raw = body?.error;
-    if (typeof raw === "string") return raw.slice(0, 200);
-    const parts = [raw?.code, raw?.message]
-      .filter(part => typeof part === "string" && String(part).trim().length > 0)
-      .map(part => String(part).trim());
-    return parts.join(" · ").slice(0, 200);
+    const full = typeof raw === "string"
+      ? raw
+      : [raw?.code, raw?.message]
+          .filter(part => typeof part === "string" && String(part).trim().length > 0)
+          .map(part => String(part).trim())
+          .join(" · ");
+    // Learn the account's real per-minute allowance from Groq's own text before
+    // it is truncated to a display-safe excerpt: a 413 states "Limit N, Requested M"
+    // after the model and organization names, which can sit past the cut.
+    observeReportedTokenAllowance(parseReportedAllowanceTokens(full));
+    return full.slice(0, 200);
   } catch {
     return "";
   }
@@ -212,6 +247,7 @@ export async function listGroqModels(apiKey: string, options: { signal?: AbortSi
       headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
       signal: deadline.signal,
     });
+    adoptGroqTokenAllowance(response);
     if (!response.ok) throw classifyStatus(response.status, await providerErrorMessage(response));
     const body = (await response.json().catch(() => null)) as { data?: unknown; models?: unknown } | null;
     if (!body || typeof body !== "object") throw new AiError("malformed_response", "Groq returned an unreadable model list.");
@@ -260,6 +296,14 @@ export function toGroqJsonSchema(node: unknown): Record<string, unknown> {
     }
     if (key === "items") {
       out.items = toGroqJsonSchema(value);
+      continue;
+    }
+    // Reusable subschemas: normalise each definition the same way, and leave the
+    // `$ref` pointer itself untouched.
+    if (key === "$defs" && value && typeof value === "object" && !Array.isArray(value)) {
+      const defs: Record<string, unknown> = {};
+      for (const [name, child] of Object.entries(value as Record<string, unknown>)) defs[name] = toGroqJsonSchema(child);
+      out.$defs = defs;
       continue;
     }
     out[key] = value;
@@ -346,6 +390,7 @@ export async function requestGroqStructuredCompletion(request: StructuredRequest
 
   try {
     let response = await send(true, true);
+    adoptGroqTokenAllowance(response);
     let providerMessage = "";
     if (!response.ok) {
       providerMessage = await providerErrorMessage(response);
@@ -363,6 +408,7 @@ export async function requestGroqStructuredCompletion(request: StructuredRequest
       if (canDowngrade) {
         request.onSchemaFallback?.();
         response = await send(false, false);
+        adoptGroqTokenAllowance(response);
         providerMessage = response.ok ? "" : await providerErrorMessage(response);
       }
       if (!response.ok) throw classifyStatus(response.status, providerMessage);

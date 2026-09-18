@@ -112,6 +112,20 @@ describe("browser Groq client", () => {
     expect((converted.properties as Record<string, unknown>).score).toEqual({ type: ["number", "null"] });
   });
 
+  it("keeps reusable subschema references intact while normalising each definition", () => {
+    const converted = toGroqJsonSchema({
+      type: "object",
+      $defs: { item: { type: "object", properties: { id: { type: "string" } } } },
+      properties: { items: { type: "array", items: { $ref: "#/$defs/item" } } },
+    });
+    // The pointer must survive byte-for-byte: it is resolved by the provider.
+    expect((converted.properties as Record<string, unknown>).items).toEqual({ type: "array", items: { $ref: "#/$defs/item" } });
+    // …while the definition itself still gets the strict-mode treatment.
+    const definition = (converted.$defs as Record<string, Record<string, unknown>>).item;
+    expect(definition.additionalProperties).toBe(false);
+    expect(definition.required).toEqual(["id"]);
+  });
+
   it("strips a fenced JSON code block from the provider response", async () => {
     stubTransport(() => completionOk('```json\n{"ok":true}\n```'));
     await expect(requestGroqStructuredCompletion(request())).resolves.toEqual({ ok: true });
