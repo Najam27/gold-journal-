@@ -24,8 +24,8 @@
  * truncated: long journal entries wrap and continue onto following pages.
  */
 
-import { PRE_TRADE_GATE_ITEMS, TRADE_CLASSIFICATION_LABELS, TRADE_CLASSIFICATION_SUMMARY, classifyTradeProcess, type TradeClassification } from "@/lib/psychology";
-import type { TradeProcessAssessment } from "@shared/psychologyEngine";
+import { MISTAKE_BY_TAG, PRE_TRADE_GATE_ITEMS, TRADE_CLASSIFICATION_LABELS, TRADE_CLASSIFICATION_SUMMARY, classifyTradeProcess, detectBehavioralTags, type TradeClassification } from "@/lib/psychology";
+import { tagsForCategory, violationTags, type MistakeCategory, type TradeProcessAssessment } from "@shared/psychologyEngine";
 import { formatActualR, formatDate, formatMoney, formatRr, toNumber } from "@/lib/gold";
 
 /** Rendered in place of a field that exists but carries no recorded value. */
@@ -33,7 +33,16 @@ export const PDF_MISSING = "—";
 
 export type PdfTrade = Record<string, unknown> & { id?: number | string | null };
 
-export type TradePdfField = { label: string; value: string };
+export type TradePdfField = {
+  label: string;
+  value: string;
+  /**
+   * Layout hint: the value is expected to be long, so the compact report gives it
+   * the full page width instead of half of it. Purely presentational — the value
+   * itself is always exported in full.
+   */
+  wide?: boolean;
+};
 export type TradePdfSection = { id: string; title: string; fields: TradePdfField[] };
 export type TradePdfEvidence = { url: string | null; filename: string | null; hasScreenshot: boolean };
 
@@ -176,9 +185,34 @@ export function checklistText(value: unknown): string {
 
 /** `confirmed / total` checklist completion, or `—` when nothing was recorded. */
 export function checklistCompletion(value: unknown): string {
+  const ratio = checklistCompletionRatio(value);
+  if (ratio == null) return PDF_MISSING;
+  return `${Math.round(ratio.checked)} / ${ratio.total} checks confirmed`;
+}
+
+/**
+ * The checklist completion ratio in a machine-readable shape, so the report can
+ * average it without parsing the display string. `null` when nothing was saved.
+ */
+export function checklistCompletionRatio(value: unknown): { checked: number; total: number; percentage: number } | null {
   const recorded = normalizeChecklist(value);
-  if (!recorded.length) return PDF_MISSING;
-  return `${recorded.filter(item => item.checked).length} / ${PRE_TRADE_GATE_ITEMS.length} checks confirmed`;
+  if (!recorded.length) return null;
+  const total = PRE_TRADE_GATE_ITEMS.length;
+  const checked = recorded.filter(item => item.checked).length;
+  return { checked, total, percentage: total ? Math.round(checked / total * 1000) / 10 : 0 };
+}
+
+/**
+ * The tagged behavioural breakdown of a trade: rule breaks, then the analytical,
+ * execution, emotional, and environmental groupings the psychology engine already
+ * assigns. Nothing is invented — a tag the taxonomy does not recognise simply
+ * does not appear here, and stays visible in the raw tag field beside it.
+ */
+export function mistakeTags(trade: PdfTrade, options: { category?: MistakeCategory; violationsOnly?: boolean }): string {
+  const { tags } = detectBehavioralTags(trade.mistake);
+  const selected = options.violationsOnly ? violationTags(tags) : options.category ? tagsForCategory(tags, options.category) : tags;
+  if (!selected.length) return PDF_MISSING;
+  return selected.map(tag => MISTAKE_BY_TAG[tag]?.label ?? tag).join(" · ");
 }
 
 function processClassification(assessment: TradeProcessAssessment): string {
@@ -196,7 +230,7 @@ function processReasons(assessment: TradeProcessAssessment): string {
  * Field mapping
  * ------------------------------------------------------------------ */
 
-type FieldSpec = { label: string; keys: string[]; value: (trade: PdfTrade, context: ModelContext) => string };
+type FieldSpec = { label: string; keys: string[]; value: (trade: PdfTrade, context: ModelContext) => string; wide?: boolean };
 
 type ModelContext = { runningBalance?: number | null; process: TradeProcessAssessment };
 
@@ -235,7 +269,6 @@ export const TRADE_PDF_SECTIONS: Array<{ id: string; title: string; fields: Fiel
       { label: "TP placement", keys: ["tpPlacement"], value: trade => pdfTextValue(trade.tpPlacement) },
       { label: "Hold quality", keys: ["holdQuality"], value: trade => pdfTextValue(trade.holdQuality) },
       { label: "Patience score", keys: ["patienceScore"], value: trade => (isBlank(trade.patienceScore) ? PDF_MISSING : `${pdfSafeText(trade.patienceScore)}/5`) },
-      { label: "Mistake / rule-break tags", keys: ["mistake"], value: trade => pdfTextValue(trade.mistake) },
       { label: "Open time (MT5)", keys: ["openTime"], value: trade => formatPktDateTime(trade.openTime) },
       { label: "Close time (MT5)", keys: ["closeTime"], value: trade => formatPktDateTime(trade.closeTime) },
       { label: "Trade duration", keys: [], value: trade => duration(trade) },
@@ -261,11 +294,23 @@ export const TRADE_PDF_SECTIONS: Array<{ id: string; title: string; fields: Fiel
     fields: [
       { label: "Plan status", keys: ["planStatus"], value: trade => pdfTextValue(trade.planStatus) },
       { label: "Planned / unplanned", keys: ["planStatus"], value: trade => (isBlank(trade.planStatus) ? PDF_MISSING : PLAN_STATUS_LABELS[pdfSafeText(trade.planStatus).toUpperCase()] ?? pdfSafeText(trade.planStatus)) },
-      { label: "Pre-trade checklist", keys: ["planChecklist"], value: trade => checklistText(trade.planChecklist) },
+      { label: "Pre-trade checklist", keys: ["planChecklist"], value: trade => checklistText(trade.planChecklist), wide: true },
       { label: "Checklist completion", keys: ["planChecklist"], value: trade => checklistCompletion(trade.planChecklist) },
       { label: "Process classification", keys: [], value: (_trade, context) => processClassification(context.process) },
       { label: "Rule adherence", keys: [], value: (_trade, context) => (context.process.ruleAdherence == null ? PDF_MISSING : `${Math.round(context.process.ruleAdherence)}%`) },
-      { label: "Process review", keys: [], value: (_trade, context) => processReasons(context.process) },
+      { label: "Process review", keys: [], value: (_trade, context) => processReasons(context.process), wide: true },
+    ],
+  },
+  {
+    id: "F",
+    title: "Process & mistakes",
+    fields: [
+      { label: "Mistake / rule-break tags", keys: ["mistake"], value: trade => pdfTextValue(trade.mistake) },
+      { label: "Rule-break tags", keys: ["mistake"], value: trade => mistakeTags(trade, { violationsOnly: true }) },
+      { label: "Analytical mistakes", keys: ["mistake"], value: trade => mistakeTags(trade, { category: "ANALYTICAL" }) },
+      { label: "Execution mistakes", keys: ["mistake"], value: trade => mistakeTags(trade, { category: "EXECUTION" }) },
+      { label: "Emotional triggers", keys: ["mistake"], value: trade => mistakeTags(trade, { category: "EMOTIONAL" }) },
+      { label: "Environmental factors", keys: ["mistake"], value: trade => mistakeTags(trade, { category: "ENVIRONMENTAL" }) },
     ],
   },
 ];
@@ -321,7 +366,7 @@ export function buildTradePdfModel(trade: PdfTrade, options: TradePdfModelOption
   const sections: TradePdfSection[] = TRADE_PDF_SECTIONS.map(section => ({
     id: section.id,
     title: section.title,
-    fields: section.fields.map(field => ({ label: field.label, value: field.value(trade, context) })),
+    fields: section.fields.map(field => ({ label: field.label, value: field.value(trade, context), wide: field.wide })),
   }));
   const result = pdfSafeText(trade.result);
   return {

@@ -55,8 +55,8 @@ const labels = (model: ReturnType<typeof buildTradePdfModel>) => fields(model).m
 describe("canonical trade PDF model", () => {
   it("exports every persisted trade field of a complete trade", () => {
     const model = buildTradePdfModel(completeTrade, { runningBalance: 1275.5 });
-    expect(model.sections.map(section => section.id)).toEqual(["A", "B", "C", "D", "E"]);
-    expect(model.sections.map(section => section.title)).toEqual(["Trade details", "Strategy", "Execution", "Risk & performance", "Plan & discipline"]);
+    expect(model.sections.map(section => section.id)).toEqual(["A", "B", "C", "D", "E", "F"]);
+    expect(model.sections.map(section => section.title)).toEqual(["Trade details", "Strategy", "Execution", "Risk & performance", "Plan & discipline", "Process & mistakes"]);
     expect(value(model, "Trade ID")).toBe("27");
     expect(value(model, "Trade date")).toBe("12/08/2026");
     expect(value(model, "Symbol")).toBe(PDF_MISSING);
@@ -76,6 +76,11 @@ describe("canonical trade PDF model", () => {
     expect(value(model, "Hold quality")).toBe("Good");
     expect(value(model, "Patience score")).toBe("4/5");
     expect(value(model, "Mistake / rule-break tags")).toBe("Early entry|Oversize");
+    expect(value(model, "Rule-break tags")).toBe("Early entry · Oversize");
+    expect(value(model, "Execution mistakes")).toBe("Early entry · Oversize");
+    expect(value(model, "Analytical mistakes")).toBe(PDF_MISSING);
+    expect(value(model, "Emotional triggers")).toBe(PDF_MISSING);
+    expect(value(model, "Environmental factors")).toBe(PDF_MISSING);
     expect(value(model, "Planned risk")).toBe("$25.00");
     expect(value(model, "Planned reward")).toBe("$100.00");
     expect(value(model, "Planned R:R")).toBe("1 : 4.00");
@@ -147,6 +152,14 @@ describe("canonical trade PDF model", () => {
     expect(value(model, "Pre-trade checklist")).toContain("✗ Stop-loss defined — not confirmed");
     expect(value(model, "Checklist completion")).toBe("1 / 10 checks confirmed");
     expect(model.sections.flatMap(section => section.fields).length).toBeGreaterThan(0);
+  });
+
+  it("flags the values the compact report must give the full page width", () => {
+    const model = buildTradePdfModel(completeTrade);
+    const field = (label: string) => fields(model).find(entry => entry.label === label);
+    expect(field("Pre-trade checklist")?.wide).toBe(true);
+    expect(field("Process review")?.wide).toBe(true);
+    expect(field("Symbol")?.wide).toBeUndefined();
   });
 
   it("labels an unsynced local record and an empty checklist honestly", () => {

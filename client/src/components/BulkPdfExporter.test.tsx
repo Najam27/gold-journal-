@@ -31,6 +31,8 @@ vi.mock("jspdf", () => ({
     roundedRect() { return this; }
     addImage() { this.images += 1; return this; }
     getImageProperties() { return { width: 1200, height: 700 }; }
+    setPage() { return this; }
+    setFont() { return this; }
     text(value: string | string[]) { this.texts.push(...(Array.isArray(value) ? value : [value])); return this; }
     splitTextToSize(text: string) { return [text]; }
     save(filename: string) { this.savedAs = filename; }
@@ -73,7 +75,7 @@ describe("BulkPdfExporter", () => {
   it("opens from the trade-log action and retains active-account-only selections across a custom range", async () => {
     render(<BulkPdfExporter />);
     window.dispatchEvent(new Event("gold-journal:bulk-pdf"));
-    await waitFor(() => expect(screen.getByText("Complete trade-log PDF")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Trade-log PDF report")).toBeTruthy());
     expect(document.querySelector(".pdf-selection-summary")?.textContent).toContain("1 recent preview trade");
     fireEvent.click(screen.getByRole("button", { name: /Custom date range/i }));
     expect(screen.getByLabelText("From")).toBeTruthy();
@@ -85,8 +87,8 @@ describe("BulkPdfExporter", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(png, { status: 200, headers: { "content-type": "image/png" } })));
     render(<BulkPdfExporter />);
     window.dispatchEvent(new Event("gold-journal:bulk-pdf"));
-    await waitFor(() => expect(screen.getByRole("button", { name: /Download complete PDF/i })).toBeTruthy());
-    fireEvent.click(screen.getByRole("button", { name: /Download complete PDF/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Download PDF report/i })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /Download PDF report/i }));
     await waitFor(() => expect(pdfInstances.length).toBe(1));
 
     expect(fetchPage).toHaveBeenCalledWith({ accountId: 3, page: 1, pageSize: 50, search: "" });
