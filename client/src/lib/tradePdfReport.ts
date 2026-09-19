@@ -1,33 +1,33 @@
 /**
- * The PDF report writer.
+ * The PDF report renderer.
  *
- * Layout contract (the report is a fixed, deliberately constructed document, not
- * a flowing one):
- *   • A4 landscape, so a complete trade table fits across the page width;
- *   • exactly two pages per trade — a compact complete-data table and a
- *     screenshot evidence page;
- *   • a compact period analysis after the trades, whose numbers all come from
- *     `@shared/analysisEngine` (see `tradePdfAnalysis`);
+ * Design contract (a fixed, deliberately constructed document):
+ *   • A4 landscape with a neutral white page, dark text, one restrained accent,
+ *     hairline rules, and a controlled positive/negative colour pair — the
+ *     document has its own print palette, so neither the app theme (light or dark)
+ *     nor a dark-mode class can change how it reads or prints;
+ *   • two pages per trade: a complete trade-data page (header, KPI strip, then
+ *     sections 1-8 laid out in two columns) and a screenshot evidence page;
+ *   • four analysis pages after the trades — performance, process, psychology,
+ *     review — each answering one question;
  *   • a footer on every page with the account, the period, and `Page X / Y`.
  *
- * It never decides what a trade contains: every value it draws comes from
- * `buildTradePdfModel`. Long values are wrapped inside their cell and a value
- * that genuinely cannot fit continues onto a continuation page — nothing is
- * truncated to make the layout work. Font size shrinks through three readable
- * tiers (down to ~7pt, never smaller) before any overflow is allowed, so an
- * ordinary trade stays on one data page.
+ * It never decides what a trade contains: every value comes from
+ * `buildTradePdfModel`, and the analysis pages come from `buildPeriodAnalysis`
+ * (which is computed by `@shared/analysisEngine`). Long values are wrapped inside
+ * their block, and a value that genuinely cannot fit continues onto a labelled
+ * continuation page — nothing is truncated and no font is driven below ~7pt.
  *
  * A `PdfDoc` is passed in rather than a concrete jsPDF instance, so the layout,
  * pagination, and screenshot fitting rules are unit-testable in Node while the
  * application passes a real jsPDF document.
  */
 
-import { PDF_MISSING, buildTradePdfModel, type TradePdfField, type TradePdfModel } from "./tradePdfModel";
-import { buildPeriodAnalysis, type AnalysisBlock, type AnalysisTable, type PeriodAnalysis } from "./tradePdfAnalysis";
+import { PDF_MISSING, buildTradePdfModel, fieldTone, type TradePdfChecklistItem, type TradePdfField, type TradePdfModel, type TradePdfTone } from "./tradePdfModel";
+import { buildPeriodAnalysis, type AnalysisBlock, type AnalysisPage, type AnalysisTable, type PeriodAnalysis } from "./tradePdfAnalysis";
 import type { BulkPdfSummary } from "./bulkPdf";
 
 export type PdfImage = { dataUrl: string; format: string };
-
 export type PdfTextOptions = { align?: "left" | "center" | "right" };
 
 /** The slice of jsPDF this writer needs; a real jsPDF document satisfies it. */
@@ -37,10 +37,13 @@ export type PdfDoc = {
   getNumberOfPages(): number;
   setFillColor(red: number, green: number, blue: number): unknown;
   setTextColor(red: number, green: number, blue: number): unknown;
+  setDrawColor?(red: number, green: number, blue: number): unknown;
+  setLineWidth?(width: number): unknown;
   setFontSize(size: number): unknown;
   setFont?(name: string, style?: string): unknown;
   rect(x: number, y: number, width: number, height: number, style?: string): unknown;
   roundedRect?(x: number, y: number, width: number, height: number, radiusX: number, radiusY: number, style?: string): unknown;
+  line?(x1: number, y1: number, x2: number, y2: number): unknown;
   text(text: string | string[], x: number, y: number, options?: PdfTextOptions): unknown;
   splitTextToSize(text: string, maxWidth: number): string[];
   addImage(dataUrl: string, format: string, x: number, y: number, width: number, height: number): unknown;
@@ -48,25 +51,50 @@ export type PdfDoc = {
 };
 
 /** A4 landscape, in millimetres. */
-export const PDF_PAGE = { width: 297, height: 210, margin: 12, columns: 3, footerBaseline: 206 } as const;
+export const PDF_PAGE = { width: 297, height: 210, margin: 12, footerBaseline: 205 } as const;
 
+/**
+ * The document's own print palette: a neutral page, dark ink, one accent, and a
+ * single positive/negative pair used consistently for every money and R figure.
+ */
 export const PDF_COLORS = {
-  bg: [16, 20, 26],
-  gold: [233, 182, 75],
-  text: [235, 240, 245],
-  muted: [146, 159, 171],
-  dim: [110, 122, 134],
-  green: [110, 205, 150],
-  red: [226, 116, 110],
-  line: [44, 55, 68],
+  page: [255, 255, 255],
+  ink: [26, 32, 40],
+  inkSoft: [92, 102, 114],
+  inkFaint: [138, 147, 158],
+  accent: [156, 118, 34],
+  accentSoft: [250, 246, 237],
+  panel: [246, 247, 249],
+  panelLine: [222, 227, 233],
+  rule: [214, 220, 227],
+  positive: [21, 122, 74],
+  negative: [178, 48, 48],
+  neutral: [92, 102, 114],
+  warning: [170, 110, 16],
+  accentAlt: [47, 92, 158],
 } as const;
 
 export const SCREENSHOT_EMBED_FAILURE = "Screenshot evidence could not be embedded during export.";
 
 type Rgb = readonly [number, number, number];
 
+const TONE_COLORS: Record<TradePdfTone, Rgb> = {
+  neutral: PDF_COLORS.ink,
+  positive: PDF_COLORS.positive,
+  negative: PDF_COLORS.negative,
+  signed: PDF_COLORS.ink,
+  accent: PDF_COLORS.accent,
+  warning: PDF_COLORS.warning,
+};
+
+function toneColor(tone: TradePdfTone | undefined, value?: string): Rgb {
+  const resolved = tone === "signed" && value ? fieldTone({ tone, value }) : tone ?? "neutral";
+  if (resolved === "signed") return PDF_COLORS.ink;
+  return TONE_COLORS[resolved] ?? PDF_COLORS.ink;
+}
+
 /* ------------------------------------------------------------------ *
- * Typography tiers
+ * Typography
  * ------------------------------------------------------------------ */
 
 type Metrics = {
@@ -74,33 +102,45 @@ type Metrics = {
   line: number;
   label: number;
   labelLine: number;
-  colGap: number;
+  gap: number;
   rowGap: number;
   section: number;
   sectionAdvance: number;
   title: number;
 };
 
-/** Readable first, compact second: the first tier that fits the page wins. */
+/**
+ * Readable first, compact second: the first tier that fits the page wins.
+ * No tier drops a value or a label below 7pt — labels, headings, and body text all
+ * stay at or above the printable floor, and a trade that genuinely cannot be laid
+ * out at 7pt continues onto a labelled page instead of shrinking further.
+ */
 const TRADE_METRICS: Metrics[] = [
-  { body: 8, line: 3.8, label: 6.8, labelLine: 3.2, colGap: 6, rowGap: 1.5, section: 8.6, sectionAdvance: 5, title: 15 },
-  { body: 7.6, line: 3.5, label: 6.5, labelLine: 2.9, colGap: 5.5, rowGap: 1.2, section: 8, sectionAdvance: 4.6, title: 14 },
-  { body: 7.2, line: 3.2, label: 6.2, labelLine: 2.7, colGap: 5, rowGap: 1, section: 7.6, sectionAdvance: 4.3, title: 13 },
-  { body: 7, line: 3.1, label: 6, labelLine: 2.6, colGap: 4.5, rowGap: 0.9, section: 7.4, sectionAdvance: 4.1, title: 13 },
+  { body: 8, line: 3.7, label: 7.4, labelLine: 3, gap: 7, rowGap: 1.5, section: 8.4, sectionAdvance: 4.9, title: 17 },
+  { body: 7.6, line: 3.5, label: 7.2, labelLine: 2.9, gap: 6, rowGap: 1.2, section: 8, sectionAdvance: 4.6, title: 16 },
+  { body: 7.2, line: 3.3, label: 7.1, labelLine: 2.8, gap: 5, rowGap: 1, section: 7.6, sectionAdvance: 4.3, title: 15 },
+  { body: 7, line: 3.1, label: 7, labelLine: 2.7, gap: 4.5, rowGap: 0.9, section: 7.4, sectionAdvance: 4.1, title: 15 },
 ];
 
-const ANALYSIS_METRICS: Metrics = { body: 7.4, line: 3.2, label: 6.5, labelLine: 2.7, colGap: 6, rowGap: 0.9, section: 8.4, sectionAdvance: 4.7, title: 15 };
-const TABLE_FONT = { title: 7.6, header: 6.2, body: 7, line: 3.4, padding: 0.7 };
-/** Metrics per row in the analysis grid: four columns allow labelled inline rows. */
+const ANALYSIS_METRICS: Metrics = { body: 7.6, line: 3.4, label: 7.2, labelLine: 3, gap: 6, rowGap: 1.1, section: 8.4, sectionAdvance: 4.8, title: 16 };
+const TABLE_FONT = { title: 8, header: 7, body: 7.2, line: 3.4, padding: 0.7 };
+/**
+ * The smallest type the report's content uses: eyebrows, KPI labels, field
+ * labels, table headers, and body text all stay at or above this, so nothing a
+ * trader has to read is shrunk to fit. (The footer credit line sits one notch
+ * below, which is where a page credit belongs.)
+ */
+export const PDF_MIN_FONT = 7;
 const METRIC_COLUMNS = 4;
+const KPI_COLUMNS = 6;
 
-const HEADER_HEIGHT = 17;
-const SCREENSHOT_CAPTION = 6;
-/** Space the at-a-glance identity band of a trade data page occupies. */
-const TRADE_PAGE_BAND = 13.6;
+const HEADER_HEIGHT = 18;
+const SCREENSHOT_CAPTION = 5;
+/** Height of the trade page's KPI strip, including its gaps. */
+const KPI_STRIP_HEIGHT = 18.5;
 
 /* ------------------------------------------------------------------ *
- * Context
+ * Context and primitives
  * ------------------------------------------------------------------ */
 
 type Ctx = {
@@ -112,57 +152,75 @@ type Ctx = {
   bottom: number;
   contentWidth: number;
   metrics: Metrics;
-  header: { eyebrow: string; title: string; continued: string };
+  header: { eyebrow: string; title: string; continued: string; caption?: string };
   titleSize: number;
 };
 
 function setFill(doc: PdfDoc, color: Rgb) { doc.setFillColor(color[0], color[1], color[2]); }
 function setText(doc: PdfDoc, color: Rgb) { doc.setTextColor(color[0], color[1], color[2]); }
-function contextWidth() { return PDF_PAGE.width - PDF_PAGE.margin * 2; }
-function contentBottom() { return PDF_PAGE.height - PDF_PAGE.margin - 4; }
+function setDraw(doc: PdfDoc, color: Rgb) { doc.setDrawColor?.(color[0], color[1], color[2]); doc.setLineWidth?.(0.2); }
+function contentWidth() { return PDF_PAGE.width - PDF_PAGE.margin * 2; }
+function contentBottom() { return PDF_PAGE.height - PDF_PAGE.margin - 5; }
 
-function paintBackground(doc: PdfDoc) {
-  setFill(doc, PDF_COLORS.bg);
+function paintPage(doc: PdfDoc) {
+  setFill(doc, PDF_COLORS.page);
   doc.rect(0, 0, PDF_PAGE.width, PDF_PAGE.height, "F");
+}
+
+function hairline(ctx: Ctx, y: number, x: number, width: number, color: Rgb = PDF_COLORS.rule, height = 0.25) {
+  setFill(ctx.doc, color);
+  ctx.doc.rect(x, y, width, height, "F");
+}
+
+function panel(ctx: Ctx, x: number, y: number, width: number, height: number, fill: Rgb = PDF_COLORS.panel, border: Rgb = PDF_COLORS.panelLine) {
+  setFill(ctx.doc, fill);
+  if (ctx.doc.roundedRect) ctx.doc.roundedRect(x, y, width, height, 1.2, 1.2, "F");
+  else ctx.doc.rect(x, y, width, height, "F");
+  setDraw(ctx.doc, border);
+  if (ctx.doc.roundedRect) ctx.doc.roundedRect(x, y, width, height, 1.2, 1.2, "S");
+  else ctx.doc.rect(x, y, width, height, "S");
 }
 
 /** Draws the page header band and returns the y the body may start at. */
 function drawHeader(ctx: Ctx, title: string) {
   const doc = ctx.doc;
   const margin = PDF_PAGE.margin;
-  setText(doc, PDF_COLORS.gold);
-  doc.setFontSize(6.6);
+  setText(doc, PDF_COLORS.inkFaint);
+  doc.setFontSize(PDF_MIN_FONT);
   doc.text(ctx.header.eyebrow, margin, margin + 3.2);
   if (doc.setFont) doc.setFont("helvetica", "bold");
-  setText(doc, PDF_COLORS.text);
+  setText(doc, PDF_COLORS.ink);
   doc.setFontSize(ctx.titleSize);
-  doc.text(doc.splitTextToSize(title, contextWidth())[0] ?? "", margin, margin + 9.4);
+  doc.text(doc.splitTextToSize(title, contentWidth())[0] ?? "", margin, margin + 10.4);
   if (doc.setFont) doc.setFont("helvetica", "normal");
-  setFill(doc, PDF_COLORS.gold);
-  doc.rect(margin, margin + 11.2, 30, 0.6, "F");
+  if (ctx.header.caption) {
+    setText(doc, PDF_COLORS.inkSoft);
+    doc.setFontSize(7.2);
+    doc.text(doc.splitTextToSize(ctx.header.caption, contentWidth())[0] ?? "", margin, margin + 14.6);
+  }
+  hairline(ctx, margin + 15.6, margin, contentWidth(), PDF_COLORS.accent, 0.6);
   return HEADER_HEIGHT;
 }
 
-function startPage(ctx: Ctx, options: { eyebrow: string; title: string; continued: string; titleSize?: number; metrics?: Metrics }) {
+function startPage(ctx: Ctx, options: { eyebrow: string; title: string; continued: string; caption?: string; titleSize?: number; metrics?: Metrics }) {
   if (ctx.started) ctx.doc.addPage();
   else ctx.started = true;
-  ctx.header = { eyebrow: options.eyebrow, title: options.title, continued: options.continued };
-  ctx.titleSize = options.titleSize ?? 15;
+  ctx.header = { eyebrow: options.eyebrow, title: options.title, continued: options.continued, caption: options.caption };
+  ctx.titleSize = options.titleSize ?? 16;
   ctx.metrics = options.metrics ?? TRADE_METRICS[1];
-  paintBackground(ctx.doc);
+  paintPage(ctx.doc);
   ctx.bodyTop = PDF_PAGE.margin + drawHeader(ctx, options.title);
   ctx.bottom = contentBottom();
-  ctx.contentWidth = contextWidth();
+  ctx.contentWidth = contentWidth();
   ctx.y = ctx.bodyTop;
 }
 
-/** Adds a continuation page that repeats the current report context. */
-function nextPage(ctx: Ctx, continued = true) {
+function nextPage(ctx: Ctx) {
   startPage(ctx, {
     eyebrow: ctx.header.eyebrow,
-    title: continued ? ctx.header.continued : ctx.header.title,
+    title: ctx.header.continued,
     continued: ctx.header.continued,
-    titleSize: Math.min(ctx.titleSize, 14),
+    titleSize: Math.min(ctx.titleSize, 15),
     metrics: ctx.metrics,
   });
 }
@@ -172,13 +230,13 @@ function ensureSpace(ctx: Ctx, needed: number) {
 }
 
 /* ------------------------------------------------------------------ *
- * Small text utilities
+ * Text utilities
  * ------------------------------------------------------------------ */
 
 /**
  * Turns a value made of many short lines (a checklist or a tag list) into one
- * flowing line so the compact table keeps every item without spending a page on
- * it. Longer prose lines are left alone. No character is removed either way.
+ * flowing line so a compact block keeps every item without spending a page on it.
+ * Longer prose lines are left alone. No character is removed either way.
  */
 export function compactListValue(value: string): string {
   const lines = value.split("\n").map(line => line.trim()).filter(Boolean);
@@ -187,9 +245,8 @@ export function compactListValue(value: string): string {
 }
 
 function wrapText(doc: PdfDoc, value: string, maxWidth: number): string[] {
-  const paragraphs = value.split("\n");
   const lines: string[] = [];
-  for (const paragraph of paragraphs) {
+  for (const paragraph of value.split("\n")) {
     if (paragraph.trim() === "") { lines.push(""); continue; }
     const wrapped = doc.splitTextToSize(paragraph, maxWidth) as string[];
     if (wrapped.length) lines.push(...wrapped);
@@ -197,185 +254,251 @@ function wrapText(doc: PdfDoc, value: string, maxWidth: number): string[] {
   return lines.length ? lines : [PDF_MISSING];
 }
 
-/** Writes wrapped text starting at `x`, returning the y it finished at. */
-function writeWrapped(ctx: Ctx, value: string, options: { x?: number; maxWidth?: number; lineHeight?: number; color?: Rgb; fontSize?: number }) {
+/** Writes wrapped text from x, returning nothing but advancing ctx.y. */
+function writeWrapped(ctx: Ctx, value: string, options: { x?: number; maxWidth?: number; lineHeight?: number; color?: Rgb; fontSize?: number } = {}) {
   const x = options.x ?? PDF_PAGE.margin;
   const lineHeight = options.lineHeight ?? ctx.metrics.line;
   const maxWidth = options.maxWidth ?? ctx.contentWidth;
-  ctx.doc.setFontSize(options.fontSize ?? ctx.metrics.body);
-  setText(ctx.doc, options.color ?? PDF_COLORS.text);
+  const fontSize = options.fontSize ?? ctx.metrics.body;
+  const color = options.color ?? PDF_COLORS.ink;
   for (const line of wrapText(ctx.doc, value, maxWidth)) {
+    // ensureSpace may start a page, and a page header sets its own type size, so
+    // both the font and the colour are re-applied for every line.
     ensureSpace(ctx, lineHeight);
+    ctx.doc.setFontSize(fontSize);
+    setText(ctx.doc, color);
     ctx.doc.text(line, x, ctx.y);
     ctx.y += lineHeight;
   }
 }
 
-function sectionHeading(ctx: Ctx, title: string) {
+function sectionHeading(ctx: Ctx, title: string, x: number, width: number, options: { accent?: boolean } = {}) {
   const metrics = ctx.metrics;
   ensureSpace(ctx, metrics.sectionAdvance);
-  setText(ctx.doc, PDF_COLORS.gold);
   ctx.doc.setFontSize(metrics.section);
-  ctx.doc.text(title.toUpperCase(), PDF_PAGE.margin, ctx.y);
-  ctx.y += metrics.sectionAdvance - 2.4;
-  setFill(ctx.doc, PDF_COLORS.line);
-  ctx.doc.rect(PDF_PAGE.margin, ctx.y, ctx.contentWidth, 0.35, "F");
-  ctx.y += 2.4;
-}
-
-const MONEY_LABELS = ["P&L", "Risk", "Reward", "R:R", "Actual R", "Balance", "MFE", "MAE", "Expectancy", "Gross"];
-
-function valueColor(label: string, value: string): Rgb {
-  if (!MONEY_LABELS.some(token => label.includes(token))) return PDF_COLORS.text;
-  if (value === PDF_MISSING) return PDF_COLORS.muted;
-  if (value.trim().startsWith("-")) return PDF_COLORS.red;
-  if (label.includes("R:R")) return PDF_COLORS.text;
-  return PDF_COLORS.green;
+  setText(ctx.doc, options.accent ? PDF_COLORS.accent : PDF_COLORS.ink);
+  if (ctx.doc.setFont) ctx.doc.setFont("helvetica", "bold");
+  ctx.doc.text(title.toUpperCase(), x, ctx.y);
+  if (ctx.doc.setFont) ctx.doc.setFont("helvetica", "normal");
+  hairline(ctx, ctx.y + 1.4, x, width, options.accent ? PDF_COLORS.accent : PDF_COLORS.rule, options.accent ? 0.45 : 0.25);
+  ctx.y += metrics.sectionAdvance;
 }
 
 /* ------------------------------------------------------------------ *
- * Compact trade table layout
+ * Trade page blocks
  * ------------------------------------------------------------------ */
 
-type Cell = {
-  label: string;
-  value: string;
-  span: number;
-  lines: string[];
-  labelLines: string[];
-  stacked: boolean;
-  color: Rgb;
-};
+type Cell = { label: string; value: string; lines: string[]; labelLines: string[]; stacked: boolean; tone?: TradePdfTone };
+type CompiledBlock =
+  | { kind: "fields"; title: string; rows: Array<{ cells: Cell[]; height: number }>; height: number }
+  | { kind: "checklist"; title: string; columns: TradePdfChecklistItem[][]; height: number }
+  | { kind: "pairs"; title: string; rows: Array<{ label: string; value: string; tone?: TradePdfTone; height: number }>; height: number }
+  | { kind: "badge"; title: string; label: string; summary: string; tone: TradePdfTone; height: number }
+  | { kind: "note"; title: string; text: string; lines: string[]; height: number };
 
-type Row = { cells: Cell[]; height: number };
+function columnWidth(ctx: Ctx) { return (ctx.contentWidth - ctx.metrics.gap) / 2; }
 
-type LaidBlock =
-  | { kind: "section"; title: string; height: number }
-  | { kind: "rows"; rows: Row[]; height: number };
-
-function columnWidth(span: number) {
-  const gap = 6;
-  const single = (contextWidth() - gap * (PDF_PAGE.columns - 1)) / PDF_PAGE.columns;
-  return span >= PDF_PAGE.columns ? contextWidth() : single * span + gap * (span - 1);
-}
-
-/**
- * Lays out one field as a table cell. A value that does not fit a single column
- * (or is flagged long by the model) takes the full page width, so nothing has to
- * be truncated to keep the table three columns wide.
- */
-function buildCell(doc: PdfDoc, field: TradePdfField, metrics: Metrics, options: { stacked?: boolean; span?: number } = {}): Cell {
+function buildCell(ctx: Ctx, field: TradePdfField, width: number): Cell {
+  const metrics = ctx.metrics;
   const value = compactListValue(field.value);
-  const single = columnWidth(1);
-  const singleValue = single - single * 0.42 - 3;
-  const wide = field.wide || doc.splitTextToSize(value, singleValue).length > 2;
-  const spanForced = options.span ?? (options.stacked ? 1 : wide ? PDF_PAGE.columns : 1);
-  const width = columnWidth(spanForced);
-  const labelWidth = options.stacked ? width : width * 0.42;
-  doc.setFontSize(metrics.label);
-  const labelLines = doc.splitTextToSize(field.label.toUpperCase(), Math.max(8, labelWidth - 1)) as string[];
-  const canStack = Boolean(options.stacked) || labelLines.length > 1;
-  doc.setFontSize(metrics.body);
-  const valueWidth = canStack ? width : width - labelWidth - 2;
-  const lines = doc.splitTextToSize(value, Math.max(8, valueWidth)) as string[];
-  return {
-    label: field.label.toUpperCase(),
-    value,
-    span: canStack && !options.stacked ? PDF_PAGE.columns : spanForced,
-    lines: lines.length ? lines : [PDF_MISSING],
-    labelLines: labelLines.length ? labelLines : [field.label.toUpperCase()],
-    stacked: canStack,
-    color: valueColor(field.label, value),
-  };
+  const labelWidth = width * 0.42;
+  const valueWidth = width - labelWidth - 2;
+  ctx.doc.setFontSize(metrics.label);
+  const labelLines = ctx.doc.splitTextToSize(field.label.toUpperCase(), labelWidth - 0.5) as string[];
+  const stacked = labelLines.length > 1 || field.wide === true;
+  ctx.doc.setFontSize(metrics.body);
+  const lines = ctx.doc.splitTextToSize(value, stacked ? width : valueWidth) as string[];
+  return { label: field.label.toUpperCase(), value, lines: lines.length ? lines : [PDF_MISSING], labelLines: labelLines.length ? labelLines : [field.label.toUpperCase()], stacked, tone: field.tone };
 }
 
 function cellHeight(cell: Cell, metrics: Metrics) {
-  const labelHeight = cell.stacked ? cell.labelLines.length * metrics.labelLine : 0;
-  return labelHeight + cell.lines.length * metrics.line + metrics.rowGap;
+  const labelBlock = cell.stacked ? cell.labelLines.length * metrics.labelLine : 0;
+  const valueLines = cell.stacked ? cell.lines.length * metrics.line : Math.max(cell.lines.length * metrics.line, metrics.line);
+  return labelBlock + valueLines + metrics.rowGap;
 }
 
-/** Packs cells into full rows of the 3-column grid; a wide cell always ends its row. */
-function packRows(cells: Cell[], metrics: Metrics): Row[] {
-  const rows: Row[] = [];
+/** Two fields per row inside a column, with long values taking the whole width. */
+function compileFields(ctx: Ctx, title: string, fields: TradePdfField[], width: number): CompiledBlock {
+  const metrics = ctx.metrics;
+  const cells = fields.map(field => buildCell(ctx, field, width));
+  const rows: Array<{ cells: Cell[]; height: number }> = [];
   let current: Cell[] = [];
-  let used = 0;
   const flush = () => {
     if (!current.length) return;
     rows.push({ cells: current, height: Math.max(...current.map(cell => cellHeight(cell, metrics))) });
     current = [];
-    used = 0;
   };
   for (const cell of cells) {
-    const span = Math.min(cell.span, PDF_PAGE.columns);
-    if (span >= PDF_PAGE.columns) { flush(); rows.push({ cells: [cell], height: cellHeight(cell, metrics) }); continue; }
-    if (used + span > PDF_PAGE.columns) flush();
+    if (cell.stacked) { flush(); rows.push({ cells: [cell], height: cellHeight(cell, metrics) }); continue; }
+    if (current.length >= 2) flush();
     current.push(cell);
-    used += span;
   }
   flush();
-  return rows;
+  return { kind: "fields", title, rows, height: metrics.sectionAdvance + rows.reduce((sum, row) => sum + row.height, 0) };
 }
 
-/** Builds the whole trade data page for one metrics tier. */
-function layoutTradePage(doc: PdfDoc, model: TradePdfModel, metrics: Metrics): LaidBlock[] {
-  const blocks: LaidBlock[] = [];
-  const pushFields = (fields: TradePdfField[]) => {
-    const rows = packRows(fields.map(field => buildCell(doc, field, metrics)), metrics);
-
-    blocks.push({ kind: "rows", rows, height: rows.reduce((sum, row) => sum + row.height, 0) });
-  };
-  for (const section of model.sections) {
-    blocks.push({ kind: "section", title: section.title, height: metrics.sectionAdvance });
-    pushFields(section.fields);
-  }
-  if (model.additionalFields.length) {
-    blocks.push({ kind: "section", title: "Additional recorded fields", height: metrics.sectionAdvance });
-    pushFields(model.additionalFields);
-  }
-  // Psychology and the journal are laid out as stacked blocks: a three-column row
-  // for before/during/after, then the notes across the full width.
-  blocks.push({ kind: "section", title: "Psychology", height: metrics.sectionAdvance });
-  const psychology = [
-    { label: "Before trade", value: model.psychology.before },
-    { label: "During trade", value: model.psychology.during },
-    { label: "After trade", value: model.psychology.after },
-  ].map(entry => buildCell(doc, { label: entry.label, value: entry.value.trim() === "" ? PDF_MISSING : entry.value }, metrics, { stacked: true, span: 1 }));
-  blocks.push({ kind: "rows", rows: [{ cells: psychology, height: Math.max(...psychology.map(cell => cellHeight(cell, metrics))) }], height: Math.max(...psychology.map(cell => cellHeight(cell, metrics))) });
-
-  blocks.push({ kind: "section", title: "Journal notes", height: metrics.sectionAdvance });
-  const notes = buildCell(doc, { label: "Journal notes", value: model.journalNotes.trim() === "" ? PDF_MISSING : model.journalNotes }, metrics, { stacked: true, span: PDF_PAGE.columns });
-  blocks.push({ kind: "rows", rows: [{ cells: [notes], height: cellHeight(notes, metrics) }], height: cellHeight(notes, metrics) });
-  return blocks;
+/** The checklist as a two-column list of confirmed / not-confirmed items. */
+function compileChecklist(ctx: Ctx, items: TradePdfChecklistItem[]): CompiledBlock {
+  const metrics = ctx.metrics;
+  const half = Math.ceil(items.length / 2);
+  const columns = [items.slice(0, half), items.slice(half)];
+  const rowHeight = metrics.line + 0.4;
+  const height = metrics.sectionAdvance + Math.max(...columns.map(column => column.length)) * rowHeight + 1;
+  return { kind: "checklist", title: "Pre-trade checklist", columns, height };
 }
 
-function renderRow(ctx: Ctx, row: Row) {
+/**
+ * Category / recorded-items rows (section 6). Two pairs share a row, so the six
+ * categories stay compact while every recorded item is still shown in full.
+ */
+function compilePairs(ctx: Ctx, title: string, fields: TradePdfField[], width: number): CompiledBlock {
+  const metrics = ctx.metrics;
+  const pairWidth = (width - metrics.gap) / 2;
+  const rows = fields.map(field => {
+    const value = compactListValue(field.value);
+    ctx.doc.setFontSize(metrics.body);
+    const lines = ctx.doc.splitTextToSize(value, pairWidth * 0.6) as string[];
+    return { label: field.label, value, tone: field.tone, height: Math.max(1, lines.length) * metrics.line + metrics.rowGap };
+  });
+  const rowHeights: number[] = [];
+  for (let index = 0; index < rows.length; index += 2) rowHeights.push(Math.max(...rows.slice(index, index + 2).map(row => row.height)));
+  return { kind: "pairs", title, rows, height: metrics.sectionAdvance + rowHeights.reduce((sum, height) => sum + height, 0) + 1 };
+}
+
+/** The process verdict, shown as its own panel so P&L never implies process quality. */
+function compileBadge(ctx: Ctx, model: TradePdfModel): CompiledBlock {
+  const metrics = ctx.metrics;
+  ctx.doc.setFontSize(metrics.body);
+  const summaryLines = (ctx.doc.splitTextToSize(model.classification.summary, columnWidth(ctx) - 8) as string[]).slice(0, 2);
+  const height = metrics.sectionAdvance + 6.5 + summaryLines.length * metrics.line + 4;
+  return { kind: "badge", title: "Process classification", label: model.classification.label, summary: model.classification.summary, tone: model.classification.tone, height };
+}
+
+function compileNote(ctx: Ctx, text: string, width: number): CompiledBlock {
+  const metrics = ctx.metrics;
+  ctx.doc.setFontSize(metrics.body);
+  const value = text.trim() === "" ? PDF_MISSING : text;
+  const lines = ctx.doc.splitTextToSize(value, width - 6) as string[];
+  return { kind: "note", title: "Journal note", text: value, lines, height: metrics.sectionAdvance + Math.max(1, lines.length) * metrics.line + 6 };
+}
+
+function renderCompiledBlock(ctx: Ctx, block: CompiledBlock, x: number, width: number) {
   const metrics = ctx.metrics;
   const doc = ctx.doc;
-  const gap = metrics.colGap;
-  ensureSpace(ctx, row.height);
-  let x = PDF_PAGE.margin;
-  for (const cell of row.cells) {
-    const width = columnWidth(cell.span);
-    if (cell.stacked) {
-      doc.setFontSize(metrics.label);
-      setText(doc, PDF_COLORS.muted);
-      cell.labelLines.forEach((line, index) => doc.text(line, x, ctx.y + index * metrics.labelLine));
-      const valueTop = ctx.y + cell.labelLines.length * metrics.labelLine;
-      doc.setFontSize(metrics.body);
-      setText(doc, cell.color);
-      cell.lines.forEach((line, index) => doc.text(line, x, valueTop + index * metrics.line));
-    } else {
-      doc.setFontSize(metrics.label);
-      setText(doc, PDF_COLORS.muted);
-      doc.text(cell.labelLines[0] ?? cell.label, x, ctx.y);
-      const valueX = x + width * 0.42;
-      doc.setFontSize(metrics.body);
-      setText(doc, cell.color);
-      cell.lines.forEach((line, index) => doc.text(line, valueX, ctx.y + index * metrics.line));
+  ensureSpace(ctx, block.height);
+  const top = ctx.y;
+  sectionHeading(ctx, block.title, x, width);
+
+  if (block.kind === "fields") {
+    for (const row of block.rows) {
+      const cellWidth = row.cells.length === 1 ? width : (width - metrics.gap) / 2;
+      let cursor = x;
+      for (const cell of row.cells) {
+        doc.setFontSize(metrics.label);
+        setText(doc, PDF_COLORS.inkSoft);
+        cell.labelLines.forEach((line, index) => doc.text(line, cursor, ctx.y + index * metrics.labelLine));
+        const valueTop = cell.stacked ? ctx.y + cell.labelLines.length * metrics.labelLine : ctx.y;
+        doc.setFontSize(metrics.body);
+        setText(doc, toneColor(cell.tone, cell.value));
+        const valueX = cell.stacked ? cursor : cursor + cellWidth * 0.42;
+        cell.lines.forEach((line, index) => doc.text(line, valueX, valueTop + index * metrics.line));
+        cursor += cellWidth + metrics.gap;
+      }
+      ctx.y += row.height;
     }
-    x += width + gap;
+    return;
   }
-  ctx.y += row.height;
+
+  if (block.kind === "checklist") {
+    const columnWidthValue = (width - metrics.gap) / 2;
+    block.columns.forEach((items, columnIndex) => {
+      items.forEach((item, index) => {
+        const lineY = ctx.y + index * (metrics.line + 0.4);
+        const mark = item.confirmed ? "✓" : "✗";
+        doc.setFontSize(metrics.body);
+        setText(doc, item.confirmed ? PDF_COLORS.positive : item.recorded ? PDF_COLORS.negative : PDF_COLORS.inkFaint);
+        doc.text(mark, x + columnIndex * (columnWidthValue + metrics.gap), lineY);
+        setText(doc, item.confirmed ? PDF_COLORS.ink : PDF_COLORS.inkSoft);
+        doc.text(doc.splitTextToSize(item.label, columnWidthValue - 5)[0] ?? item.label, x + columnIndex * (columnWidthValue + metrics.gap) + 4, lineY);
+      });
+    });
+    ctx.y += Math.max(...block.columns.map(column => column.length)) * (metrics.line + 0.4) + 1;
+    return;
+  }
+
+  if (block.kind === "pairs") {
+    const pairWidth = (width - metrics.gap) / 2;
+    for (let index = 0; index < block.rows.length; index += 2) {
+      const pair = block.rows.slice(index, index + 2);
+      const rowHeight = Math.max(...pair.map(row => row.height));
+      pair.forEach((row, cellIndex) => {
+        const cellX = x + cellIndex * (pairWidth + metrics.gap);
+        doc.setFontSize(metrics.label);
+        setText(doc, PDF_COLORS.inkSoft);
+        doc.text(row.label.toUpperCase(), cellX, ctx.y);
+        doc.setFontSize(metrics.body);
+        setText(doc, toneColor(row.tone, row.value));
+        const wrapped = doc.splitTextToSize(compactListValue(row.value), pairWidth * 0.6) as string[];
+        (wrapped.length ? wrapped : [PDF_MISSING]).forEach((line, lineIndex) => doc.text(line, cellX + pairWidth * 0.4, ctx.y + lineIndex * metrics.line));
+      });
+      ctx.y += rowHeight;
+    }
+    ctx.y += 1;
+    return;
+  }
+
+  if (block.kind === "badge") {
+    const tone = block.tone;
+    const fill: Rgb = tone === "positive" ? [238, 247, 242] : tone === "negative" ? [252, 240, 240] : tone === "warning" ? [253, 247, 235] : tone === "accent" ? [242, 246, 253] : PDF_COLORS.panel;
+    const summaryLines = (doc.splitTextToSize(block.summary, width - 8) as string[]).slice(0, 2);
+    const boxHeight = 6.5 + summaryLines.length * metrics.line + 2.5;
+    panel(ctx, x, ctx.y, width, boxHeight, fill, PDF_COLORS.panelLine);
+    doc.setFontSize(10);
+    if (doc.setFont) doc.setFont("helvetica", "bold");
+    setText(doc, toneColor(tone));
+    doc.text(block.label.toUpperCase(), x + 4, ctx.y + 6.4);
+    if (doc.setFont) doc.setFont("helvetica", "normal");
+    doc.setFontSize(metrics.body);
+    setText(doc, PDF_COLORS.inkSoft);
+    summaryLines.forEach((line, index) => doc.text(line, x + 4, ctx.y + 6.4 + 3.8 + index * metrics.line));
+    ctx.y += boxHeight + 1.5;
+    return;
+  }
+
+  // note: a bordered text box so the journal entry reads as one passage.
+  const boxHeight = Math.max(1, block.lines.length) * metrics.line + 5;
+  panel(ctx, x, ctx.y, width, boxHeight, [252, 252, 251], PDF_COLORS.rule);
+  doc.setFontSize(metrics.body);
+  setText(doc, PDF_COLORS.ink);
+  block.lines.forEach((line, index) => doc.text(line, x + 3, ctx.y + 3.6 + index * metrics.line));
+  ctx.y += boxHeight + 1.5;
+}
+
+/* ------------------------------------------------------------------ *
+ * KPI strip
+ * ------------------------------------------------------------------ */
+
+function renderKpiStrip(ctx: Ctx, model: TradePdfModel) {
+  const kpis = model.kpis;
+  if (!kpis.length) return;
+  const height = KPI_STRIP_HEIGHT;
+  panel(ctx, PDF_PAGE.margin, ctx.y, ctx.contentWidth, height, PDF_COLORS.panel, PDF_COLORS.panelLine);
+  const count = Math.max(1, kpis.length);
+  const cellWidth = ctx.contentWidth / count;
+  kpis.forEach((kpi, index) => {
+    const x = PDF_PAGE.margin + index * cellWidth + 4;
+    if (index > 0) hairline(ctx, ctx.y + 3, PDF_PAGE.margin + index * cellWidth, 0.2, PDF_COLORS.panelLine, height - 6);
+    ctx.doc.setFontSize(PDF_MIN_FONT);
+    setText(ctx.doc, PDF_COLORS.inkSoft);
+    ctx.doc.text(kpi.label.toUpperCase(), x, ctx.y + 5.6);
+    ctx.doc.setFontSize(11);
+    if (ctx.doc.setFont) ctx.doc.setFont("helvetica", "bold");
+    setText(ctx.doc, toneColor(kpi.tone, kpi.value));
+    ctx.doc.text(ctx.doc.splitTextToSize(kpi.value, cellWidth - 6)[0] ?? PDF_MISSING, x, ctx.y + 12.4);
+    if (ctx.doc.setFont) ctx.doc.setFont("helvetica", "normal");
+  });
+  ctx.doc.setFontSize(ctx.metrics.body);
+  ctx.y += height + 4;
 }
 
 /* ------------------------------------------------------------------ *
@@ -465,167 +588,355 @@ export function fitInside(boxWidth: number, boxHeight: number, width: number, he
   return { width: width * scale, height: height * scale };
 }
 
-type ScreenshotPageOptions = { model: TradePdfModel; position: string; fetchImage: (url: string) => Promise<PdfImage> };
+type ScreenshotContext = { model: TradePdfModel; position: string; fetchImage: (url: string) => Promise<PdfImage> };
 
-function identityLines(model: TradePdfModel) {
-  const ticket = model.sections.flatMap(section => section.fields).find(field => field.label === "MT5 ticket")?.value ?? PDF_MISSING;
-  return `Trade ID ${model.idLabel} · ${model.tradeDate} · ${model.symbol} · ${model.direction} · ${model.result} · ${model.pnl} · MT5 ${ticket}`;
+/** The MT5 ticket as the card labels it, or the explicit missing marker. */
+function ticketLabel(model: TradePdfModel): string {
+  return model.sections.flatMap(section => section.fields).find(field => field.label === "MT5 ticket")?.value ?? PDF_MISSING;
 }
 
-async function renderScreenshotPage(ctx: Ctx, options: ScreenshotPageOptions) {
+/** The compact evidence bar under the image: format, size, and identifying fields. */
+function renderEvidenceBar(ctx: Ctx, model: TradePdfModel, details: string) {
+  const height = 12;
+  panel(ctx, PDF_PAGE.margin, ctx.y, ctx.contentWidth, height, PDF_COLORS.panel, PDF_COLORS.panelLine);
+  const ticket = ticketLabel(model);
+  const cells = [
+    ["Trade", `${model.idLabel} · ${model.tradeDate}`],
+    ["MT5 ticket", ticket],
+    ["Symbol", `${model.symbol} · ${model.session}`],
+    ["Screenshot", model.evidence.filename ?? "not recorded"],
+    ["Image", details],
+  ];
+  const cellWidth = ctx.contentWidth / cells.length;
+  cells.forEach(([label, value], index) => {
+    if (index > 0) hairline(ctx, ctx.y + 3, PDF_PAGE.margin + index * cellWidth, 0.2, PDF_COLORS.panelLine, height - 6);
+    const x = PDF_PAGE.margin + index * cellWidth + 4;
+    ctx.doc.setFontSize(PDF_MIN_FONT);
+    setText(ctx.doc, PDF_COLORS.inkSoft);
+    ctx.doc.text(label.toUpperCase(), x, ctx.y + 4.8);
+    ctx.doc.setFontSize(7.6);
+    setText(ctx.doc, PDF_COLORS.ink);
+    ctx.doc.text(ctx.doc.splitTextToSize(String(value), cellWidth - 6)[0] ?? PDF_MISSING, x, ctx.y + 9.4);
+  });
+  ctx.y += height + 2;
+}
+
+async function renderScreenshotPage(ctx: Ctx, options: ScreenshotContext) {
   const { model, position, fetchImage } = options;
   startPage(ctx, {
     eyebrow: "GOLD JOURNAL · SCREENSHOT EVIDENCE",
-    title: `${position} · ${model.symbol} · ${model.direction} · ${model.result} · ${model.pnl}`,
-    continued: `${position} — screenshot (continued)`,
-    titleSize: 14,
+    title: `${position} · ${model.direction} · ${model.result} · ${model.pnl}`,
+    continued: `${position.toUpperCase()} — SCREENSHOT EVIDENCE (CONTINUED)`,
+    caption: [model.tradeDate, model.symbol, model.session].join(" · ").toUpperCase(),
+    titleSize: 15,
     metrics: ANALYSIS_METRICS,
   });
-  ctx.doc.setFontSize(7.2);
-  writeWrapped(ctx, identityLines(model), { color: PDF_COLORS.muted, lineHeight: 3.4 });
-  ctx.y += 2;
+
   const evidence = model.evidence;
   const filename = evidence.filename ?? "not recorded";
-  const linkStatus = evidence.url ? "available at export time" : "unavailable at export time";
 
   if (!evidence.url) {
-    sectionHeading(ctx, "No screenshot available");
+    const hasRecord = evidence.hasScreenshot;
+    const boxHeight = 74;
+    const centerX = PDF_PAGE.margin + ctx.contentWidth / 2;
+    // Centred in the page's free area, so the evidence page reads as a deliberate
+    // empty state instead of a heading with a gap under it.
+    const top = ctx.y + Math.max(0, (ctx.bottom - ctx.y - boxHeight - SCREENSHOT_CAPTION - 12) / 2);
+    panel(ctx, PDF_PAGE.margin, top, ctx.contentWidth, boxHeight, [251, 251, 250], PDF_COLORS.rule);
+    ctx.doc.setFontSize(11);
+    if (ctx.doc.setFont) ctx.doc.setFont("helvetica", "bold");
+    setText(ctx.doc, hasRecord ? PDF_COLORS.warning : PDF_COLORS.inkSoft);
+    ctx.doc.text(hasRecord ? "SCREENSHOT UNAVAILABLE AT EXPORT TIME" : "NO SCREENSHOT AVAILABLE", centerX, top + 30, { align: "center" });
     ctx.doc.setFontSize(8);
-    writeWrapped(ctx, evidence.hasScreenshot
-      ? `A screenshot is recorded for this trade but no export link was available at export time. ${SCREENSHOT_EMBED_FAILURE}`
-      : "No screenshot was saved with this trade.", { color: evidence.hasScreenshot ? PDF_COLORS.red : PDF_COLORS.muted, lineHeight: 3.6 });
-    writeWrapped(ctx, `File name: ${filename} · Export link: ${linkStatus}`, { color: PDF_COLORS.dim, lineHeight: 3.6 });
+    if (ctx.doc.setFont) ctx.doc.setFont("helvetica", "normal");
+    setText(ctx.doc, PDF_COLORS.inkSoft);
+    const message = hasRecord
+      ? "A screenshot is stored for this trade, but no export link was available when the report was built."
+      : "No chart image is attached to this trade; the complete trade data is on the previous page.";
+    (ctx.doc.splitTextToSize(message, ctx.contentWidth - 40) as string[]).forEach((line, index) => ctx.doc.text(line, centerX, top + 38 + index * 4, { align: "center" }));
+    // The evidence stays identifiable even when there is no image to show.
+    ctx.doc.setFontSize(PDF_MIN_FONT);
+    setText(ctx.doc, PDF_COLORS.inkSoft);
+    ctx.doc.text(`${position.toUpperCase()} · ${model.tradeDate} · ${model.symbol} · MT5 ${ticketLabel(model)}`, centerX, top + boxHeight - 9, { align: "center" });
+    ctx.y = top + boxHeight + SCREENSHOT_CAPTION;
+    renderEvidenceBar(ctx, model, `no image · ${hasRecord ? "link unavailable" : "not attached"}`);
     return;
   }
 
   try {
-    // Fetched and measured first, so the heading, the metadata, and the image
-    // always land together and the image can never overflow the page.
+    // Fetched and measured first, so the image is fitted before anything is drawn
+    // and the evidence bar always lands on the same page.
     const image = await fetchImage(evidence.url);
     const properties = ctx.doc.getImageProperties(image.dataUrl);
     const width = Number(properties?.width);
     const height = Number(properties?.height);
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) throw new Error("Screenshot dimensions could not be read");
-    const boxHeight = ctx.bottom - ctx.y - SCREENSHOT_CAPTION;
+    const boxHeight = ctx.bottom - ctx.y - SCREENSHOT_CAPTION - 14;
     if (boxHeight <= 20) throw new Error("No page space is available for the screenshot");
     // Contain, never stretch or crop. Small images are enlarged modestly (up to
-    // 1.5x their natural print size) instead of being blown up to full width.
+    // 1.5x their natural print size) instead of being blown up to page width.
     const naturalWidth = width / 96 * 25.4;
     const naturalHeight = height / 96 * 25.4;
     const available = fitInside(Math.min(ctx.contentWidth, naturalWidth * 1.5), Math.min(boxHeight, naturalHeight * 1.5), width, height);
     const x = PDF_PAGE.margin + (ctx.contentWidth - available.width) / 2;
+    setDraw(ctx.doc, PDF_COLORS.rule);
+    ctx.doc.rect(x - 0.6, ctx.y - 0.6, available.width + 1.2, available.height + 1.2, "S");
     ctx.doc.addImage(image.dataUrl, image.format, x, ctx.y, available.width, available.height);
-    ctx.y += available.height + 2.4;
-    ctx.doc.setFontSize(7);
-    writeWrapped(ctx, `Embedded at ${Math.round(available.width)} × ${Math.round(available.height)} mm (${image.format}, ${width} × ${height} px) · File name: ${filename}`, { color: PDF_COLORS.dim, lineHeight: 3.4 });
+    ctx.y += available.height + 4;
+    renderEvidenceBar(ctx, model, `${image.format} · ${width} × ${height} px · ${Math.round(available.width)} × ${Math.round(available.height)} mm`);
   } catch (error: any) {
-    // A single unreadable image never aborts the report: the trade's data page is
-    // already written and every remaining trade is rendered normally.
-    sectionHeading(ctx, "Screenshot evidence");
-    ctx.doc.setFontSize(8);
-    writeWrapped(ctx, `${SCREENSHOT_EMBED_FAILURE} Screenshot unavailable at export time.`, { color: PDF_COLORS.red, lineHeight: 3.6 });
-    writeWrapped(ctx, `File name: ${filename} · Export link: ${linkStatus} · ${error?.message ?? "unavailable"}`, { color: PDF_COLORS.dim, lineHeight: 3.6 });
-    writeWrapped(ctx, "Every other field of this trade is unaffected and the report continues with the next trade.", { color: PDF_COLORS.muted, lineHeight: 3.6 });
+    // A single unreadable image never aborts the report.
+    panel(ctx, PDF_PAGE.margin, ctx.y, ctx.contentWidth, 42, [252, 244, 244], [232, 196, 196]);
+    ctx.doc.setFontSize(10);
+    setText(ctx.doc, PDF_COLORS.negative);
+    ctx.doc.text("SCREENSHOT COULD NOT BE LOADED", PDF_PAGE.margin + 4, ctx.y + 9);
+    ctx.doc.setFontSize(7.6);
+    setText(ctx.doc, PDF_COLORS.inkSoft);
+    (ctx.doc.splitTextToSize(`${SCREENSHOT_EMBED_FAILURE} The trade data is unaffected and the report continues with the next trade.`, ctx.contentWidth - 12) as string[]).forEach((line, index) => ctx.doc.text(line, PDF_PAGE.margin + 4, ctx.y + 16 + index * 3.6));
+    ctx.y += 46;
+    renderEvidenceBar(ctx, model, `load failed · ${error?.message ?? "unavailable"}`);
   }
 }
 
 /* ------------------------------------------------------------------ *
- * Trade pages
+ * Trade page
  * ------------------------------------------------------------------ */
 
 /**
- * Measures the trade data page against every typography tier.
+ * The trade's identity, stated once: date, symbol, session, direction, result.
+ * The P&L is not repeated here because the KPI strip is where it belongs, and the
+ * field tables below carry every value again as the formal record.
+ */
+function tradeHeaderMeta(model: TradePdfModel) {
+  return [model.tradeDate, model.symbol, model.session, model.direction, model.result].join(" · ").toUpperCase();
+}
+
+/**
+ * Measures the trade data page for every typography tier.
  *
- * The first tier that fits one page wins, so an ordinary trade is always exactly
- * one data page; the smallest tier is only used, and content only continues onto
- * another page, when the recorded data genuinely cannot be laid out otherwise.
+ * The first tier whose layout fits one page wins, so an ordinary trade is always
+ * exactly one data page; the smallest tier is only used, and content only
+ * continues onto another page, when the recorded data genuinely cannot be laid
+ * out otherwise.
  */
 export function measureTradeDataPage(doc: PdfDoc, model: TradePdfModel) {
-  const available = contentBottom() - (PDF_PAGE.margin + HEADER_HEIGHT) - TRADE_PAGE_BAND;
-  const measured = TRADE_METRICS.map(tier => ({ tier, height: layoutTradePage(doc, model, tier).reduce((sum, block) => sum + block.height, 0) }));
+  const available = contentBottom() - (PDF_PAGE.margin + HEADER_HEIGHT) - KPI_STRIP_HEIGHT - 4;
+  const ctx: Ctx = {
+    doc, started: false, y: 0, bodyTop: 0, bottom: contentBottom(), contentWidth: contentWidth(),
+    metrics: TRADE_METRICS[1], header: { eyebrow: "", title: "", continued: "" }, titleSize: 16,
+  };
+  const measured = TRADE_METRICS.map(tier => {
+    ctx.metrics = tier;
+    ctx.y = 0;
+    const blocks = tradePageBlocks(ctx, model, columnWidth(ctx));
+    return { tier, height: tradePageHeight(ctx, blocks) };
+  });
   const chosen = measured.find(entry => entry.height <= available) ?? measured[measured.length - 1];
   return { available, height: chosen.height, tier: chosen.tier, fits: chosen.height <= available, measurements: measured.map(entry => entry.height) };
 }
 
+type TradePageBlocks = {
+  left: CompiledBlock[];
+  right: CompiledBlock[];
+  checklist: CompiledBlock;
+  categories: CompiledBlock;
+  psychologyHeight: number;
+  psychologyLines: string[][];
+  note: CompiledBlock;
+  /**
+   * Persisted properties the canonical model has no dedicated home for. Normally
+   * empty — a future column lands here instead of being silently dropped.
+   */
+  extra: CompiledBlock | null;
+};
+
+function tradePageBlocks(ctx: Ctx, model: TradePdfModel, column: number): TradePageBlocks {
+  const section = (id: string) => model.sections.find(entry => entry.id === id)?.fields ?? [];
+  // Left column reads 1-2, right column reads 3-4, exactly the section order.
+  const left: CompiledBlock[] = [
+    compileFields(ctx, "1 · Trade overview", section("A"), column),
+    compileFields(ctx, "2 · Strategy & execution", section("B"), column),
+  ];
+  const right: CompiledBlock[] = [
+    compileFields(ctx, "3 · Risk & performance", section("C"), column),
+    compileFields(ctx, "4 · Plan & discipline", section("D"), column),
+    compileBadge(ctx, model),
+  ];
+  // Sections 5-8 sit below the columns. The checklist and the mistake categories
+  // share one band, psychology takes three columns, and the journal note fills
+  // whatever is left — continuing onto a labelled page only when it must.
+  const checklist = compileChecklist(ctx, model.checklist);
+  const categories = compilePairs(ctx, "6 · Process & mistakes", section("E"), ctx.contentWidth);
+  const psychologyCells = [model.psychology.before, model.psychology.during, model.psychology.after];
+  const cellWidth = (ctx.contentWidth - ctx.metrics.gap * 2) / 3;
+  ctx.doc.setFontSize(ctx.metrics.body);
+  const psychologyLines = psychologyCells.map(value => ctx.doc.splitTextToSize(value.trim() === "" ? PDF_MISSING : value, cellWidth - 6) as string[]);
+  const psychologyHeight = ctx.metrics.sectionAdvance + Math.max(1, ...psychologyLines.map(lines => lines.length)) * ctx.metrics.line + 5;
+  const note = compileNote(ctx, model.journalNotes, ctx.contentWidth);
+  // Drift protection: any persisted field the sections above do not map still
+  // reaches the document, so a new column can never vanish from an export.
+  const extra = model.additionalFields.length ? compileFields(ctx, "9 · Additional recorded fields", model.additionalFields, ctx.contentWidth) : null;
+  return { left, right, checklist, categories, psychologyHeight, psychologyLines, note, extra };
+}
+
+/** The full height of a trade data page: both columns, then every block below them. */
+function tradePageHeight(ctx: Ctx, blocks: TradePageBlocks) {
+  const columns = Math.max(
+    blocks.left.reduce((sum, block) => sum + block.height, 0),
+    blocks.right.reduce((sum, block) => sum + block.height, 0),
+  );
+  // The note needs at least its heading and two lines to be worth placing here.
+  const noteMinimum = ctx.metrics.sectionAdvance + 2 * ctx.metrics.line + 6;
+  return columns + 2 + Math.max(blocks.checklist.height, blocks.categories.height) + blocks.psychologyHeight + noteMinimum + (blocks.extra?.height ?? 0);
+}
+
 function renderTradeDataPage(ctx: Ctx, model: TradePdfModel, index: number, total: number) {
   const position = `Trade ${String(index + 1).padStart(2, "0")} / ${String(total).padStart(2, "0")}`;
-  const meta = `${model.tradeDate} · ${model.symbol} · ${model.direction} · ${model.result} · ${model.pnl} · Session ${model.session}`;
   const measurement = measureTradeDataPage(ctx.doc, model);
   const metrics = measurement.tier;
-  const blocks = layoutTradePage(ctx.doc, model, metrics);
-
   startPage(ctx, {
-    eyebrow: "GOLD JOURNAL · TRADE CARD",
-    title: `${position} · ${model.symbol} · ${model.direction}`,
-    continued: `${position} — complete trade data (continued)`,
+    eyebrow: "GOLD JOURNAL · TRADE REPORT",
+    title: position.toUpperCase(),
+    continued: `${position.toUpperCase()} — TRADE DATA (CONTINUED)`,
+    caption: tradeHeaderMeta(model),
     titleSize: metrics.title,
     metrics,
   });
-  // At-a-glance band: the figures the trade is identified by, on one line.
-  const doc = ctx.doc;
-  doc.setFontSize(10.5);
-  setText(doc, PDF_COLORS.gold);
-  doc.text(position, PDF_PAGE.margin, ctx.y + 3);
-  doc.setFontSize(11.5);
-  setText(doc, model.pnlValue < 0 ? PDF_COLORS.red : PDF_COLORS.green);
-  doc.text(model.pnl, PDF_PAGE.margin + ctx.contentWidth, ctx.y + 3, { align: "right" });
-  ctx.y += 5.6;
-  doc.setFontSize(7.6);
-  writeWrapped(ctx, compactListValue(meta), { color: PDF_COLORS.muted, lineHeight: 3.6 });
-  ctx.y += 1.6;
-  setFill(doc, PDF_COLORS.line);
-  doc.rect(PDF_PAGE.margin, ctx.y, ctx.contentWidth, 0.3, "F");
-  ctx.y += 2.6;
+  renderKpiStrip(ctx, model);
 
-  for (const block of blocks) {
-    if (block.kind === "section") sectionHeading(ctx, block.title);
-    else for (const row of block.rows) renderRow(ctx, row);
+  const column = columnWidth(ctx);
+  const blocks = tradePageBlocks(ctx, model, column);
+  const columnsTop = ctx.y;
+  // Left column, then right column: the reading order of the field sections.
+  ctx.y = columnsTop;
+  for (const block of blocks.left) renderCompiledBlock(ctx, block, PDF_PAGE.margin, column);
+  const leftBottom = ctx.y;
+  ctx.y = columnsTop;
+  for (const block of blocks.right) renderCompiledBlock(ctx, block, PDF_PAGE.margin + column + metrics.gap, column);
+  const rightBottom = ctx.y;
+
+  // Band 5-6: the checklist beside the recorded mistake categories.
+  const bandTop = Math.max(leftBottom, rightBottom) + 2;
+  ctx.y = bandTop;
+  renderCompiledBlock(ctx, blocks.checklist, PDF_PAGE.margin, column);
+  const checklistBottom = ctx.y;
+  ctx.y = bandTop;
+  renderCompiledBlock(ctx, blocks.categories, PDF_PAGE.margin + column + metrics.gap, column);
+  ctx.y = Math.max(checklistBottom, ctx.y) + 2;
+
+  // Section 7: psychology as three equal columns.
+  const psychologyTop = ctx.y;
+  const psychologyHeight = blocks.psychologyHeight - metrics.sectionAdvance;
+  sectionHeading(ctx, "7 · Psychology", PDF_PAGE.margin, ctx.contentWidth);
+  const psychologyCells = [
+    { label: "Before trade", lines: blocks.psychologyLines[0] },
+    { label: "During trade", lines: blocks.psychologyLines[1] },
+    { label: "After trade", lines: blocks.psychologyLines[2] },
+  ];
+  const cellWidth = (ctx.contentWidth - metrics.gap * 2) / 3;
+  psychologyCells.forEach((cell, cellIndex) => {
+    const x = PDF_PAGE.margin + cellIndex * (cellWidth + metrics.gap);
+    panel(ctx, x, psychologyTop, cellWidth, psychologyHeight, [250, 250, 249], PDF_COLORS.rule);
+    ctx.doc.setFontSize(metrics.label);
+    setText(ctx.doc, PDF_COLORS.inkSoft);
+    ctx.doc.text(cell.label.toUpperCase(), x + 3, psychologyTop + 4);
+    ctx.doc.setFontSize(metrics.body);
+    setText(ctx.doc, PDF_COLORS.ink);
+    cell.lines.forEach((line, lineIndex) => ctx.doc.text(line, x + 3, psychologyTop + 7 + lineIndex * metrics.line));
+  });
+  ctx.y = psychologyTop + psychologyHeight + 2.5;
+
+  // Section 8: the journal note gets the remaining space, and continues onto a
+  // dedicated page only when the entry genuinely does not fit.
+  const noteTop = ctx.y;
+  const note = blocks.note;
+  if (noteTop + note.height <= ctx.bottom) {
+    renderCompiledBlock(ctx, note, PDF_PAGE.margin, ctx.contentWidth);
+  } else {
+    sectionHeading(ctx, note.title, PDF_PAGE.margin, ctx.contentWidth);
+    const lines = ctx.doc.splitTextToSize(note.kind === "note" ? note.text : "", ctx.contentWidth - 6) as string[];
+    const room = Math.max(1, Math.floor((ctx.bottom - ctx.y - 4) / metrics.line));
+    const firstPage = lines.slice(0, room);
+    const rest = lines.slice(room);
+    if (firstPage.length) {
+      panel(ctx, PDF_PAGE.margin, ctx.y, ctx.contentWidth, firstPage.length * metrics.line + 5, [252, 252, 251], PDF_COLORS.rule);
+      ctx.doc.setFontSize(metrics.body);
+      setText(ctx.doc, PDF_COLORS.ink);
+      firstPage.forEach((line, lineIndex) => ctx.doc.text(line, PDF_PAGE.margin + 3, ctx.y + 3.6 + lineIndex * metrics.line));
+    }
+    if (rest.length) {
+      nextPage(ctx);
+      sectionHeading(ctx, "8 · Journal note (continued)", PDF_PAGE.margin, ctx.contentWidth);
+      // The continuation may itself span pages, so the text style is re-applied
+      // for every line rather than once before the loop.
+      rest.forEach(line => {
+        ensureSpace(ctx, ctx.metrics.line);
+        ctx.doc.setFontSize(metrics.body);
+        setText(ctx.doc, PDF_COLORS.ink);
+        ctx.doc.text(line, PDF_PAGE.margin, ctx.y);
+        ctx.y += ctx.metrics.line;
+      });
+    }
   }
+
+  if (blocks.extra) renderCompiledBlock(ctx, blocks.extra, PDF_PAGE.margin, ctx.contentWidth);
 }
 
 /* ------------------------------------------------------------------ *
  * Analysis pages
  * ------------------------------------------------------------------ */
 
-/**
- * The analysis metric grid. A metric whose label and value both fit on one line is
- * written as a single labelled row (the compact case); anything longer drops the
- * value onto its own lines. The row height always follows the tallest cell, so no
- * value can ever overlap the row below it.
- */
-function metricGrid(ctx: Ctx, items: { label: string; value: string }[]) {
+function metricGrid(ctx: Ctx, items: { label: string; value: string; tone?: TradePdfTone }[], columns = METRIC_COLUMNS) {
   const metrics = ctx.metrics;
   const doc = ctx.doc;
-  const gap = metrics.colGap;
-  const perRow = METRIC_COLUMNS;
-  const width = (ctx.contentWidth - gap * (perRow - 1)) / perRow;
-  // Uppercase labels are wide: giving them half the cell keeps almost every
-  // metric on a single labelled row instead of dropping the value to its own line.
+  const width = (ctx.contentWidth - metrics.gap * (columns - 1)) / columns;
   const labelWidth = width * 0.5;
-  for (let index = 0; index < items.length; index += perRow) {
-    const slice = items.slice(index, index + perRow);
+  for (let index = 0; index < items.length; index += columns) {
+    const slice = items.slice(index, index + columns);
     doc.setFontSize(metrics.label);
     const cells = slice.map(item => {
-      const label = item.label.toUpperCase();
-      const inline = doc.splitTextToSize(label, labelWidth - 1).length === 1;
+      const inline = doc.splitTextToSize(item.label.toUpperCase(), labelWidth - 1).length === 1;
       doc.setFontSize(metrics.body);
-      const valueLines = doc.splitTextToSize(item.value, Math.max(8, inline ? width - labelWidth - 2 : width)) as string[];
-      return { item, label, inline, lines: valueLines.length ? valueLines : [PDF_MISSING] };
+      const lines = doc.splitTextToSize(item.value, Math.max(8, inline ? width - labelWidth - 2 : width)) as string[];
+      return { item, inline, lines: lines.length ? lines : [PDF_MISSING] };
     });
     const height = Math.max(...cells.map(cell => (cell.inline ? 0 : metrics.labelLine) + cell.lines.length * metrics.line)) + metrics.rowGap;
     ensureSpace(ctx, height);
     cells.forEach((cell, cellIndex) => {
-      const x = PDF_PAGE.margin + cellIndex * (width + gap);
+      const x = PDF_PAGE.margin + cellIndex * (width + metrics.gap);
       doc.setFontSize(metrics.label);
-      setText(doc, PDF_COLORS.muted);
-      doc.text(cell.label, x, ctx.y);
+      setText(doc, PDF_COLORS.inkSoft);
+      doc.text(cell.item.label.toUpperCase(), x, ctx.y);
       doc.setFontSize(metrics.body);
-      setText(doc, valueColor(cell.item.label, cell.item.value));
+      setText(doc, toneColor(cell.item.tone, cell.item.value));
       const top = ctx.y + (cell.inline ? 0 : metrics.labelLine);
       cell.lines.forEach((line, lineIndex) => doc.text(line, cell.inline ? x + labelWidth : x, top + lineIndex * metrics.line));
     });
     ctx.y += height;
   }
+}
+
+/** The analysis headline cards: larger figures, one per metric. */
+function renderKpiCards(ctx: Ctx, items: { label: string; value: string; tone?: TradePdfTone }[]) {
+  const metrics = ctx.metrics;
+  const count = Math.max(1, Math.min(items.length, KPI_COLUMNS));
+  const width = (ctx.contentWidth - metrics.gap * (count - 1)) / count;
+  const height = 19;
+  ensureSpace(ctx, height + 4);
+  items.slice(0, KPI_COLUMNS).forEach((item, index) => {
+    const x = PDF_PAGE.margin + index * (width + metrics.gap);
+    panel(ctx, x, ctx.y, width, height, PDF_COLORS.panel, PDF_COLORS.panelLine);
+    ctx.doc.setFontSize(PDF_MIN_FONT);
+    setText(ctx.doc, PDF_COLORS.inkSoft);
+    ctx.doc.text(item.label.toUpperCase(), x + 4, ctx.y + 6);
+    ctx.doc.setFontSize(13);
+    if (ctx.doc.setFont) ctx.doc.setFont("helvetica", "bold");
+    setText(ctx.doc, toneColor(item.tone, item.value));
+    ctx.doc.text(ctx.doc.splitTextToSize(item.value, width - 8)[0] ?? PDF_MISSING, x + 4, ctx.y + 14.4);
+    if (ctx.doc.setFont) ctx.doc.setFont("helvetica", "normal");
+  });
+  ctx.doc.setFontSize(metrics.body);
+  ctx.y += height + 5;
 }
 
 function tableColumnWidths(table: AnalysisTable, width: number) {
@@ -637,9 +948,8 @@ function tableColumnWidths(table: AnalysisTable, width: number) {
 const TABLE_HEADER_BLOCK = 2.2 + 1 + TABLE_FONT.line;
 
 /**
- * The exact height `renderTable` will consume, so a pair of tables is only moved
- * to another page when it genuinely does not fit, and side-by-side tables can be
- * aligned without either one overflowing the page.
+ * The exact height `renderTable` will consume, so a pair of tables only moves to
+ * another page when it genuinely does not fit.
  */
 function measureTable(ctx: Ctx, table: AnalysisTable, width: number) {
   const doc = ctx.doc;
@@ -653,39 +963,40 @@ function measureTable(ctx: Ctx, table: AnalysisTable, width: number) {
   return TABLE_HEADER_BLOCK + rows.reduce((sum, height) => sum + height, 0) + empty;
 }
 
-/** Draws a table, repeating the title and the header row after a page break. */
+/** Draws a table with a clear header rule, repeating it after a page break. */
 function renderTable(ctx: Ctx, table: AnalysisTable, width: number, x: number = PDF_PAGE.margin) {
   const doc = ctx.doc;
   const perCell = tableColumnWidths(table, width);
   const drawHeader = () => {
     doc.setFontSize(TABLE_FONT.title);
-    setText(doc, PDF_COLORS.gold);
+    if (doc.setFont) doc.setFont("helvetica", "bold");
+    setText(doc, PDF_COLORS.ink);
     doc.text(table.title.toUpperCase(), x, ctx.y);
-    ctx.y += 2.2;
+    if (doc.setFont) doc.setFont("helvetica", "normal");
+    ctx.y += 2.6;
     doc.setFontSize(TABLE_FONT.header);
-    setText(doc, PDF_COLORS.muted);
+    setText(doc, PDF_COLORS.inkSoft);
     let cursor = x;
     table.columns.forEach((column, index) => {
       doc.text(column.label.toUpperCase(), column.align === "right" ? cursor + perCell[index] : cursor, ctx.y, column.align === "right" ? { align: "right" } : undefined);
       cursor += perCell[index];
     });
     ctx.y += 1;
-    setFill(doc, PDF_COLORS.line);
-    doc.rect(x, ctx.y, width, 0.3, "F");
+    hairline(ctx, ctx.y, x, width, PDF_COLORS.rule, 0.3);
     ctx.y += TABLE_FONT.line;
   };
-  ensureSpace(ctx, TABLE_FONT.title + 2 + TABLE_FONT.line * 2);
+  ensureSpace(ctx, TABLE_HEADER_BLOCK + 2);
   drawHeader();
   if (!table.rows.length) {
     doc.setFontSize(TABLE_FONT.body);
-    setText(doc, PDF_COLORS.dim);
+    setText(doc, PDF_COLORS.inkFaint);
     doc.text(table.empty, x, ctx.y);
     ctx.y += TABLE_FONT.line * 2;
     return;
   }
-  for (const row of table.rows) {
+  table.rows.forEach((row, rowIndex) => {
     doc.setFontSize(TABLE_FONT.body);
-    const wrapped = row.map((value, index) => {
+    const wrapped: string[][] = row.map((value: string, index: number) => {
       const lines = doc.splitTextToSize(String(value), Math.max(4, perCell[index] - 2)) as string[];
       return lines.length ? lines : [PDF_MISSING];
     });
@@ -696,32 +1007,39 @@ function renderTable(ctx: Ctx, table: AnalysisTable, width: number, x: number = 
       doc.setFontSize(TABLE_FONT.body);
     }
     let cursor = x;
-    wrapped.forEach((lines, index) => {
+    wrapped.forEach((lines: string[], index: number) => {
       const column = table.columns[index];
-      setText(doc, column.align === "right" ? valueColor(column.label, lines[0]) : PDF_COLORS.text);
-      lines.forEach((line, lineIndex) => {
-        const lineY = ctx.y + lineIndex * TABLE_FONT.line;
-        doc.text(line, column.align === "right" ? cursor + perCell[index] : cursor, lineY, column.align === "right" ? { align: "right" } : undefined);
+      const isNumeric = column.align === "right";
+      setText(doc, isNumeric ? toneColor("signed", lines[0]) : PDF_COLORS.ink);
+      lines.forEach((line: string, lineIndex: number) => {
+        doc.text(line, isNumeric ? cursor + perCell[index] : cursor, ctx.y + lineIndex * TABLE_FONT.line, isNumeric ? { align: "right" } : undefined);
       });
       cursor += perCell[index];
     });
     ctx.y += height;
-  }
+    if (rowIndex < table.rows.length - 1) hairline(ctx, ctx.y - TABLE_FONT.padding + 0.3, x, width, PDF_COLORS.panelLine, 0.15);
+  });
   ctx.y += 2.4;
 }
 
 function renderAnalysisBlock(ctx: Ctx, block: AnalysisBlock) {
-  if (block.kind === "heading") { sectionHeading(ctx, block.title); return; }
-  if (block.kind === "metrics") { metricGrid(ctx, block.items); return; }
+  if (block.kind === "heading") { sectionHeading(ctx, block.title, PDF_PAGE.margin, ctx.contentWidth, { accent: true }); return; }
+  // The cards are self-labelling, so the KPI band needs no heading; every metric
+  // grid does, otherwise its title would be silently dropped from the page.
+  if (block.kind === "kpis") { renderKpiCards(ctx, block.items); return; }
+  if (block.kind === "metrics") {
+    if (block.title) sectionHeading(ctx, block.title, PDF_PAGE.margin, ctx.contentWidth);
+    metricGrid(ctx, block.items);
+    return;
+  }
   if (block.kind === "table") { renderTable(ctx, block.table, ctx.contentWidth); return; }
   if (block.kind === "tableRow") {
-    const gap = ctx.metrics.colGap;
+    const gap = ctx.metrics.gap;
     const half = (ctx.contentWidth - gap) / 2;
     const tallest = Math.max(0, ...block.tables.map(table => measureTable(ctx, table, half)));
     if (ctx.y + tallest > ctx.bottom) {
-      // Side by side no longer fits on this page. Each table is re-measured at the
-      // full width instead of moving both to a fresh page, so the space left on
-      // this page is still used and no page is wasted on a single table.
+      // Side by side no longer fits: render each table across the full width so
+      // the remaining space on this page is still used.
       for (const table of block.tables) renderTable(ctx, table, ctx.contentWidth);
       return;
     }
@@ -733,55 +1051,130 @@ function renderAnalysisBlock(ctx: Ctx, block: AnalysisBlock) {
     ctx.y = startY + tallest;
     return;
   }
-  if (block.kind === "paragraph" && block.flow) {
-    if (block.title) sectionHeading(ctx, block.title);
-    writeWrapped(ctx, block.lines.join(" · "), { color: PDF_COLORS.text, lineHeight: 3.3, fontSize: ANALYSIS_METRICS.body });
+  if (block.title) sectionHeading(ctx, block.title, PDF_PAGE.margin, ctx.contentWidth);
+  if (block.flow) {
+    writeWrapped(ctx, block.lines.join(" · "), { color: PDF_COLORS.inkSoft, lineHeight: 3.5, fontSize: ANALYSIS_METRICS.body });
     return;
   }
-  if (block.title) sectionHeading(ctx, block.title);
-  ctx.doc.setFontSize(ANALYSIS_METRICS.body);
-  for (const line of block.lines) writeWrapped(ctx, `• ${line}`, { color: PDF_COLORS.text, lineHeight: 3.3, fontSize: ANALYSIS_METRICS.body });
+  for (const line of block.lines) {
+    ensureSpace(ctx, 3.6);
+    ctx.doc.setFontSize(ANALYSIS_METRICS.body);
+    setText(ctx.doc, PDF_COLORS.accent);
+    ctx.doc.text("•", PDF_PAGE.margin, ctx.y);
+    writeWrapped(ctx, line, { x: PDF_PAGE.margin + 4, maxWidth: ctx.contentWidth - 4, color: PDF_COLORS.ink, lineHeight: 3.6, fontSize: ANALYSIS_METRICS.body });
+  }
+  ctx.y += 1.5;
 }
 
-function renderAnalysis(ctx: Ctx, options: TradeLogPdfOptions, analysis: PeriodAnalysis) {
+type ParagraphBlock = Extract<AnalysisBlock, { kind: "paragraph" }>;
+
+/** The height a bullet block occupies at a given width, so columns can balance. */
+function measureParagraphBlock(ctx: Ctx, block: ParagraphBlock, width: number) {
+  const metrics = ANALYSIS_METRICS;
+  let height = block.title ? metrics.sectionAdvance : 0;
+  ctx.doc.setFontSize(metrics.body);
+  if (block.flow) {
+    const lines = ctx.doc.splitTextToSize(block.lines.join(" · "), width) as string[];
+    return height + Math.max(1, lines.length) * 3.5 + 3;
+  }
+  for (const line of block.lines) {
+    const wrapped = ctx.doc.splitTextToSize(line, width - 4) as string[];
+    height += Math.max(1, wrapped.length) * 3.6 + 0.4;
+  }
+  return height + 2;
+}
+
+function renderParagraphBlock(ctx: Ctx, block: ParagraphBlock, x: number, width: number) {
+  if (block.title) sectionHeading(ctx, block.title, x, width);
+  if (block.flow) {
+    writeWrapped(ctx, block.lines.join(" · "), { x, maxWidth: width, color: PDF_COLORS.inkSoft, lineHeight: 3.5, fontSize: ANALYSIS_METRICS.body });
+    ctx.y += 3;
+    return;
+  }
+  for (const line of block.lines) {
+    ensureSpace(ctx, 3.6);
+    ctx.doc.setFontSize(ANALYSIS_METRICS.body);
+    setText(ctx.doc, PDF_COLORS.accent);
+    ctx.doc.text("•", x, ctx.y);
+    writeWrapped(ctx, line, { x: x + 4, maxWidth: width - 4, color: PDF_COLORS.ink, lineHeight: 3.6, fontSize: ANALYSIS_METRICS.body });
+  }
+  ctx.y += 2;
+}
+
+/**
+ * Renders the review page in two balanced columns.
+ *
+ * The review is prose, not a table, so a single 273 mm column would waste half of
+ * every line; two columns let the whole page be read at once without shrinking
+ * the type. If the columns still do not fit (an unusually long period), the blocks
+ * fall back to sequential full-width rendering, which paginates normally.
+ */
+function renderTwoColumnParagraphs(ctx: Ctx, blocks: ParagraphBlock[]) {
+  const gap = ANALYSIS_METRICS.gap;
+  const width = (ctx.contentWidth - gap) / 2;
+  const columns: Array<{ blocks: ParagraphBlock[]; height: number }> = [{ blocks: [], height: 0 }, { blocks: [], height: 0 }];
+  for (const block of blocks) {
+    const target = columns[0].height <= columns[1].height ? columns[0] : columns[1];
+    target.blocks.push(block);
+    target.height += measureParagraphBlock(ctx, block, width);
+  }
+  const tallest = Math.max(...columns.map(column => column.height));
+  if (ctx.y + tallest > ctx.bottom) {
+    for (const block of blocks) renderParagraphBlock(ctx, block, PDF_PAGE.margin, ctx.contentWidth);
+    return;
+  }
+  const startY = ctx.y;
+  columns.forEach((column, index) => {
+    ctx.y = startY;
+    const x = PDF_PAGE.margin + index * (width + gap);
+    for (const block of column.blocks) renderParagraphBlock(ctx, block, x, width);
+  });
+  ctx.y = startY + tallest;
+}
+
+function renderAnalysisPage(ctx: Ctx, page: AnalysisPage, rangeLabel: string, mode: "ALL_TIME" | "RANGE", total: number) {
   startPage(ctx, {
-    eyebrow: "GOLD JOURNAL · PRIVATE PERFORMANCE REPORT",
-    title: `Period analysis · ${options.accountName}`,
-    continued: "Period analysis (continued)",
-    titleSize: 15,
+    eyebrow: page.eyebrow,
+    title: page.title,
+    continued: `${page.title} (continued)`,
+    caption: `${mode === "ALL_TIME" ? "Whole trade log" : "Selected period"} · ${rangeLabel} · ${total} exported trade${total === 1 ? "" : "s"}`,
+    titleSize: 17,
     metrics: ANALYSIS_METRICS,
   });
-  ctx.doc.setFontSize(7.4);
-  writeWrapped(ctx, `${options.mode === "ALL_TIME" ? "Whole trade log" : "Selected period"} · ${options.rangeLabel} · every figure below is calculated from the ${analysis.total} exported trade${analysis.total === 1 ? "" : "s"} in this report, using the same analysis engine as the Performance view.`, { color: PDF_COLORS.muted, lineHeight: 3.6 });
+  writeWrapped(ctx, page.caption, { color: PDF_COLORS.inkSoft, lineHeight: 3.5, fontSize: 7.2 });
   ctx.y += 3;
-  for (const block of analysis.blocks) renderAnalysisBlock(ctx, block);
+  const prose = page.blocks.filter((block): block is ParagraphBlock => block.kind === "paragraph");
+  const structured = page.blocks.filter(block => block.kind !== "paragraph");
+  for (const block of structured) renderAnalysisBlock(ctx, block);
+  if (prose.length && page.twoColumn) renderTwoColumnParagraphs(ctx, prose);
+  else for (const block of prose) renderAnalysisBlock(ctx, block);
 }
 
 /* ------------------------------------------------------------------ *
- * Summary + footer
+ * Empty report and footers
  * ------------------------------------------------------------------ */
 
 function renderEmptyReport(ctx: Ctx, options: TradeLogPdfOptions) {
   startPage(ctx, {
-    eyebrow: "GOLD JOURNAL · PRIVATE PERFORMANCE REPORT",
-    title: `No trades found for the selected period`,
+    eyebrow: "GOLD JOURNAL · PERFORMANCE REPORT",
+    title: "No trades found for the selected period",
     continued: "No trades found",
-    titleSize: 16,
+    titleSize: 18,
     metrics: ANALYSIS_METRICS,
   });
   ctx.doc.setFontSize(9);
-  writeWrapped(ctx, `Account: ${options.accountName}`, { color: PDF_COLORS.text, lineHeight: 4.2, fontSize: 9 });
-  writeWrapped(ctx, `Selected date range: ${options.rangeLabel}`, { color: PDF_COLORS.text, lineHeight: 4.2, fontSize: 9 });
-  ctx.y += 2;
-  writeWrapped(ctx, "No trade matched the selected account and date range, so there is nothing to export. Change the range, or add trades to this account, and run the export again.", { color: PDF_COLORS.muted, lineHeight: 4.2, fontSize: 8.4 });
+  writeWrapped(ctx, `Account: ${options.accountName}`, { color: PDF_COLORS.ink, lineHeight: 4.4, fontSize: 9 });
+  writeWrapped(ctx, `Selected date range: ${options.rangeLabel}`, { color: PDF_COLORS.ink, lineHeight: 4.4, fontSize: 9 });
+  ctx.y += 3;
+  writeWrapped(ctx, "No trade matched the selected account and date range, so there is nothing to export. Change the range, or add trades to this account, and run the export again.", { color: PDF_COLORS.inkSoft, lineHeight: 4.4, fontSize: 8.6 });
 }
 
 function renderFooters(doc: PdfDoc, options: TradeLogPdfOptions, total: number) {
   const label = `Gold Journal · ${options.accountName} · ${options.rangeLabel}`;
   for (let page = 1; page <= total; page += 1) {
     doc.setPage(page);
-    doc.setFontSize(6.6);
-    setText(doc, PDF_COLORS.dim);
+    doc.setFontSize(6.4);
+    setText(doc, PDF_COLORS.inkFaint);
     doc.text(label, PDF_PAGE.margin, PDF_PAGE.footerBaseline);
     doc.text(`Page ${page} / ${total}`, PDF_PAGE.width - PDF_PAGE.margin, PDF_PAGE.footerBaseline, { align: "right" });
   }
@@ -806,8 +1199,8 @@ export type TradeLogPdfOptions = {
 
 /**
  * Renders the whole report: two pages per trade (complete data table, then its
- * screenshot), the period analysis, and a footer on every page — all from the
- * same exported trade set, with one screenshot fetch per unique URL.
+ * screenshot evidence), the four analysis pages, and a footer on every page — all
+ * from the same exported trade set, with one screenshot fetch per unique URL.
  */
 export async function renderTradeLogPdf(doc: PdfDoc, options: TradeLogPdfOptions) {
   const ctx: Ctx = {
@@ -816,10 +1209,10 @@ export async function renderTradeLogPdf(doc: PdfDoc, options: TradeLogPdfOptions
     y: PDF_PAGE.margin,
     bodyTop: PDF_PAGE.margin,
     bottom: contentBottom(),
-    contentWidth: contextWidth(),
+    contentWidth: contentWidth(),
     metrics: TRADE_METRICS[1],
     header: { eyebrow: "", title: "", continued: "" },
-    titleSize: 15,
+    titleSize: 16,
   };
   if (!options.trades.length) {
     renderEmptyReport(ctx, options);
@@ -831,11 +1224,12 @@ export async function renderTradeLogPdf(doc: PdfDoc, options: TradeLogPdfOptions
   for (let index = 0; index < options.trades.length; index += 1) {
     const row = options.trades[index];
     const model = buildTradePdfModel(row.trade, { runningBalance: row.runningBalance ?? null });
+    const position = `Trade ${String(index + 1).padStart(2, "0")} / ${String(options.trades.length).padStart(2, "0")}`;
     renderTradeDataPage(ctx, model, index, options.trades.length);
-    await renderScreenshotPage(ctx, { model, position: `Trade ${String(index + 1).padStart(2, "0")} / ${String(options.trades.length).padStart(2, "0")}`, fetchImage });
+    await renderScreenshotPage(ctx, { model, position, fetchImage });
   }
   const analysis = options.analysis ?? buildPeriodAnalysis(options.trades.map(row => row.trade), { accountName: options.accountName, rangeLabel: options.rangeLabel });
-  renderAnalysis(ctx, options, analysis);
+  for (const page of analysis.pages) renderAnalysisPage(ctx, page, options.rangeLabel, options.mode, analysis.total);
   const total = doc.getNumberOfPages();
   renderFooters(doc, options, total);
   return { pages: total, trades: options.trades.length, summary: options.summary, analysis };

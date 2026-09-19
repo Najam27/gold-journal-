@@ -96,7 +96,7 @@ describe("BulkPdfExporter", () => {
     await waitFor(() => expect(doc.savedAs).toContain("Funded-Gold"));
     const written = doc.texts.join("\n");
     // The complete canonical model reaches the document, not a hand-picked subset.
-    ["TRADE ID", "MT5 TICKET", "SETUP QUALITY", "CONFIRMATION", "PLANNED R:R", "ACTUAL P&L", "RUNNING BALANCE", "PRE-TRADE CHECKLIST", "JOURNAL NOTES", "BEFORE TRADE", "SCREENSHOT EVIDENCE"].forEach(label => expect(written).toContain(label));
+    ["TRADE ID", "MT5 TICKET", "SETUP QUALITY", "CONFIRMATION", "PLANNED R:R", "ACTUAL P&L", "RUNNING BALANCE", "PRE-TRADE CHECKLIST", "JOURNAL NOTE", "BEFORE TRADE", "SCREENSHOT EVIDENCE"].forEach(label => expect(written).toContain(label));
     expect(written).toContain("#987654");
     expect(written).toContain("Waited for the retest");
     expect(written).toContain("calm");

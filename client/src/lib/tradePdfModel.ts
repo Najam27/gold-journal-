@@ -3,25 +3,30 @@
  *
  * `TradeDetailDialog` is the authoritative view of a trade (`Trade data →
  * canonical Trade Card model → UI Trade Card`). This module is the *same* step
- * for export (`Trade data → canonical Trade Card model → PDF Trade Card`), so
- * the PDF cannot drift away from the trade card a trader sees on screen.
+ * for export (`Trade data → canonical Trade Card model → PDF report`), so the
+ * document cannot drift away from the trade a trader sees on screen.
+ *
+ * The model is presentation-neutral but structured for a report: every field
+ * carries its own label, value, tone, and layout hint, and the trade's key
+ * figures, checklist state, and process classification are exposed as typed data
+ * rather than being re-derived by the renderer. A new persisted column therefore
+ * has exactly one place to appear, and a new report block can only show what the
+ * model already publishes.
  *
  * Rules this module enforces:
- *   • every persisted trade field has a labelled home in one of the sections, so
- *     nothing that is readable on the card can be silently dropped from the PDF;
+ *   • every persisted trade field has a labelled home, so nothing readable on the
+ *     card can be silently dropped from the report;
  *   • a field that exists but was never recorded renders `—` instead of
  *     disappearing, which keeps the exported schema honest;
- *   • a persisted property this module does not know about is surfaced in an
- *     "additional recorded fields" list instead of being discarded, so adding a
- *     new column cannot quietly miss the export;
+ *   • a persisted property this module does not know about is surfaced under
+ *     "Additional recorded fields" instead of being discarded;
  *   • internal plumbing (`userId`, `accountId`, `screenshotKey`, timestamps,
- *     `clientMutationId`) never reaches the document. The private storage KEY is
- *     the only thing kept back — the browser-facing signed `screenshotUrl` and
- *     the non-sensitive original `screenshotName` travel with the trade exactly
- *     as they do in the UI.
+ *     `clientMutationId`) never reaches the document — the browser-facing signed
+ *     `screenshotUrl` and the original `screenshotName` travel with the trade
+ *     exactly as they do in the UI.
  *
  * Text is sanitized for the PDF writer (control characters removed) but is NEVER
- * truncated: long journal entries wrap and continue onto following pages.
+ * truncated: long journal entries wrap and continue onto another page.
  */
 
 import { MISTAKE_BY_TAG, PRE_TRADE_GATE_ITEMS, TRADE_CLASSIFICATION_LABELS, TRADE_CLASSIFICATION_SUMMARY, classifyTradeProcess, detectBehavioralTags, type TradeClassification } from "@/lib/psychology";
@@ -33,18 +38,28 @@ export const PDF_MISSING = "—";
 
 export type PdfTrade = Record<string, unknown> & { id?: number | string | null };
 
+/**
+ * How a value should be presented. `signed` means "colour it by the sign of the
+ * number it holds", which is what every P&L, risk, and R figure wants; the other
+ * tones are fixed.
+ */
+export type TradePdfTone = "neutral" | "positive" | "negative" | "signed" | "accent" | "warning";
+
 export type TradePdfField = {
   label: string;
   value: string;
-  /**
-   * Layout hint: the value is expected to be long, so the compact report gives it
-   * the full page width instead of half of it. Purely presentational — the value
-   * itself is always exported in full.
-   */
+  /** Layout hint: the value is long, so the report gives it the full column. */
   wide?: boolean;
+  tone?: TradePdfTone;
+  /** Marks the field as one of the trade's headline figures (the KPI strip). */
+  kpi?: boolean;
 };
+
 export type TradePdfSection = { id: string; title: string; fields: TradePdfField[] };
 export type TradePdfEvidence = { url: string | null; filename: string | null; hasScreenshot: boolean };
+export type TradePdfKpi = { label: string; value: string; tone: TradePdfTone };
+export type TradePdfChecklistItem = { label: string; confirmed: boolean; recorded: boolean };
+export type TradePdfClassification = { key: TradeClassification; label: string; summary: string; tone: TradePdfTone };
 
 export type TradePdfModel = {
   id: number | string | null;
@@ -56,7 +71,13 @@ export type TradePdfModel = {
   session: string;
   pnl: string;
   pnlValue: number;
+  /** Headline figures in the order the report's KPI strip presents them. */
+  kpis: TradePdfKpi[];
   sections: TradePdfSection[];
+  /** Every gate item plus anything recorded outside the current gate. */
+  checklist: TradePdfChecklistItem[];
+  /** Outcome-independent process verdict, shown separately from P&L. */
+  classification: TradePdfClassification;
   psychology: { before: string; during: string; after: string };
   journalNotes: string;
   evidence: TradePdfEvidence;
@@ -66,9 +87,9 @@ export type TradePdfModel = {
 export type TradePdfModelOptions = { runningBalance?: number | null };
 
 /**
- * Technical sanitization only. User text is never sliced: the PDF writer wraps
- * it and continues onto another page instead of dropping characters. Carriage
- * returns are normalized so a pasted Windows note keeps its line structure.
+ * Technical sanitization only. User text is never sliced: the report wraps it and
+ * continues onto another page instead of dropping characters. Carriage returns
+ * are normalized so a pasted Windows note keeps its line structure.
  */
 export function pdfSafeText(value: unknown): string {
   if (value == null) return "";
@@ -81,6 +102,13 @@ export function pdfSafeText(value: unknown): string {
 export function pdfTextValue(value: unknown): string {
   const text = pdfSafeText(value);
   return text.trim() === "" ? PDF_MISSING : text;
+}
+
+/** Resolves a field's tone against its own value (used by every consumer). */
+export function fieldTone(field: { tone?: TradePdfTone; value: string }): TradePdfTone {
+  if (field.tone !== "signed") return field.tone ?? "neutral";
+  if (field.value === PDF_MISSING) return "neutral";
+  return field.value.trim().startsWith("-") ? "negative" : "positive";
 }
 
 function isBlank(value: unknown): boolean {
@@ -164,26 +192,36 @@ export function normalizeChecklist(value: unknown): ChecklistItem[] {
 }
 
 /**
- * The complete checklist display: every confirmed item plus every gate item that
- * was left unconfirmed, so "not evaluated" is visible rather than implied.
+ * The complete checklist as report-ready rows: every confirmed item, then every
+ * gate item that was left unconfirmed, so "not evaluated" is visible rather than
+ * implied. `recorded` distinguishes "left unchecked" from "never saved at all".
  */
-export function checklistText(value: unknown): string {
+export function checklistItems(value: unknown): TradePdfChecklistItem[] {
   const recorded = normalizeChecklist(value);
-  if (!recorded.length) return PDF_MISSING;
   const remaining = new Map(recorded.map(item => [item.id, item]));
-  const lines: string[] = [];
-  for (const item of PRE_TRADE_GATE_ITEMS) {
-    const entry = remaining.get(item.id);
-    if (!entry) { lines.push(`✗ ${item.label} — not confirmed`); continue; }
-    lines.push(entry.checked ? `✓ ${item.label}` : `✗ ${item.label} — not confirmed`);
-    remaining.delete(item.id);
+  const items: TradePdfChecklistItem[] = [];
+  for (const gate of PRE_TRADE_GATE_ITEMS) {
+    const entry = remaining.get(gate.id);
+    if (!entry) { items.push({ label: gate.label, confirmed: false, recorded: false }); continue; }
+    items.push({ label: entry.label, confirmed: entry.checked, recorded: true });
+    remaining.delete(gate.id);
   }
   // Anything recorded outside the current gate is still the trader's own record.
-  for (const entry of recorded) if (remaining.has(entry.id)) lines.push(`${entry.checked ? "✓" : "✗"} ${entry.label}`);
-  return lines.join("\n");
+  for (const entry of recorded) if (remaining.has(entry.id)) items.push({ label: entry.label, confirmed: entry.checked, recorded: true });
+  return items;
 }
 
-/** `confirmed / total` checklist completion, or `—` when nothing was recorded. */
+/**
+ * The checklist as text, for the copy-friendly view. `—` when the trade saved no
+ * checklist at all: the gate items still appear in the structured rows the report
+ * draws, but a text field should not invent a checklist that was never given.
+ */
+export function checklistText(value: unknown): string {
+  const items = checklistItems(value);
+  if (!items.some(item => item.recorded)) return PDF_MISSING;
+  return items.map(item => `${item.confirmed ? "✓" : "✗"} ${item.label}${item.confirmed ? "" : " — not confirmed"}`).join("\n");
+}
+
 export function checklistCompletion(value: unknown): string {
   const ratio = checklistCompletionRatio(value);
   if (ratio == null) return PDF_MISSING;
@@ -195,10 +233,10 @@ export function checklistCompletion(value: unknown): string {
  * average it without parsing the display string. `null` when nothing was saved.
  */
 export function checklistCompletionRatio(value: unknown): { checked: number; total: number; percentage: number } | null {
-  const recorded = normalizeChecklist(value);
-  if (!recorded.length) return null;
+  const items = checklistItems(value);
+  if (!items.some(item => item.recorded)) return null;
   const total = PRE_TRADE_GATE_ITEMS.length;
-  const checked = recorded.filter(item => item.checked).length;
+  const checked = items.filter(item => item.confirmed).length;
   return { checked, total, percentage: total ? Math.round(checked / total * 1000) / 10 : 0 };
 }
 
@@ -215,14 +253,25 @@ export function mistakeTags(trade: PdfTrade, options: { category?: MistakeCatego
   return selected.map(tag => MISTAKE_BY_TAG[tag]?.label ?? tag).join(" · ");
 }
 
-function processClassification(assessment: TradeProcessAssessment): string {
-  const label = TRADE_CLASSIFICATION_LABELS[assessment.classification as TradeClassification] ?? PDF_MISSING;
-  const summary = TRADE_CLASSIFICATION_SUMMARY[assessment.classification as TradeClassification] ?? "";
-  return summary ? `${label} — ${summary}` : label;
+function processClassification(process: TradeProcessAssessment): TradePdfClassification {
+  const key = process.classification;
+  const labels: Record<TradeClassification, { tone: TradePdfTone }> = {
+    GOOD_WIN: { tone: "positive" },
+    BAD_WIN: { tone: "warning" },
+    GOOD_LOSS: { tone: "accent" },
+    BAD_LOSS: { tone: "negative" },
+    NOT_EVALUATED: { tone: "neutral" },
+  };
+  return {
+    key,
+    label: TRADE_CLASSIFICATION_LABELS[key] ?? PDF_MISSING,
+    summary: TRADE_CLASSIFICATION_SUMMARY[key] ?? "",
+    tone: labels[key]?.tone ?? "neutral",
+  };
 }
 
-function processReasons(assessment: TradeProcessAssessment): string {
-  const lines = [...assessment.reasons, ...assessment.observed];
+function processReasons(process: TradeProcessAssessment): string {
+  const lines = [...process.reasons, ...process.observed];
   return lines.length ? lines.join("\n") : PDF_MISSING;
 }
 
@@ -230,87 +279,80 @@ function processReasons(assessment: TradeProcessAssessment): string {
  * Field mapping
  * ------------------------------------------------------------------ */
 
-type FieldSpec = { label: string; keys: string[]; value: (trade: PdfTrade, context: ModelContext) => string; wide?: boolean };
+type FieldSpec = { label: string; keys: string[]; value: (trade: PdfTrade, context: ModelContext) => string; wide?: boolean; tone?: TradePdfTone; kpi?: boolean };
 
-type ModelContext = { runningBalance?: number | null; process: TradeProcessAssessment };
+type ModelContext = { runningBalance?: number | null; process: TradeProcessAssessment; classification: TradePdfClassification };
 
 export const TRADE_PDF_SECTIONS: Array<{ id: string; title: string; fields: FieldSpec[] }> = [
   {
     id: "A",
-    title: "Trade details",
+    title: "Trade overview",
     fields: [
       { label: "Trade ID", keys: ["id"], value: trade => tradeIdLabel(trade.id) },
+      { label: "MT5 ticket", keys: ["mt5Ticket"], value: trade => (isBlank(trade.mt5Ticket) ? PDF_MISSING : `#${pdfSafeText(trade.mt5Ticket)}`) },
       { label: "Trade date", keys: ["tradeDate"], value: trade => pdfTextValue(formatDate(trade.tradeDate as string | number | Date)) },
       { label: "Symbol", keys: ["symbol"], value: trade => pdfTextValue(trade.symbol) },
-      { label: "MT5 ticket", keys: ["mt5Ticket"], value: trade => (isBlank(trade.mt5Ticket) ? PDF_MISSING : `#${pdfSafeText(trade.mt5Ticket)}`) },
       { label: "Session", keys: ["session"], value: trade => pdfTextValue(trade.session) },
       { label: "Direction", keys: ["direction"], value: trade => pdfTextValue(trade.direction) },
       { label: "Result", keys: ["result"], value: trade => pdfTextValue(pdfSafeText(trade.result).replace(/_/g, " ")) },
       { label: "Timeframe", keys: ["timeframe"], value: trade => pdfTextValue(trade.timeframe) },
-    ],
-  },
-  {
-    id: "B",
-    title: "Strategy",
-    fields: [
-      { label: "Level / confluence", keys: ["level"], value: trade => pdfTextValue(trade.level) },
-      { label: "Setup quality", keys: ["setupQuality"], value: trade => pdfTextValue(trade.setupQuality) },
-      { label: "Confirmation", keys: ["confirmationType"], value: trade => pdfTextValue(trade.confirmationType) },
-      { label: "Market condition", keys: ["marketCondition"], value: trade => pdfTextValue(trade.marketCondition) },
-      { label: "Bias alignment", keys: ["biasAlignment"], value: trade => pdfTextValue(trade.biasAlignment) },
-    ],
-  },
-  {
-    id: "C",
-    title: "Execution",
-    fields: [
-      { label: "Execution type", keys: ["executionType"], value: trade => pdfTextValue(trade.executionType) },
-      { label: "SL placement", keys: ["slPlacement"], value: trade => pdfTextValue(trade.slPlacement) },
-      { label: "TP placement", keys: ["tpPlacement"], value: trade => pdfTextValue(trade.tpPlacement) },
-      { label: "Hold quality", keys: ["holdQuality"], value: trade => pdfTextValue(trade.holdQuality) },
-      { label: "Patience score", keys: ["patienceScore"], value: trade => (isBlank(trade.patienceScore) ? PDF_MISSING : `${pdfSafeText(trade.patienceScore)}/5`) },
       { label: "Open time (MT5)", keys: ["openTime"], value: trade => formatPktDateTime(trade.openTime) },
       { label: "Close time (MT5)", keys: ["closeTime"], value: trade => formatPktDateTime(trade.closeTime) },
       { label: "Trade duration", keys: [], value: trade => duration(trade) },
     ],
   },
   {
-    id: "D",
-    title: "Risk & performance",
+    id: "B",
+    title: "Strategy & execution",
     fields: [
-      { label: "Planned risk", keys: ["risk"], value: trade => money(trade.risk) },
-      { label: "Planned reward", keys: ["reward"], value: trade => money(trade.reward) },
-      { label: "Planned R:R", keys: ["risk", "reward"], value: trade => rr(trade.risk, trade.reward) },
-      { label: "Actual P&L", keys: ["pnl"], value: trade => money(trade.pnl) },
-      { label: "Actual R", keys: ["risk", "pnl"], value: trade => actualR(trade.risk, trade.pnl) },
-      { label: "Running balance", keys: ["runningBalance"], value: (_trade, context) => (context.runningBalance == null ? PDF_MISSING : formatMoney(context.runningBalance)) },
-      { label: "MFE", keys: ["mfe"], value: trade => money(trade.mfe) },
-      { label: "MAE", keys: ["mae"], value: trade => money(trade.mae) },
+      { label: "Level / confluence", keys: ["level"], value: trade => pdfTextValue(trade.level), wide: true },
+      { label: "Setup quality", keys: ["setupQuality"], value: trade => pdfTextValue(trade.setupQuality) },
+      { label: "Confirmation", keys: ["confirmationType"], value: trade => pdfTextValue(trade.confirmationType) },
+      { label: "Market condition", keys: ["marketCondition"], value: trade => pdfTextValue(trade.marketCondition) },
+      { label: "Bias alignment", keys: ["biasAlignment"], value: trade => pdfTextValue(trade.biasAlignment) },
+      { label: "Execution type", keys: ["executionType"], value: trade => pdfTextValue(trade.executionType) },
+      { label: "SL placement", keys: ["slPlacement"], value: trade => pdfTextValue(trade.slPlacement) },
+      { label: "TP placement", keys: ["tpPlacement"], value: trade => pdfTextValue(trade.tpPlacement) },
+      { label: "Hold quality", keys: ["holdQuality"], value: trade => pdfTextValue(trade.holdQuality) },
+      { label: "Patience score", keys: ["patienceScore"], value: trade => (isBlank(trade.patienceScore) ? PDF_MISSING : `${pdfSafeText(trade.patienceScore)}/5`), kpi: true },
     ],
   },
   {
-    id: "E",
+    id: "C",
+    title: "Risk & performance",
+    fields: [
+      { label: "Planned risk", keys: ["risk"], value: trade => money(trade.risk), tone: "signed" },
+      { label: "Planned reward", keys: ["reward"], value: trade => money(trade.reward), tone: "signed" },
+      { label: "Planned R:R", keys: ["risk", "reward"], value: trade => rr(trade.risk, trade.reward), kpi: true, tone: "accent" },
+      { label: "Actual P&L", keys: ["pnl"], value: trade => money(trade.pnl), kpi: true, tone: "signed" },
+      { label: "Actual R", keys: ["risk", "pnl"], value: trade => actualR(trade.risk, trade.pnl), kpi: true, tone: "signed" },
+      { label: "Running balance", keys: ["runningBalance"], value: (_trade, context) => (context.runningBalance == null ? PDF_MISSING : formatMoney(context.runningBalance)), tone: "signed" },
+      { label: "MFE", keys: ["mfe"], value: trade => money(trade.mfe), tone: "signed" },
+      { label: "MAE", keys: ["mae"], value: trade => money(trade.mae), tone: "signed" },
+    ],
+  },
+  {
+    id: "D",
     title: "Plan & discipline",
     fields: [
       { label: "Plan status", keys: ["planStatus"], value: trade => pdfTextValue(trade.planStatus) },
       { label: "Planned / unplanned", keys: ["planStatus"], value: trade => (isBlank(trade.planStatus) ? PDF_MISSING : PLAN_STATUS_LABELS[pdfSafeText(trade.planStatus).toUpperCase()] ?? pdfSafeText(trade.planStatus)) },
-      { label: "Pre-trade checklist", keys: ["planChecklist"], value: trade => checklistText(trade.planChecklist), wide: true },
-      { label: "Checklist completion", keys: ["planChecklist"], value: trade => checklistCompletion(trade.planChecklist) },
-      { label: "Process classification", keys: [], value: (_trade, context) => processClassification(context.process) },
-      { label: "Rule adherence", keys: [], value: (_trade, context) => (context.process.ruleAdherence == null ? PDF_MISSING : `${Math.round(context.process.ruleAdherence)}%`) },
+      { label: "Checklist completion", keys: ["planChecklist"], value: trade => checklistCompletion(trade.planChecklist), kpi: true },
+      { label: "Rule adherence", keys: [], value: (_trade, context) => (context.process.ruleAdherence == null ? PDF_MISSING : `${Math.round(context.process.ruleAdherence)}%`), kpi: true },
+      { label: "Process classification", keys: [], value: (_trade, context) => (context.classification.summary ? `${context.classification.label} — ${context.classification.summary}` : context.classification.label), tone: "accent", wide: true },
       { label: "Process review", keys: [], value: (_trade, context) => processReasons(context.process), wide: true },
     ],
   },
   {
-    id: "F",
+    id: "E",
     title: "Process & mistakes",
     fields: [
-      { label: "Mistake / rule-break tags", keys: ["mistake"], value: trade => pdfTextValue(trade.mistake) },
-      { label: "Rule-break tags", keys: ["mistake"], value: trade => mistakeTags(trade, { violationsOnly: true }) },
-      { label: "Analytical mistakes", keys: ["mistake"], value: trade => mistakeTags(trade, { category: "ANALYTICAL" }) },
-      { label: "Execution mistakes", keys: ["mistake"], value: trade => mistakeTags(trade, { category: "EXECUTION" }) },
-      { label: "Emotional triggers", keys: ["mistake"], value: trade => mistakeTags(trade, { category: "EMOTIONAL" }) },
-      { label: "Environmental factors", keys: ["mistake"], value: trade => mistakeTags(trade, { category: "ENVIRONMENTAL" }) },
+      { label: "Mistake tags", keys: ["mistake"], value: trade => pdfTextValue(trade.mistake), wide: true },
+      { label: "Rule-break tags", keys: ["mistake"], value: trade => mistakeTags(trade, { violationsOnly: true }), wide: true },
+      { label: "Analytical mistakes", keys: ["mistake"], value: trade => mistakeTags(trade, { category: "ANALYTICAL" }), wide: true },
+      { label: "Execution mistakes", keys: ["mistake"], value: trade => mistakeTags(trade, { category: "EXECUTION" }), wide: true },
+      { label: "Emotional triggers", keys: ["mistake"], value: trade => mistakeTags(trade, { category: "EMOTIONAL" }), wide: true },
+      { label: "Environmental factors", keys: ["mistake"], value: trade => mistakeTags(trade, { category: "ENVIRONMENTAL" }), wide: true },
     ],
   },
 ];
@@ -324,6 +366,9 @@ export const TRADE_PDF_MAPPED_KEYS: string[] = Array.from(new Set([...TRADE_PDF_
  * ever receives the freshly signed `screenshotUrl` for it.
  */
 export const TRADE_PDF_INTERNAL_KEYS = ["userId", "accountId", "createdAt", "updatedAt", "screenshotKey", "clientMutationId", "localPending"];
+
+/** The KPI strip's figures, in the order the report presents them. */
+export const TRADE_PDF_KPI_LABELS = ["Actual P&L", "Actual R", "Planned R:R", "Rule adherence", "Checklist completion", "Patience score"];
 
 function additionalValue(value: unknown): string | null {
   if (isBlank(value)) return null;
@@ -341,7 +386,7 @@ function additionalValue(value: unknown): string | null {
 
 /**
  * Everything the trade record carries that the sections above do not already
- * show. A future column therefore appears in the PDF automatically instead of
+ * show. A future column therefore appears in the report automatically instead of
  * being forgotten, while internal plumbing stays out.
  */
 export function additionalTradeFields(trade: PdfTrade): TradePdfField[] {
@@ -358,16 +403,23 @@ export function additionalTradeFields(trade: PdfTrade): TradePdfField[] {
 
 /**
  * Builds the complete exported representation of one trade. This is the single
- * source of truth for the PDF trade card; the report writer only lays it out.
+ * source of truth for the PDF report; the renderer only lays it out.
  */
 export function buildTradePdfModel(trade: PdfTrade, options: TradePdfModelOptions = {}): TradePdfModel {
   const process = classifyTradeProcess(trade as Parameters<typeof classifyTradeProcess>[0]);
-  const context: ModelContext = { runningBalance: options.runningBalance ?? null, process };
+  const classification = processClassification(process);
+  const context: ModelContext = { runningBalance: options.runningBalance ?? null, process, classification };
   const sections: TradePdfSection[] = TRADE_PDF_SECTIONS.map(section => ({
     id: section.id,
     title: section.title,
-    fields: section.fields.map(field => ({ label: field.label, value: field.value(trade, context), wide: field.wide })),
+    fields: section.fields.map(field => ({ label: field.label, value: field.value(trade, context), wide: field.wide, tone: field.tone, kpi: field.kpi })),
   }));
+  const allFields = sections.flatMap(section => section.fields);
+  const byLabel = new Map(allFields.map(field => [field.label, field]));
+  const kpis: TradePdfKpi[] = TRADE_PDF_KPI_LABELS
+    .map(label => byLabel.get(label))
+    .filter((field): field is TradePdfField => Boolean(field))
+    .map(field => ({ label: field.label, value: field.value, tone: fieldTone(field) }));
   const result = pdfSafeText(trade.result);
   return {
     id: (trade.id ?? null) as number | string | null,
@@ -379,7 +431,10 @@ export function buildTradePdfModel(trade: PdfTrade, options: TradePdfModelOption
     session: pdfTextValue(trade.session),
     pnl: money(trade.pnl),
     pnlValue: toNumber(trade.pnl),
+    kpis,
     sections,
+    checklist: checklistItems(trade.planChecklist),
+    classification,
     psychology: {
       before: pdfSafeText(trade.emotionBefore),
       during: pdfSafeText(trade.emotionDuring),
