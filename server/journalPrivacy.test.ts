@@ -12,6 +12,12 @@ describe("journal browser-data privacy", () => {
     ["userId", "accountId", "screenshotKey", "createdAt", "updatedAt"].forEach(field => expect(safe).not.toHaveProperty(field));
   });
 
+  it("keeps the trade's own MT5 ticket for the Trade Card and the PDF export, as a string", () => {
+    const safe = toSafeTrade({ id: 7, userId: 21, accountId: 3, mt5Ticket: BigInt("123456789"), session: "London" });
+    expect(safe.mt5Ticket).toBe("123456789");
+    expect(toSafeTrade({ id: 8, session: "London" }).mt5Ticket).toBeNull();
+  });
+
   it("keeps only the public account and journal fields that the interface requires", () => {
     const account = toSafeAccount({ id: 3, userId: 21, name: "Funded Gold", startingBalance: "1000", createdAt: new Date(), updatedAt: new Date() });
     const plan = toSafeJournalRecord({ id: 4, userId: 21, accountId: 3, planDate: new Date(), planNotes: "Wait for London", createdAt: new Date(), updatedAt: new Date() });
