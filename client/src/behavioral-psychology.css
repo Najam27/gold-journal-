@@ -90,6 +90,21 @@
 .dev-readiness.safe { border-color: color-mix(in srgb, var(--success) 40%, var(--gj-line)); }
 .dev-readiness.safe > svg { color: var(--success); }
 
+/* Decision-oriented summary: four answers, then the full analytics on demand. */
+.dev-brief { display: grid; gap: 12px; }
+.dev-brief-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: 10px; }
+.dev-brief-card { display: grid; gap: 5px; min-width: 0; padding: 13px 14px; border: 1px solid var(--gj-line); border-radius: 11px; background: var(--gj-panel-2); }
+.dev-brief-card > span { color: var(--gj-dim); font: 800 8px "DM Mono", monospace; letter-spacing: .09em; }
+.dev-brief-card strong { color: var(--gj-text); font-size: 13px; line-height: 1.35; }
+.dev-brief-card small { color: var(--gj-subtext); font-size: 9px; line-height: 1.45; }
+.dev-brief-card.safe { border-color: color-mix(in srgb, var(--success) 38%, var(--gj-line)); }
+.dev-brief-card.safe > span { color: var(--success); }
+.dev-brief-card.watch { border-color: color-mix(in srgb, var(--warning) 45%, var(--gj-line)); }
+.dev-brief-card.watch > span { color: var(--warning); }
+.dev-brief-card.risk { border-color: color-mix(in srgb, var(--destructive) 42%, var(--gj-line)); }
+.dev-brief-card.risk > span { color: var(--destructive); }
+.dev-details-toggle { justify-self: start; margin-top: 14px; padding: 7px 0; border: 0; background: transparent; color: var(--gj-gold); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; cursor: pointer; }
+.dev-details-toggle:hover { text-decoration: underline; }
 .dev-versus { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 7.5rem), 1fr)); gap: 10px; }
 .dev-versus > * { min-width: 0; }
 .dev-versus > div { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--gj-line); border-radius: 10px; background: var(--gj-panel-2); }
@@ -274,6 +289,7 @@
 }
 
 @media (max-width: 460px) {
+  .dev-brief-grid { grid-template-columns: minmax(0, 1fr); }
   .dev-stat-grid { grid-template-columns: minmax(0, 1fr); }
   .dev-stat small { white-space: normal; }
   .dev-score strong { font-size: 30px; }

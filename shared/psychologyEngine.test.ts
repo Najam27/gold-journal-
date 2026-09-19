@@ -4,6 +4,7 @@ import {
   MISTAKE_TAXONOMY,
   analyzeTraderDevelopment,
   buildTraderSessions,
+  calculateBehavioralFeedback,
   calculateBehavioralFocus,
   calculateBehavioralPnl,
   calculateDisciplineScore,
@@ -18,6 +19,10 @@ import {
   evaluateCooldown,
   evaluatePreTradeGate,
   groupTradingSessions,
+  hasSessionReview,
+  parseBehavioralObjectiveStatus,
+  parsePostSessionBehavioralReview,
+  parsePsychologyTriggers,
   type PsychologyPlan,
   type PsychologyTrade,
   type TraderSession,
@@ -365,5 +370,97 @@ describe("composition and edge cases", () => {
     const snapshot = JSON.stringify(trade);
     analyzeTraderDevelopment({ trades: [trade], plans: [bookPlan] });
     expect(JSON.stringify(trade)).toBe(snapshot);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * The behavioural loop: triggers, the objective verdict, and the summary the
+ * Psychology page leads with.
+ * ------------------------------------------------------------------ */
+
+describe("behavioural triggers and the objective verdict", () => {
+  it("reads trigger keys from every serialisation the journal has written", () => {
+    expect(parsePsychologyTriggers(["FOMO", "REVENGE"])).toEqual(["FOMO", "REVENGE"]);
+    expect(parsePsychologyTriggers("FOMO|IMPATIENCE")).toEqual(["FOMO", "IMPATIENCE"]);
+    expect(parsePsychologyTriggers('["STRESS"]')).toEqual(["STRESS"]);
+    expect(parsePsychologyTriggers("[")).toEqual([]);
+    expect(parsePsychologyTriggers(null)).toEqual([]);
+    expect(parsePsychologyTriggers(["FOMO", "FOMO", ""])).toEqual(["FOMO"]);
+  });
+
+  it("accepts only the recorded objective verdicts", () => {
+    expect(parseBehavioralObjectiveStatus("YES")).toBe("YES");
+    expect(parseBehavioralObjectiveStatus("partially")).toBe("PARTIALLY");
+    expect(parseBehavioralObjectiveStatus("No")).toBe("NO");
+    expect(parseBehavioralObjectiveStatus("maybe")).toBeNull();
+    expect(parseBehavioralObjectiveStatus(null)).toBeNull();
+  });
+
+  it("reads the compact post-session review without inventing answers", () => {
+    expect(parsePostSessionBehavioralReview({ followPlan: "NO", nextSessionChange: "Wait", triggerAction: "" })).toEqual({ followPlan: "NO", nextSessionChange: "Wait", triggerAction: "" });
+    expect(parsePostSessionBehavioralReview({ followPlan: null, nextSessionChange: "", triggerAction: "" })).toBeNull();
+    expect(parsePostSessionBehavioralReview(null)).toBeNull();
+  });
+
+  it("counts a review even when the optional ratings were left empty", () => {
+    expect(hasSessionReview({ planDate: "2026-08-04", behavioralObjectiveStatus: "YES" })).toBe(true);
+    expect(hasSessionReview({ planDate: "2026-08-04", lessons: "Wait for the close" })).toBe(true);
+    expect(hasSessionReview({ planDate: "2026-08-04", postSessionBehavioralReview: { followPlan: "PARTIALLY" } })).toBe(true);
+    expect(hasSessionReview({ planDate: "2026-08-04" })).toBe(false);
+    expect(hasSessionReview(null)).toBe(false);
+  });
+
+  it("exposes the saved loop values on the built session", () => {
+    const plan: PsychologyPlan = { planDate: "2026-08-04T08:00:00+05:00", psychologyTriggers: ["REVENGE"], behavioralObjectiveStatus: "NO" };
+    const [session] = buildTraderSessions(brokenTrades, [plan]);
+    expect(session.behavioralTriggers).toEqual(["REVENGE"]);
+    expect(session.objectiveStatus).toBe("NO");
+    expect(session.behavioralReviewed).toBe(true);
+  });
+});
+
+describe("behavioural feedback summary", () => {
+  const plans: PsychologyPlan[] = [
+    { planDate: "2026-08-03T08:00:00+05:00", riskLimit: "200", maxTrades: 2, behavioralFocus: "Patience", behavioralObjectiveStatus: "PARTIALLY", psychologyTriggers: ["FOMO", "IMPATIENCE"], postSessionBehavioralReview: { followPlan: "PARTIALLY", nextSessionChange: "Wait", triggerAction: "" } },
+    { planDate: "2026-08-04T08:00:00+05:00", riskLimit: "200", maxTrades: 2, behavioralFocus: "Risk discipline", behavioralObjectiveStatus: "NO", psychologyTriggers: ["FOMO", "REVENGE"], primaryPsychologyTrigger: "REVENGE" },
+  ];
+
+  it("answers what is repeating and what sits beside a rule break", () => {
+    const feedback = calculateBehavioralFeedback(buildTraderSessions(allTrades, plans));
+    expect(feedback.sessions).toBe(2);
+    expect(feedback.focusLabel).toBe("Risk discipline");
+    expect(feedback.focusStatus).toBe("NO");
+    expect(feedback.repeatedTrigger).toMatchObject({ key: "FOMO", label: "Fear of missing out", sessions: 2, violations: 1 });
+    // FOMO is recorded AND flagged as a violation that day; REVENGE was recorded
+    // but never flagged, so it is not reported as sitting beside a rule break.
+    expect(feedback.violationLinkedTriggers.map(entry => entry.key)).toEqual(["FOMO"]);
+    expect(feedback.triggerCounts.map(entry => entry.key)).toEqual(expect.arrayContaining(["REVENGE"]));
+    expect(feedback.reviewedSessions).toBe(2);
+    expect(feedback.objectiveHoldRate).toBe(25);
+    expect(feedback.nextAction).toMatch(/Fear of missing out/);
+  });
+
+  it("ignores the explicit no-trigger answer", () => {
+    const feedback = calculateBehavioralFeedback(buildTraderSessions(allTrades, [{ ...plans[0], psychologyTriggers: ["NONE"] }]));
+    expect(feedback.triggerCounts).toEqual([]);
+    expect(feedback.taggedSessions).toBe(0);
+    expect(feedback.repeatedTrigger).toBeNull();
+  });
+
+  it("reports no data instead of a score when nothing was recorded", () => {
+    const feedback = calculateBehavioralFeedback([]);
+    expect(feedback.sessions).toBe(0);
+    expect(feedback.objectiveHoldRate).toBeNull();
+    expect(feedback.repeatedTrigger).toBeNull();
+    expect(feedback.violationLinkedTriggers).toEqual([]);
+    expect(feedback.reviewStreak).toBe(0);
+    expect(feedback.note).toMatch(/No triggers or objective verdicts are saved yet/);
+  });
+
+  it("never changes the P&L or discipline numbers it reads alongside", () => {
+    const report = analyzeTraderDevelopment({ trades: allTrades, plans });
+    expect(report.behavioralPnl.totalPnl).toBe(-110);
+    expect(report.counts).toMatchObject({ GOOD_WIN: 1, BAD_WIN: 1, GOOD_LOSS: 2, BAD_LOSS: 1 });
+    expect(report.totals.reviewed).toBe(2);
   });
 });

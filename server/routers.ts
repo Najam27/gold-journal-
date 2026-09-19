@@ -1,4 +1,5 @@
 import { goldRouter } from "./goldRouter";
+import { planReviewRouter } from "./planReviewRouter";
 import { systemRouter } from "./_core/systemRouter";
 import { TRPCError } from "@trpc/server";
 import { publicProcedure, router } from "./_core/trpc";
@@ -10,6 +11,9 @@ export const appRouter = router({
     logout: publicProcedure.mutation(() => ({ success: true } as const)),
   }),
   ...goldRouter._def.record,
+  // The daily plan's behavioural close-out (copy provenance, triggers, the
+  // objective verdict, and the post-session behavioural review).
+  ...planReviewRouter._def.record,
 });
 
 export type AppRouter = typeof appRouter;

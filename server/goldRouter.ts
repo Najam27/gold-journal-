@@ -72,6 +72,12 @@ const isFuturePktTimestamp = (timestamp: number, now = new Date()) => getPktDate
 const canonicalPktPlanDate = (timestamp: number) => new Date(pktDateToTimestamp(getPktDateKey(timestamp)));
 const analysisInput = z.object({ accountId: z.number().int().positive(), filters: analysisFiltersInput });
 const analysisCompareInput = z.object({ accountId: z.number().int().positive(), current: analysisFiltersInput, previous: analysisFiltersInput });
+// The daily plan's behavioural close-out — copy provenance, the psychological
+// triggers, the objective verdict, and the short post-session review — is
+// persisted by `planReview.save` in ./planReviewRouter.ts, on the same
+// (userId, accountId, planDate) row this router owns. It lives there so the
+// planning payload and the behavioural payload stay separately validatable
+// while remaining one plan record.
 const lossFloorMetrics = new Set(["daily_loss", "weekly_drawdown"]);
 const goalInput = z.object({ accountId: z.number().int().positive(), name: z.string().trim().min(1).max(120), description: optionalText(500), period: z.enum(["DAILY", "WEEKLY", "MONTHLY"]), metric: z.string().trim().min(1).max(80), comparison: z.enum(["GTE", "LTE"]), target: money(-1_000_000), notify: z.boolean().default(true), active: z.boolean().default(true) }).superRefine((value, ctx) => {
   if (lossFloorMetrics.has(value.metric) && value.target >= 0) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["target"], message: "Loss controls use a negative P&L floor, for example -100." });
@@ -777,6 +783,8 @@ export const goldRouter = router({
       return { success: true };
     }),
   }),
+  // The daily plan router. Planning fields, the pre-session check-in, the
+  // post-session review, and copy provenance are one record.
   plans: router({
     save: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), planDate: timestampInput, preBias: optionalText(40), marketContext: optionalText(3000), keyLevels: optionalText(3000), sessionFocus: z.array(z.string().trim().max(120)).max(9), eventRisk: optionalText(1500), longScenario: optionalText(3000), shortScenario: optionalText(3000), noTradeCondition: optionalText(2000), invalidationLevel: optionalText(1000), riskLimit: optionalText(40), maxTrades: z.number().int().min(1).max(99).nullable(), sizingPlan: optionalText(2000), planNotes: optionalText(5000), rulesPlanned: z.array(z.object({ id: z.string().trim().min(1).max(80), text: z.string().trim().max(500), checked: z.boolean() })).max(30), emotionalState: z.enum(["", "Calm", "Neutral", "Anxious", "Frustrated", "Overconfident", "Tired"]).optional().default(""), energyLevel: z.number().int().min(1).max(5).nullable().optional().default(null), focusLevel: z.number().int().min(1).max(5).nullable().optional().default(null), confidenceLevel: z.number().int().min(1).max(5).nullable().optional().default(null), stressLevel: z.number().int().min(1).max(5).nullable().optional().default(null), behavioralFocus: optionalText(80), psychologyRisk: optionalText(1000), emotionStart: z.array(z.string().trim().max(80)).max(20), emotionEnd: z.array(z.string().trim().max(80)).max(20), executionScore: z.number().int().min(1).max(5).nullable(), rulesFollowed: z.array(z.object({ id: z.string().trim().min(1).max(80), yes: z.boolean() })).max(30), whatWentWell: optionalText(5000), whatWentWrong: optionalText(5000), executionNotes: optionalText(5000), planDeviation: optionalText(5000), lessons: optionalText(2000), tomorrowFocus: optionalText(2000), overallRating: z.number().int().min(1).max(5).nullable() })).mutation(async ({ ctx, input }) => {
       await getOwnedAccount(ctx.user.id, input.accountId);

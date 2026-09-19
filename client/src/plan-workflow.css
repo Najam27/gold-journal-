@@ -1,0 +1,104 @@
+/**
+ * Plan & Execution workflow layer.
+ *
+ * The plan desk is a staged workflow (copy → plan → check-in → review) rather
+ * than one long form, so this file styles the workflow chrome: the session
+ * status strip, the copy controls and their change list, the compact
+ * plan-versus-execution read, the trigger chips, and the review actions.
+ *
+ * Everything is built from the shared theme tokens so the surface stays legible
+ * in the app's palette, and every block stacks on a phone without a horizontal
+ * scroll.
+ */
+
+/* Header: date + copy controls ------------------------------------------- */
+.plan-date-control { flex-wrap: wrap; justify-content: flex-end; }
+.plan-copy-select { display: inline-flex; align-items: center; gap: 7px; min-height: 35px; padding: 0 9px; border: 1px solid var(--gj-line); border-radius: 8px; background: var(--gj-control); color: var(--gj-subtext); font-size: 10px; }
+.plan-copy-select select { min-width: 9.5rem; border: 0; background: transparent; color: var(--gj-text); font: 600 11px "DM Mono", monospace; }
+.plan-copy-select:focus-within { border-color: var(--ring); box-shadow: 0 0 0 3px var(--gj-focus); }
+.plan-copy-select option { background: var(--gj-panel); color: var(--gj-text); }
+
+/* Session status --------------------------------------------------------- */
+.plan-status-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 16px; }
+.session-status { display: grid; gap: 3px; min-width: min(100%, 16rem); padding: 9px 12px; border: 1px solid var(--gj-line); border-radius: 9px; background: var(--gj-panel-2); }
+.session-status b { color: var(--gj-text); font: 800 9px "DM Mono", monospace; letter-spacing: .08em; }
+.session-status small { color: var(--gj-subtext); font-size: 10px; line-height: 1.45; }
+.session-status.safe { border-color: color-mix(in srgb, var(--success) 40%, var(--gj-line)); }
+.session-status.safe b { color: var(--success); }
+.session-status.watch { border-color: color-mix(in srgb, var(--warning) 45%, var(--gj-line)); }
+.session-status.watch b { color: var(--warning); }
+.session-status.risk { border-color: color-mix(in srgb, var(--destructive) 45%, var(--gj-line)); }
+.session-status.risk b { color: var(--destructive); }
+/* Desktop always shows the history column, so the toggle only exists where the
+   column is actually hidden. */
+.plan-archive-toggle { display: none; }
+
+/* Copy provenance -------------------------------------------------------- */
+.plan-copy-notice { margin: 0 0 14px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--gj-gold) 38%, var(--gj-line)); border-radius: 9px; background: color-mix(in srgb, var(--gj-gold) 8%, var(--gj-panel)); color: var(--gj-text); font-size: 11px; line-height: 1.5; }
+.plan-copy-basis { display: grid; gap: 9px; margin: 0 0 14px; padding: 12px; border: 1px solid var(--gj-line); border-radius: 10px; background: var(--gj-panel-2); }
+.plan-copy-basis-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--gj-gold); }
+.plan-copy-basis-head strong { color: var(--gj-text); font-size: 11px; }
+.plan-copy-basis-head span { color: var(--gj-dim); font-size: 10px; }
+.copy-changed-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.copy-changed-list li { padding: 3px 7px; border: 1px solid var(--gj-line); border-radius: 99px; background: var(--gj-panel); color: var(--gj-subtext); font-size: 9px; }
+.copy-changed-list li.changed { border-color: color-mix(in srgb, var(--gj-gold) 45%, var(--gj-line)); color: var(--gj-gold-text); }
+.copy-changed-list.unchanged { color: var(--gj-dim); font-size: 10px; }
+
+/* Plan history ----------------------------------------------------------- */
+.plan-history-list { display: grid; gap: 7px; margin-top: 14px; }
+.plan-history-row { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--gj-line); border-radius: 9px; background: var(--gj-panel-2); }
+.plan-history-row strong { display: block; color: var(--gj-text); font: 700 10px "DM Mono", monospace; }
+.plan-history-row span { display: block; margin-top: 3px; color: var(--gj-subtext); font-size: 10px; line-height: 1.4; }
+.plan-history-row small { display: block; margin-top: 3px; color: var(--gj-dim); font-size: 9px; line-height: 1.4; }
+.plan-history-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.plan-history-actions em { font: 800 8px "DM Mono", monospace; letter-spacing: .06em; }
+.plan-history-actions em.safe { color: var(--success); }
+.plan-history-actions em.watch { color: var(--warning); }
+.plan-history-actions button { border: 0; background: transparent; color: var(--gj-gold); font-size: 10px; cursor: pointer; }
+.plan-history-actions button:hover { text-decoration: underline; }
+
+/* Progressive disclosure ------------------------------------------------- */
+.plan-advanced-toggle { margin-top: 14px; padding: 6px 0; border: 0; background: transparent; color: var(--gj-gold); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; cursor: pointer; }
+.plan-advanced-toggle:hover { text-decoration: underline; }
+.plan-advanced-grid { padding-top: 4px; }
+
+/* Plan vs execution ------------------------------------------------------ */
+.plan-versus-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: 10px; margin-bottom: 14px; }
+.plan-versus-strip > div { display: grid; gap: 4px; min-width: 0; padding: 12px; border: 1px solid var(--gj-line); border-radius: 10px; background: var(--gj-panel-2); }
+.plan-versus-strip span { color: var(--gj-dim); font: 800 8px "DM Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.plan-versus-strip strong { color: var(--gj-text); font-size: 16px; }
+.plan-versus-strip small { color: var(--gj-subtext); font-size: 9px; line-height: 1.45; }
+.plan-versus-strip .safe { border-color: color-mix(in srgb, var(--success) 40%, var(--gj-line)); }
+.plan-versus-strip .safe strong { color: var(--success); }
+.plan-versus-strip .watch { border-color: color-mix(in srgb, var(--warning) 45%, var(--gj-line)); }
+.plan-versus-strip .watch strong { color: var(--warning); }
+.plan-deviation-list { display: grid; gap: 6px; margin: 0 0 14px; padding-left: 17px; color: var(--gj-subtext); font-size: 10px; line-height: 1.5; }
+.plan-deviation-note { margin: 0 0 14px; padding: 10px 12px; border-left: 2px solid var(--gj-gold); background: var(--gj-panel-2); color: var(--gj-subtext); font-size: 10px; line-height: 1.55; }
+
+/* Trigger chips ---------------------------------------------------------- */
+.trigger-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.trigger-chips button { padding: 6px 9px; border: 1px solid var(--gj-line); border-radius: 99px; background: var(--gj-panel-2); color: var(--gj-subtext); font-size: 10px; cursor: pointer; }
+.trigger-chips button:hover { border-color: color-mix(in srgb, var(--gj-gold) 40%, var(--gj-line)); }
+.trigger-chips button.selected { border-color: var(--gj-gold); background: color-mix(in srgb, var(--gj-gold) 14%, var(--gj-panel)); color: var(--gj-gold-text); }
+
+/* Optional ratings and review actions ------------------------------------ */
+.plan-optional-ratings { margin-top: 16px; border: 1px solid var(--gj-line); border-radius: 9px; background: var(--gj-panel-2); }
+.plan-optional-ratings summary { padding: 11px 13px; color: var(--gj-subtext); font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; cursor: pointer; }
+.plan-optional-ratings[open] summary { border-bottom: 1px solid var(--gj-line); color: var(--gj-text); }
+.plan-optional-ratings .field-grid { padding: 13px; }
+.plan-review-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+/* Phones: nothing scrolls sideways, and history stays reachable ---------- */
+@media (max-width: 760px) {
+  .plan-date-control { justify-content: stretch; }
+  .plan-date-control .button { flex: 1 1 auto; }
+  .plan-copy-select { flex: 1 1 100%; }
+  .plan-copy-select select { flex: 1 1 auto; }
+  .plan-status-strip { align-items: stretch; }
+  .session-status { min-width: 100%; }
+  .plan-archive-toggle { display: inline-flex; margin-left: 0; }
+  .plan-layout.professional-plan-layout .mini-calendar { display: none; }
+  .plan-layout.professional-plan-layout.archive-open .mini-calendar { display: block; }
+  .plan-review-actions { justify-content: stretch; }
+  .plan-review-actions .button { flex: 1 1 auto; }
+}

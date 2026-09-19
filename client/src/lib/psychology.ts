@@ -15,10 +15,13 @@ import {
   DEFAULT_BEHAVIOR_CONFIG,
   analyzeTraderDevelopment,
   buildTraderSessions,
+  calculateBehavioralFeedback,
   classifyTradeProcess,
   detectDuplicateTickets,
   evaluatePreTradeGate,
+  parsePostSessionBehavioralReview,
   type BehaviorConfig,
+  type BehavioralFeedback,
   type DisciplineComponent,
   type PsychologyCheckin,
   type PsychologyPlan,
@@ -29,10 +32,20 @@ import {
 import { getPktDateKey } from "@shared/pktDate";
 
 export {
+  BEHAVIORAL_OBJECTIVE_STATUSES,
+  BEHAVIORAL_OBJECTIVE_STATUS_LABELS,
+  BEHAVIORAL_OBJECTIVES,
   DEFAULT_BEHAVIOR_CONFIG,
   DEFAULT_DISCIPLINE_WEIGHTS,
   DISCIPLINE_COMPONENT_LABELS,
   EMOTIONAL_STATES,
+  PSYCHOLOGY_TRIGGERS,
+  calculateBehavioralFeedback,
+  hasSessionReview,
+  parseBehavioralObjectiveStatus,
+  parsePostSessionBehavioralReview,
+  parsePsychologyTriggers,
+  psychologyTriggerLabel,
   MISTAKE_BY_TAG,
   MISTAKE_CATEGORY_LABELS,
   MISTAKE_TAXONOMY,
@@ -57,10 +70,13 @@ export {
 } from "@shared/psychologyEngine";
 export type {
   BehaviorConfig,
+  BehavioralFeedback,
   BehavioralFocus,
   BehavioralInsight,
+  BehavioralObjectiveStatus,
   BehavioralPnl,
   BehavioralTag,
+  PostSessionBehavioralReview,
   CooldownState,
   DisciplineComponent,
   DisciplineScore,
@@ -78,20 +94,19 @@ export type {
   WeeklyPsychology,
 } from "@shared/psychologyEngine";
 
-/** The one primary behavioural objective a trader can choose per session. */
-export const BEHAVIORAL_OBJECTIVES = [
-  "Patience",
-  "FOMO control",
-  "Revenge control",
-  "Impulse control",
-  "Overconfidence control",
-  "Loss acceptance",
-  "Rule adherence",
-  "Emotional stability",
-  "Overtrading control",
-  "Risk discipline",
-  "Waiting for confirmation",
-] as const;
+/**
+ * The behavioural report plus its decision-oriented summary.
+ *
+ * `analyzeTraderDevelopment` owns every number. This adapter appends the
+ * "what is improving / what repeats / what to focus on next" block so the
+ * Psychology page and the plan review read the same computed values instead of
+ * each deriving their own.
+ */
+export type TraderDevelopment = TraderDevelopmentReport & { behavioralFeedback: BehavioralFeedback };
+
+export function withBehavioralFeedback(report: TraderDevelopmentReport, config?: Partial<BehaviorConfig>): TraderDevelopment {
+  return { ...report, behavioralFeedback: calculateBehavioralFeedback(report.sessions, config) };
+}
 
 export type TraderProfile = {
   identityStatement?: string | null;
@@ -144,20 +159,30 @@ export function todayKey(now: Date = new Date()) {
  * Builds the full trader development report for one account.
  * Memoise the result: it walks every loaded trade and plan once.
  */
-export function buildTraderDevelopment(input: JournalBehaviorInput): TraderDevelopmentReport {
+export function buildTraderDevelopment(input: JournalBehaviorInput): TraderDevelopment {
   const trades = (input.trades ?? []) as PsychologyTrade[];
   const plans = (input.plans ?? []) as PsychologyPlan[];
   const profile = input.traderProfile ?? null;
+  const config = behaviorConfigFromProfile(profile);
   const report = analyzeTraderDevelopment({
     trades,
     plans,
     identityStatement: profile?.identityStatement ?? "",
     weights: disciplineWeightsFromProfile(profile),
-    config: behaviorConfigFromProfile(profile),
+    config,
     checkin: input.checkin ?? null,
     today: todayKey(),
   });
-  return report;
+  return withBehavioralFeedback(report, config);
+}
+
+/**
+ * The saved post-session behavioural review for one plan, or null when the
+ * session has not answered it yet. Read-only: it never writes or defaults a
+ * value the trader did not give.
+ */
+export function planBehavioralReview(plan: PsychologyPlan | null | undefined) {
+  return parsePostSessionBehavioralReview(plan?.postSessionBehavioralReview);
 }
 
 /** The saved plan for one Pakistan-time day, if any. */
@@ -209,6 +234,10 @@ export function tradeProcessContext(options: { day: string; trades: unknown[] | 
     riskCeiling,
     maxTrades: plan?.maxTrades ?? merged.maxTradesPerDay ?? null,
     plannedSessions: Array.isArray(plan?.sessionFocus) ? (plan?.sessionFocus as unknown[]).map(value => String(value)) : [],
+    // The day's one behavioural objective travels with the plan context, so the
+    // Trade Log can show what today was supposed to be about next to the trade
+    // that is being logged.
+    behavioralFocus: String(plan?.behavioralFocus ?? "").trim() || null,
     hasPlan: Boolean(plan),
     sessionTradeCount: session?.closed.length ?? 0,
   };

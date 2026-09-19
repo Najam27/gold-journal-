@@ -150,6 +150,226 @@ export type PsychologyTrade = {
 
 export type ChecklistItem = { id: string; label?: string; text?: string; checked?: boolean; yes?: boolean };
 
+/**
+ * The one behaviour a trader chooses to control for a session.
+ *
+ * The first block is the action language the plan workflow asks for; the second
+ * block is every value the journal has already stored, kept selectable so an
+ * older plan still renders its own objective instead of silently losing it.
+ */
+export const BEHAVIORAL_OBJECTIVES = [
+  "Wait for confirmation",
+  "Respect stop loss",
+  "Avoid revenge trading",
+  "Avoid overtrading",
+  "Follow session limits",
+  "Do not chase entries",
+  "Accept missed trades",
+  "Respect planned exit",
+  "Trade only A setups",
+  "Reduce impulsive entries",
+  "Patience",
+  "FOMO control",
+  "Revenge control",
+  "Impulse control",
+  "Overconfidence control",
+  "Loss acceptance",
+  "Rule adherence",
+  "Emotional stability",
+  "Overtrading control",
+  "Risk discipline",
+  "Waiting for confirmation",
+] as const;
+
+/**
+ * What triggered an emotional reaction during the session.
+ *
+ * `tag` links a trigger to the behavioural taxonomy where one exists, which is
+ * how a trigger can be related to a saved rule violation without claiming that
+ * the trigger caused it.
+ */
+export const PSYCHOLOGY_TRIGGERS: { key: string; label: string; tag: BehavioralTag | null }[] = [
+  { key: "FOMO", label: "Fear of missing out", tag: "FOMO" },
+  { key: "FEAR_AFTER_LOSS", label: "Fear after loss", tag: null },
+  { key: "REVENGE", label: "Revenge impulse", tag: "REVENGE" },
+  { key: "GREED", label: "Greed", tag: null },
+  { key: "IMPATIENCE", label: "Impatience", tag: "IMPATIENCE" },
+  { key: "OVERCONFIDENCE", label: "Overconfidence", tag: null },
+  { key: "HESITATION", label: "Hesitation", tag: null },
+  { key: "GIVING_BACK_PROFIT", label: "Fear of giving back profit", tag: "EARLY_EXIT" },
+  { key: "BOREDOM", label: "Boredom", tag: "OVERTRADING" },
+  { key: "RECOVER_LOSSES", label: "Need to recover losses", tag: "REVENGE" },
+  { key: "EXTERNAL_DISTRACTION", label: "External distraction", tag: null },
+  { key: "FATIGUE", label: "Fatigue", tag: null },
+  { key: "STRESS", label: "Stress", tag: null },
+  { key: "NONE", label: "No significant trigger", tag: null },
+];
+
+export const BEHAVIORAL_OBJECTIVE_STATUSES = ["YES", "PARTIALLY", "NO"] as const;
+export type BehavioralObjectiveStatus = (typeof BEHAVIORAL_OBJECTIVE_STATUSES)[number];
+
+export const BEHAVIORAL_OBJECTIVE_STATUS_LABELS: Record<BehavioralObjectiveStatus, string> = {
+  YES: "Yes — the objective held",
+  PARTIALLY: "Partially — it held some of the time",
+  NO: "No — it did not hold",
+};
+
+/** Splits any historic serialisation of the trigger list into stable keys. */
+export function parsePsychologyTriggers(value: unknown): string[] {
+  let raw: unknown[] = [];
+  if (Array.isArray(value)) raw = value;
+  else {
+    const text = clean(value);
+    if (!text) return [];
+    if (text.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) raw = parsed;
+      } catch {
+        return [];
+      }
+    } else raw = text.split("|");
+  }
+  return Array.from(new Set(raw.map(item => clean(item)).filter(Boolean)));
+}
+
+/** The human label for a trigger key; an unknown key is shown as saved. */
+export function psychologyTriggerLabel(key: string) {
+  return PSYCHOLOGY_TRIGGERS.find(trigger => trigger.key === key)?.label ?? clean(key);
+}
+
+export function parseBehavioralObjectiveStatus(value: unknown): BehavioralObjectiveStatus | null {
+  const text = clean(value).toUpperCase();
+  return (BEHAVIORAL_OBJECTIVE_STATUSES as readonly string[]).includes(text) ? (text as BehavioralObjectiveStatus) : null;
+}
+
+export type PostSessionBehavioralReview = {
+  followPlan: BehavioralObjectiveStatus | null;
+  nextSessionChange: string;
+  triggerAction: string;
+};
+
+export function parsePostSessionBehavioralReview(value: unknown): PostSessionBehavioralReview | null {
+  if (!value) return null;
+  let source: unknown = value;
+  if (typeof value === "string") {
+    try {
+      source = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof source !== "object" || Array.isArray(source)) return null;
+  const record = source as Record<string, unknown>;
+  const review: PostSessionBehavioralReview = {
+    followPlan: parseBehavioralObjectiveStatus(record.followPlan),
+    nextSessionChange: clean(record.nextSessionChange),
+    triggerAction: clean(record.triggerAction),
+  };
+  return review.followPlan || review.nextSessionChange || review.triggerAction ? review : null;
+}
+
+/**
+ * "Reviewed" means the after-session questions were actually answered.
+ * The optional execution score and session rating are no longer required for a
+ * review to count, because the compact review asks one behaviour question, one
+ * deviation, one lesson, and one next-session change instead.
+ */
+export function hasSessionReview(plan: PsychologyPlan | null | undefined) {
+  if (!plan) return false;
+  return Boolean(
+    plan.executionScore != null
+    || plan.overallRating != null
+    || parseBehavioralObjectiveStatus(plan.behavioralObjectiveStatus)
+    || parsePostSessionBehavioralReview(plan.postSessionBehavioralReview)
+    || clean(plan.planDeviation)
+    || clean(plan.whatWentWell)
+    || clean(plan.whatWentWrong)
+    || clean(plan.lessons)
+    || clean(plan.tomorrowFocus),
+  );
+}
+
+/**
+ * Decision-oriented behavioural summary: what is improving, what repeats, which
+ * triggers sit next to rule breaks, and what to focus on next. Every value is
+ * derived from saved plans and trades — nothing is inferred from a missing
+ * answer, and an empty journal reports "no data" rather than a score.
+ */
+export type BehavioralFeedback = {
+  window: number;
+  sessions: number;
+  focusLabel: string | null;
+  focusStatus: BehavioralObjectiveStatus | null;
+  reviewStreak: number;
+  taggedSessions: number;
+  reviewedSessions: number;
+  repeatedTrigger: { key: string; label: string; sessions: number; violations: number } | null;
+  violationLinkedTriggers: { key: string; label: string; sessions: number; violations: number }[];
+  triggerCounts: { key: string; label: string; sessions: number; violations: number }[];
+  objectiveHoldRate: number | null;
+  nextAction: string | null;
+  note: string;
+};
+
+export function calculateBehavioralFeedback(sessions: TraderSession[], configInput: Partial<BehaviorConfig> = {}): BehavioralFeedback {
+  const config: BehaviorConfig = { ...DEFAULT_BEHAVIOR_CONFIG, ...configInput };
+  const window = Math.max(config.focusWindow, 10);
+  const ordered = [...sessions]
+    .sort((a, b) => a.day.localeCompare(b.day))
+    .filter(session => session.plan || session.closed.length > 0)
+    .slice(-window);
+  const latestPlanSession = [...ordered].reverse().find(session => session.plan) ?? null;
+  const counts = new Map<string, { sessions: number; violations: number }>();
+  const statuses: BehavioralObjectiveStatus[] = [];
+  for (const session of ordered) {
+    const status = parseBehavioralObjectiveStatus(session.plan?.behavioralObjectiveStatus);
+    if (status) statuses.push(status);
+    for (const key of parsePsychologyTriggers(session.plan?.psychologyTriggers)) {
+      if (key === "NONE") continue;
+      const entry = counts.get(key) ?? { sessions: 0, violations: 0 };
+      entry.sessions += 1;
+      // A trigger is only counted alongside a rule break when the behaviour it
+      // names was itself flagged in that session. Recording a trigger next to a
+      // violation is a correlation the trader can see — it is never reported as
+      // the cause of one.
+      const tag = PSYCHOLOGY_TRIGGERS.find(trigger => trigger.key === key)?.tag ?? null;
+      if (tag && session.violations.includes(tag)) entry.violations += 1;
+      counts.set(key, entry);
+    }
+  }
+  const triggerCounts = Array.from(counts.entries())
+    .map(([key, entry]) => ({ key, label: psychologyTriggerLabel(key), sessions: entry.sessions, violations: entry.violations }))
+    .sort((a, b) => b.sessions - a.sessions || b.violations - a.violations || a.key.localeCompare(b.key));
+  const repeated = triggerCounts.find(entry => entry.sessions >= 2) ?? null;
+  const objectiveHoldRate = statuses.length
+    ? round(statuses.reduce((sum, status) => sum + (status === "YES" ? 1 : status === "PARTIALLY" ? 0.5 : 0), 0) / statuses.length * 100)
+    : null;
+  const focus = calculateBehavioralFocus(ordered, config);
+  const focusLabel = clean(latestPlanSession?.plan?.behavioralFocus) || focus?.label || null;
+  const focusStatus = parseBehavioralObjectiveStatus(latestPlanSession?.plan?.behavioralObjectiveStatus);
+  const nextAction = repeated
+    ? `${repeated.label} appeared in ${repeated.sessions} of the last ${ordered.length} sessions. Set it as today's single objective.`
+    : focus?.recommendation ?? (statuses.length ? "Keep one objective per session so trigger history stays measurable." : null);
+  return {
+    window,
+    sessions: ordered.length,
+    focusLabel,
+    focusStatus,
+    reviewStreak: calculateStreaks(ordered, config).journal,
+    taggedSessions: ordered.filter(session => parsePsychologyTriggers(session.plan?.psychologyTriggers).some(key => key !== "NONE")).length,
+    reviewedSessions: statuses.length,
+    repeatedTrigger: repeated,
+    violationLinkedTriggers: triggerCounts.filter(entry => entry.violations > 0).sort((a, b) => b.violations - a.violations || b.sessions - a.sessions),
+    triggerCounts,
+    objectiveHoldRate,
+    nextAction,
+    note: triggerCounts.length || statuses.length
+      ? "Triggers and objective verdicts come from saved session reviews. They describe what was recorded, not what caused an outcome."
+      : "No triggers or objective verdicts are saved yet. The post-session review records them in a few seconds per session.",
+  };
+}
+
 export type PsychologyPlan = {
   id?: number | null;
   planDate: number | string | Date;
@@ -175,6 +395,13 @@ export type PsychologyPlan = {
   tomorrowFocus?: string | null;
   whatWentWell?: string | null;
   whatWentWrong?: string | null;
+  /** Which saved plan this one was copied from. Provenance only, never a live template. */
+  copiedFromPlanId?: number | null;
+  copiedFromPlanDate?: number | string | Date | null;
+  psychologyTriggers?: unknown;
+  primaryPsychologyTrigger?: string | null;
+  behavioralObjectiveStatus?: string | null;
+  postSessionBehavioralReview?: unknown;
 };
 
 export type BehaviorConfig = {
@@ -555,6 +782,10 @@ export type TraderSession = {
   emotionalState: string | null;
   dominantEmotion: string | null;
   reviewed: boolean;
+  /** The compact after-session behavioural review was answered for this day. */
+  behavioralReviewed: boolean;
+  behavioralTriggers: string[];
+  objectiveStatus: BehavioralObjectiveStatus | null;
   lesson: string | null;
   planAdherence: PlanAdherence;
   components: Record<DisciplineComponent, ComponentScore>;
@@ -763,7 +994,10 @@ function buildSession(input: { day: string; trades: PsychologyTrade[]; plan: Psy
       ? { score: 100, sample: 1, violations: 0 }
       : { score: 0, sample: 1, violations: 1 };
 
-  const reviewed = Boolean(plan && (plan.executionScore != null || plan.overallRating != null));
+  const reviewed = hasSessionReview(plan);
+  const behavioralTriggers = parsePsychologyTriggers(plan?.psychologyTriggers);
+  const objectiveStatus = parseBehavioralObjectiveStatus(plan?.behavioralObjectiveStatus);
+  const behavioralReviewed = Boolean(objectiveStatus || behavioralTriggers.length || parsePostSessionBehavioralReview(plan?.postSessionBehavioralReview));
   const journalHabit: ComponentScore = plan
     ? { score: reviewed ? 100 : 60, sample: 1, violations: reviewed ? 0 : 1 }
     : { score: null, sample: 0, violations: 0 };
@@ -806,6 +1040,9 @@ function buildSession(input: { day: string; trades: PsychologyTrade[]; plan: Psy
     emotionalState: clean(plan?.emotionalState) || null,
     dominantEmotion: dominantEmotion(closed, plan),
     reviewed,
+    behavioralReviewed,
+    behavioralTriggers,
+    objectiveStatus,
     lesson: clean(plan?.lessons) || null,
     planAdherence: calculatePlanAdherence(plan, closed),
     components,

@@ -1667,9 +1667,15 @@ export default function GoldJournal() {
               />
             )}
             {view === "plan" && (
+              // The plan desk reviews the session it planned, so it receives
+              // today's trades and the saved behavioural configuration, plus a
+              // route into the option manager that owns the trading rules.
               <PlanView
                 account={account}
                 plans={data?.dailyPlans ?? []}
+                trades={trades}
+                behaviorConfig={behaviorConfig}
+                onManageRules={() => setView("options")}
                 onSaved={refresh}
               />
             )}

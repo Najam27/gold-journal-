@@ -19,7 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatMoney } from "@/lib/gold";
-import type { TraderDevelopmentReport } from "@shared/psychologyEngine";
+import { BEHAVIORAL_OBJECTIVE_STATUS_LABELS, type TraderDevelopment } from "@/lib/psychology";
 
 /**
  * Goals-page "trader development" block.
@@ -73,12 +73,15 @@ export function TraderDevelopmentPanel({
   onSaveIdentity,
   pending = false,
 }: {
-  report: TraderDevelopmentReport;
+  report: TraderDevelopment;
   identityStatement?: string;
   onSaveIdentity?: (statement: string) => Promise<void> | void;
   pending?: boolean;
 }) {
   const [statement, setStatement] = useState(identityStatement ?? "");
+  // The page leads with the decision-oriented summary; the full analytics stay
+  // one click away instead of being forced on every visit.
+  const [showDetails, setShowDetails] = useState(false);
   useEffect(() => setStatement(identityStatement ?? ""), [identityStatement]);
 
   const hasSessions = report.sessions.length > 0;
@@ -105,6 +108,19 @@ export function TraderDevelopmentPanel({
     { label: "Overtrading control", value: report.weekly.overtrading, target: 85 },
   ];
   const behavioral = report.behavioralPnl;
+  const feedback = report.behavioralFeedback;
+  // The four answers the summary leads with, derived from saved sessions only.
+  const improvement = (() => {
+    if (report.weekly.biggestImprovement) return `${report.weekly.biggestImprovement.label} up ${report.weekly.biggestImprovement.delta.toFixed(0)}%`;
+    if (report.focus?.trend != null) return `${report.focus.label} ${report.focus.trend >= 0 ? "up" : "down"} ${Math.abs(report.focus.trend).toFixed(0)}%`;
+    return "Not enough reviewed sessions to compare yet";
+  })();
+  const repeating = feedback.repeatedTrigger
+    ? `${feedback.repeatedTrigger.label} in ${feedback.repeatedTrigger.sessions} of the last ${feedback.sessions} sessions`
+    : hasSessions ? "No trigger has repeated in the current window" : "Waiting for a reviewed session";
+  const violationLinked = feedback.violationLinkedTriggers.length
+    ? feedback.violationLinkedTriggers.slice(0, 2).map(entry => `${entry.label} in ${entry.violations} session${entry.violations === 1 ? "" : "s"} with a rule break`).join(" · ")
+    : "No trigger is linked to a rule break yet";
 
   return (
     <section className="dev-workspace control-workspace">
@@ -124,6 +140,44 @@ export function TraderDevelopmentPanel({
         </div>
       </header>
 
+      <section className="dev-brief">
+        <div className="dev-brief-grid">
+          <article className="dev-brief-card safe">
+            <span>WHAT IS IMPROVING</span>
+            <strong>{improvement}</strong>
+            <small>{report.weekly.sessions ? `${report.weekly.sessions} session${report.weekly.sessions === 1 ? "" : "s"} in the current window` : "Waiting for evaluated sessions"}</small>
+          </article>
+          <article className="dev-brief-card watch">
+            <span>WHAT IS REPEATING</span>
+            <strong>{repeating}</strong>
+            <small>{feedback.taggedSessions ? `${feedback.taggedSessions} of the last ${feedback.sessions} sessions recorded a trigger` : "No trigger has been recorded yet"}</small>
+          </article>
+          <article className="dev-brief-card risk">
+            <span>TRIGGERS BESIDE RULE BREAKS</span>
+            <strong>{violationLinked}</strong>
+            <small>{feedback.note}</small>
+          </article>
+          <article className="dev-brief-card neutral">
+            <span>CURRENT BEHAVIOURAL OBJECTIVE</span>
+            <strong>{feedback.focusLabel ?? "Not set"}</strong>
+            <small>{feedback.focusStatus ? BEHAVIORAL_OBJECTIVE_STATUS_LABELS[feedback.focusStatus] : "Set one objective per session to measure it."}{feedback.objectiveHoldRate == null ? "" : ` · held ${feedback.objectiveHoldRate.toFixed(0)}% of reviewed sessions`}</small>
+          </article>
+        </div>
+        <div className={`dev-readiness ${report.readiness.band === "HIGH" ? "safe" : report.readiness.band === "LOW" ? "risk" : "watch"}`}>
+          <Activity size={16} />
+          <div>
+            <strong>Trading readiness {report.readiness.score == null ? "—" : `${report.readiness.score.toFixed(0)}/100`}</strong>
+            <span>{report.readiness.guidance} Guidance only — it never blocks a trade.</span>
+          </div>
+        </div>
+      </section>
+
+      <button type="button" className="dev-details-toggle" aria-expanded={showDetails} onClick={() => setShowDetails(current => !current)}>
+        {showDetails ? "Hide detailed analytics" : "View detailed analytics"}
+      </button>
+
+      {showDetails && (
+        <>
       <section className="dev-stat-grid">
         <Stat label="DISCIPLINE" value={number(report.discipline.score)} detail="Weighted, process-first" tone={tone(report.discipline.score, 70)} />
         <Stat label="PLAN ADHERENCE" value={report.planAdherence == null ? "—" : `${report.planAdherence.toFixed(0)}%`} detail="Planned vs executed" tone={tone(report.planAdherence, 80)} />
@@ -241,13 +295,7 @@ export function TraderDevelopmentPanel({
           ) : (
             <p className="dev-empty">No protocol saved for this day yet. The Plan &amp; Execution page records it before the session opens.</p>
           )}
-          <div className={`dev-readiness ${report.readiness.band === "HIGH" ? "safe" : report.readiness.band === "LOW" ? "risk" : "watch"}`}>
-            <Activity size={16} />
-            <div>
-              <strong>Trading readiness {report.readiness.score == null ? "—" : `${report.readiness.score.toFixed(0)}/100`}</strong>
-              <span>{report.readiness.guidance}</span>
-            </div>
-          </div>
+          <p className="dev-note">Readiness guidance is in the behavioural summary above. It is guidance only and never blocks a trade.</p>
         </Panel>
 
         <Panel title="Planned vs executed" eyebrow="EXECUTION" icon={Target}>
@@ -448,6 +496,8 @@ export function TraderDevelopmentPanel({
           )}
         </Panel>
       </div>
+        </>
+      )}
     </section>
   );
 }

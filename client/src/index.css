@@ -4,6 +4,7 @@
 @import "./flexible-goals.css";
 @import "./mt5-live.css";
 @import "./behavioral-psychology.css";
+@import "./plan-workflow.css";
 /* The premium terminal layer (surfaces, accents, depth, controls) loads last
    from main.tsx so it is the single consolidated presentation authority. */
 
