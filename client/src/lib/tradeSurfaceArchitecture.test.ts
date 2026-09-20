@@ -134,6 +134,17 @@ describe("trade surface architecture", () => {
     });
   });
 
+  it("never prints evidence or sync plumbing as a technical label", () => {
+    // Evidence is the trader's chart image; how it is stored is not part of the
+    // review. These are the exact labels the review surfaces must never print.
+    const forbidden = ["MT5 ticket", "Ticket #", "Screenshot filename", "Stored screenshot", "Storage key", "Image dimensions", "PNG / JPEG"];
+    const files = [...SURFACES.map(surface => surface.file), "./../components/TradeDialogWithCustomOptions.tsx"];
+    for (const file of files) {
+      const text = source(file);
+      for (const phrase of forbidden) expect(text, `${file} prints "${phrase}"`).not.toContain(phrase);
+    }
+  });
+
   it("shares one section palette across the surfaces", () => {
     const accents = Object.values(TRADE_SECTION_THEME).map(theme => theme.accent);
     // Every canonical section is visually distinguishable in the viewer, the shared

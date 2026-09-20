@@ -354,12 +354,9 @@ function ScreenshotEvidence({ screenshot, setScreenshot, editing, removeScreensh
       />
       {storedUrl ? (
         <div className="upload-box evidence-existing">
-          <img
-            src={storedUrl}
-            alt={editing?.screenshotName ? `Stored screenshot ${editing.screenshotName}` : "Stored trade screenshot"}
-          />
+          <img src={storedUrl} alt="Screenshot evidence saved with this trade" />
           <div>
-            <strong>{editing?.screenshotName || "Stored screenshot"}</strong>
+            <strong>Screenshot attached</strong>
             <span>Saved with this trade and restored on every reload.</span>
           </div>
           <div className="evidence-actions">
