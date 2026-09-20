@@ -18,12 +18,13 @@ function dateInput(value: number | Date) { return getPktDateInput(value); }
 /**
  * Whole-log PDF export.
  *
- * The document is rendered from `buildTradePdfModel` (the canonical complete
- * Trade Card model the viewer uses), not from a hand-picked field list, so every
- * recorded field of every selected trade reaches the file. Each trade gets a
- * compact A4-landscape data table followed by its own screenshot page, and the
- * report closes with a period analysis whose numbers come from the same engine the
- * Performance view uses.
+ * The document is rendered from `buildTradePresentation` (the canonical Trade Card
+ * model the viewer and the share image also use), not from a hand-picked field
+ * list, so every recorded field of every selected trade reaches the file. Each
+ * trade gets a compact A4-landscape data table followed by its own screenshot
+ * page. The report then closes with four analysis pages that each answer one
+ * question — performance, process, psychology, review — built from the same engine
+ * the Performance view uses, with every metric owned by exactly one of them.
  */
 export function BulkPdfExporter() {
   const { isAuthenticated, profileReady } = useAuth();
@@ -86,5 +87,5 @@ export function BulkPdfExporter() {
   };
 
   if (!isAuthenticated) return null;
-  return <Dialog open={open} onOpenChange={setOpen}><DialogContent className="bulk-pdf-dialog"><DialogHeader><DialogTitle>Trade-log PDF report</DialogTitle><DialogDescription>A compact A4 landscape report: one page of complete trade data and one screenshot page per trade, followed by the period analysis. No field, note, emotion, checklist item, or screenshot is dropped, and the report contains only the active account.</DialogDescription></DialogHeader><div className="pdf-range-mode"><button className={allTime ? "active" : ""} onClick={() => setAllTime(true)}>Whole trade log</button><button className={!allTime ? "active" : ""} onClick={setCustom}><CalendarRange size={14} /> Custom date range</button></div>{!allTime && <div className="pdf-date-range"><label>From<Input type="date" value={from} onChange={event => setFrom(event.target.value)} /></label><label>To<Input type="date" value={to} onChange={event => setTo(event.target.value)} /></label></div>}<div className="pdf-selection-summary"><span><b>{selected.length}</b> recent preview trade{selected.length === 1 ? "" : "s"}</span><span>Recent P&L <b className={summary.pnl >= 0 ? "positive" : "negative"}>{formatMoney(summary.pnl)}</b></span></div><div className="pdf-export-includes"><ImageIcon size={15} /><span>The report fetches every page only when you download it. Each trade becomes two pages — a compact complete-data table and its screenshot evidence — and the report ends with four analysis pages (performance, process, psychology, review). Expect about {selected.length * 2 + 4} pages for the current selection.</span></div><div className="dialog-actions"><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button disabled={busy || !account} onClick={createPdf}><FileDown size={15} />{busy ? "Building report…" : "Download PDF report"}</Button></div></DialogContent></Dialog>;
+  return <Dialog open={open} onOpenChange={setOpen}><DialogContent className="bulk-pdf-dialog"><DialogHeader><DialogTitle>Trade-log PDF report</DialogTitle><DialogDescription>A compact A4 landscape report: one page of complete trade data and one screenshot page per trade, followed by the period analysis. No field, note, emotion, checklist item, or screenshot is dropped, and the report contains only the active account.</DialogDescription></DialogHeader><div className="pdf-range-mode"><button className={allTime ? "active" : ""} onClick={() => setAllTime(true)}>Whole trade log</button><button className={!allTime ? "active" : ""} onClick={setCustom}><CalendarRange size={14} /> Custom date range</button></div>{!allTime && <div className="pdf-date-range"><label>From<Input type="date" value={from} onChange={event => setFrom(event.target.value)} /></label><label>To<Input type="date" value={to} onChange={event => setTo(event.target.value)} /></label></div>}<div className="pdf-selection-summary"><span><b>{selected.length}</b> recent preview trade{selected.length === 1 ? "" : "s"}</span><span>Recent P&L <b className={summary.pnl >= 0 ? "positive" : "negative"}>{formatMoney(summary.pnl)}</b></span></div><div className="pdf-export-includes"><ImageIcon size={15} /><span>The report fetches every page only when you download it. Each trade becomes two pages — a compact complete-data table and its screenshot evidence — and the report ends with four analysis pages that each own one question (performance results, process and discipline, recorded behaviour, review summary). Expect about {selected.length * 2 + 4} pages for the current selection.</span></div><div className="dialog-actions"><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button disabled={busy || !account} onClick={createPdf}><FileDown size={15} />{busy ? "Building report…" : "Download PDF report"}</Button></div></DialogContent></Dialog>;
 }

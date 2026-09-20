@@ -74,13 +74,74 @@ describe("PDF period analysis", () => {
     expect(findTable(blocks, "Session performance")?.rows).toHaveLength(3);
   });
 
-  it("reports risk and drawdown only when the data supports it", () => {
+  it("keeps drawdown amounts on the performance page and risk control on the process page", () => {
     const analysis = buildAnalysis(rows as never);
-    expect(metricValue(blocks, "Risk & drawdown", "Maximum drawdown")).toBe(`-${formatMoney(analysis.drawdown.maximum).replace("-", "")}`);
-    expect(metricValue(blocks, "Risk & drawdown", "Longest win streak")).toBe(String(analysis.streaks.longestWin));
-    expect(metricValue(blocks, "Risk & drawdown", "Longest loss streak")).toBe(String(analysis.streaks.longestLoss));
-    expect(metricValue(blocks, "Risk & drawdown", "Average planned risk")).toBe(formatMoney(analysis.risk.average as number));
-    expect(metricValue(blocks, "Risk & drawdown", "Risk consistency")).toBe(`${Math.round((analysis.risk.consistency as number) * 100)}%`);
+    // The amount of a drawdown is a result, so Performance owns it.
+    expect(metricValue(blocks, "Headline figures", "Max drawdown")).toBe(`-${formatMoney(analysis.drawdown.maximum).replace("-", "")}`);
+    expect(metricValue(blocks, "Performance", "Average drawdown")).toBe(formatMoney(analysis.drawdown.average as number));
+    // How the drawdown and streaks were traded through is process context.
+    expect(metricValue(blocks, "Risk & process control", "Longest win streak")).toBe(String(analysis.streaks.longestWin));
+    expect(metricValue(blocks, "Risk & process control", "Longest loss streak")).toBe(String(analysis.streaks.longestLoss));
+    expect(metricValue(blocks, "Risk & process control", "Average planned risk")).toBe(formatMoney(analysis.risk.average as number));
+    expect(metricValue(blocks, "Risk & process control", "Risk consistency")).toBe(`${Math.round((analysis.risk.consistency as number) * 100)}%`);
+    // ... and the amount is never printed a second time on the process page.
+    expect(metricValue(blocks, "Risk & process control", "Max drawdown")).toBeNull();
+    expect(metricValue(blocks, "Risk & process control", "Average drawdown")).toBeNull();
+  });
+
+  it("gives every metric and table exactly one owning page", () => {
+    const pageOwners = new Map<string, string>([
+      ["Performance overview", "performance"],
+      ["Process & behaviour", "process"],
+      ["Psychology & mistakes", "psychology"],
+      ["Review summary", "review"],
+    ]);
+    const seen = new Map<string, string>();
+    for (const page of model.pages) {
+      const owner = pageOwners.get(page.title);
+      expect(owner, `page ${page.title} has an owner`).toBeTruthy();
+      const names: string[] = [];
+      for (const block of page.blocks) {
+        if (block.kind === "heading") names.push(block.title);
+        if (block.kind === "kpis" || block.kind === "metrics") { names.push(block.title, ...block.items.map(item => item.label)); }
+        if (block.kind === "table") names.push(block.table.title);
+        if (block.kind === "tableRow") names.push(...block.tables.map(entry => entry.title));
+        if (block.kind === "paragraph" && block.title) names.push(block.title);
+      }
+      for (const name of names) {
+        expect(model.ownership[name], `${name} has a declared owner`).toBe(owner);
+        const already = seen.get(name);
+        if (already) expect(already, `${name} is printed on more than one page`).toBe(page.title);
+        seen.set(name, page.title);
+      }
+    }
+  });
+
+  it("prints the recorded behaviour dataset once, never as two overlapping tables", () => {
+    const titles = allBlocks(model).flatMap(block => block.kind === "table" ? [block.table.title] : block.kind === "tableRow" ? block.tables.map(entry => entry.title) : []);
+    expect(titles).toContain("Mistake / rule-break frequency");
+    expect(titles).not.toContain("Repeated behavioural patterns");
+    // The consolidated table is the only place a mistake tag is listed.
+    expect(titles.filter(title => title === "Mistake / rule-break frequency")).toHaveLength(1);
+  });
+
+  it("keeps the review to short factual summaries with no repeated tables", () => {
+    expect(model.review.map(section => section.title)).toEqual([
+      "Performance summary", "Process summary", "Psychology summary", "Risk summary", "Data quality", "Review points",
+    ]);
+    expect(model.review.find(section => section.title === "Performance summary")!.lines.length).toBeLessThanOrEqual(4);
+    expect(model.review.find(section => section.title === "Risk summary")!.lines.length).toBeLessThanOrEqual(3);
+    expect(model.review.find(section => section.title === "Data quality")!.lines.length).toBeLessThanOrEqual(2);
+    expect(model.review.find(section => section.title === "Review points")!.lines.length).toBeLessThanOrEqual(5);
+    // The review page is prose only — it never re-renders a dataset in table form.
+    const reviewPage = model.pages.find(page => page.title === "Review summary")!;
+    expect(reviewPage.blocks.every(block => block.kind === "paragraph")).toBe(true);
+    const joined = model.review.flatMap(section => section.lines).join(" ");
+    expect(joined).toContain("2 of 4 closed trades were wins");
+    expect(joined).toContain("New York");
+    expect(joined).toContain("Rule adherence averaged");
+    // Descriptive, never prescriptive or interpretive.
+    expect(joined).not.toMatch(/repeat this context|you should|you are|emotionally|likely|probably|advice|edge over/i);
   });
 
   it("keeps outcome and process separate using the shared classifier", () => {
@@ -115,8 +176,8 @@ describe("PDF period analysis", () => {
     expect(emotions?.rows).toHaveLength(analysis.behavior.emotions.length);
     expect(emotions?.rows.map(row => row[0])).toContain("Before");
     expect(emotions?.rows.some(row => row[1] === "Fear")).toBe(true);
-    // A tag recorded on more than one trade is reported as a repeated pattern.
-    expect(findTable(blocks, "Repeated behavioural patterns")?.rows.map(row => row[0])).toEqual(["Impatience"]);
+    // A tag recorded on more than one trade stays in that same consolidated table.
+    expect(mistakes?.rows.map(row => row[0])).toContain("Impatience");
     // A tag the taxonomy does not recognise is still reported, never dropped.
     const custom = buildPeriodAnalysis([{ ...rows[1], mistake: "Something new entirely" }] as never, { accountName: "A", rangeLabel: "B" });
     expect(findTable(allBlocks(custom), "Mistake / rule-break frequency")?.rows.map(row => row[0])).toEqual(["Something new entirely"]);
@@ -139,18 +200,16 @@ describe("PDF period analysis", () => {
     expect(metricValue(singleBlocks, "Performance", "Profit factor")).toBe(ANALYSIS_MISSING);
     expect(metricValue(singleBlocks, "Performance", "Average loss")).toBe(ANALYSIS_MISSING);
     expect(metricValue(singleBlocks, "Performance", "Worst trade")).toBe(ANALYSIS_MISSING);
-    expect(metricValue(singleBlocks, "Risk & drawdown", "Maximum drawdown")).toBe(ANALYSIS_MISSING);
+    expect(metricValue(singleBlocks, "Headline figures", "Max drawdown")).toBe(ANALYSIS_MISSING);
+    expect(metricValue(singleBlocks, "Risk & process control", "Drawdown episodes")).toBe(ANALYSIS_MISSING);
     expect(findTable(singleBlocks, "Direction performance")?.rows).toHaveLength(1);
     const empty = buildPeriodAnalysis([], { accountName: "A", rangeLabel: "B" });
     expect(metricValue(allBlocks(empty), "Performance", "Win rate")).toBe(ANALYSIS_MISSING);
-    expect(findParagraph(allBlocks(empty), "Performance observations")?.[0]).toContain("No closed trades are available");
+    expect(findParagraph(allBlocks(empty), "Performance summary")?.[0]).toContain("No closed trades are available");
   });
 
   it("states only facts it can compute, with no psychological verdict", () => {
-    expect(model.observations.map(group => group.title)).toEqual([
-      "Performance observations", "Risk observations", "Execution observations", "Process observations", "Psychology observations", "Data-quality limitations",
-    ]);
-    const prose = model.observations.flatMap(group => group.lines).join(" ");
+    const prose = model.review.flatMap(section => section.lines).join(" ");
     expect(prose).toContain("2 of 4 closed trades were wins");
     expect(prose).toContain("New York");
     expect(prose).toContain("Rule adherence averaged");
@@ -158,18 +217,16 @@ describe("PDF period analysis", () => {
     expect(model.limitations.join(" ")).toContain("OPEN trades are excluded from performance metrics.");
   });
 
-  it("builds the action list from recorded values with fixed rules", () => {
-    expect(model.review.repeat.join(" ")).toContain("repeat this context");
-    expect(model.review.review.join(" ")).toMatch(/review (those entries|those decisions)/);
-    expect(model.review.watch.join(" ")).toContain("Longest losing streak");
-    expect(model.review.watch.join(" ")).toContain("small sample");
-    const joined = [...model.review.repeat, ...model.review.review, ...model.review.watch].join(" ");
-    expect(joined).not.toMatch(/you are|your personality|emotionally unstable/i);
-    // With no trades at all, every list still says something truthful.
+  it("derives the review points from recorded values, with a truthful empty state", () => {
+    const points = model.review.find(section => section.title === "Review points")!.lines.join(" ");
+    expect(points).toContain("Most traded session");
+    expect(points).toContain("small sample");
+    // Never an instruction, never an interpretation.
+    expect(points).not.toMatch(/repeat|you should|make sure|avoid/i);
     const empty = buildPeriodAnalysis([], { accountName: "A", rangeLabel: "B" });
-    expect(empty.review.review).toEqual(["No closed trades are available for this period."]);
-    expect(empty.review.repeat[0]).toContain("No context met the criteria");
-    expect(empty.review.watch[0]).toContain("No watch-out threshold");
+    expect(empty.review.map(section => section.title)).toEqual(["Performance summary", "Process summary", "Psychology summary", "Risk summary", "Data quality", "Review points"]);
+    expect(empty.review.every(section => section.lines.length > 0)).toBe(true);
+    expect(empty.review[5].lines).toEqual(["No closed trades are available for this period."]);
   });
 
   it("matches metricRow for an ad-hoc grouping so no private formula exists", () => {

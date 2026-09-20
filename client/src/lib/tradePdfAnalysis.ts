@@ -44,19 +44,116 @@ export type AnalysisBlock =
  */
 export type AnalysisPage = { eyebrow: string; title: string; caption: string; blocks: AnalysisBlock[]; twoColumn?: boolean };
 
-/** What the trader should act on, derived from the recorded values by fixed rules. */
-export type AnalysisReview = { repeat: string[]; review: string[]; watch: string[] };
+/**
+ * The report's field ownership map.
+ *
+ * The four analysis pages have strict, non-overlapping responsibilities, so every
+ * figure the report can print is named here exactly once with the page that owns it:
+ *
+ *   • Performance — what happened to the account (results, breakdowns);
+ *   • Process     — how consistently the intended process was followed;
+ *   • Psychology  — what behaviour, emotions and mistakes were recorded;
+ *   • Review      — short factual summaries, never another copy of a table.
+ *
+ * A test asserts that every metric and table the report renders is on this list and
+ * is only ever rendered on its owner's page, so a metric cannot quietly move or be
+ * printed twice.
+ */
+export type ReportOwner = "performance" | "process" | "psychology" | "review";
 
-export type AnalysisObservationGroup = { title: string; lines: string[] };
+export const REPORT_OWNERSHIP: Record<string, ReportOwner> = {
+  // Performance — period and results.
+  Account: "performance",
+  "Start date": "performance",
+  "End date": "performance",
+  "Trades exported": "performance",
+  "Closed trades": "performance",
+  "Open trades": "performance",
+  "Active days": "performance",
+  "Selected period": "performance",
+  "Period": "performance",
+  "Net P&L": "performance",
+  "Gross profit": "performance",
+  "Gross loss": "performance",
+  "Profit factor": "performance",
+  "Win rate": "performance",
+  Wins: "performance",
+  Losses: "performance",
+  "Break-even": "performance",
+  "Average win": "performance",
+  "Average loss": "performance",
+  Expectancy: "performance",
+  "Average R": "performance",
+  "Total R": "performance",
+  "Median R": "performance",
+  "Best trade": "performance",
+  "Worst trade": "performance",
+  "Win rate range (95%)": "performance",
+  "Median trade": "performance",
+  "Data completeness": "performance",
+  "Max drawdown": "performance",
+  "Average drawdown": "performance",
+  "Headline figures": "performance",
+  Performance: "performance",
+  "Session performance": "performance",
+  "Direction performance": "performance",
+  "Timeframe performance": "performance",
+  "Setup performance": "performance",
+  "Daily performance": "performance",
+  // Process — plan, discipline, and risk control.
+  "Plan & discipline": "process",
+  "Planned trades": "process",
+  "Unplanned trades": "process",
+  "Plan not stated": "process",
+  "Rule adherence": "process",
+  "Trades with rule breaks": "process",
+  "Checklist completion": "process",
+  "Average patience score": "process",
+  "Evaluated trades": "process",
+  "Risk & process control": "process",
+  "Drawdown episodes": "process",
+  "Longest drawdown": "process",
+  "Longest win streak": "process",
+  "Longest loss streak": "process",
+  "Average planned risk": "process",
+  "Median planned risk": "process",
+  "Risk consistency": "process",
+  "Risk after a win": "process",
+  "Risk after a loss": "process",
+  "Average planned R": "process",
+  "Average target capture": "process",
+  "Reached or exceeded target": "process",
+  "Process classification": "process",
+  "Execution type": "process",
+  "Hold quality": "process",
+  "Patience distribution": "process",
+  // Psychology — recorded behaviour only. One consolidated mistakes table.
+  "Mistake / rule-break frequency": "psychology",
+  "Process, emotional, and environmental tags": "psychology",
+  "Recorded emotions": "psychology",
+  "Data quality & limitations": "psychology",
+  // Review — factual summaries.
+  "Performance summary": "review",
+  "Process summary": "review",
+  "Psychology summary": "review",
+  "Risk summary": "review",
+  "Data quality": "review",
+  "Review points": "review",
+};
+
+/** One review section: a short heading and at most a handful of factual lines. */
+export type AnalysisReviewSection = { title: string; lines: string[] };
 
 export type PeriodAnalysis = {
   pages: AnalysisPage[];
   total: number;
   /** Closed trades only: the sample every rate below is computed against. */
   closed: number;
-  review: AnalysisReview;
-  observations: AnalysisObservationGroup[];
+  /** The review page's sections, each a plain-language summary of one question. */
+  review: AnalysisReviewSection[];
   limitations: string[];
+  /** The field ownership map the pages above were built from. */
+  ownership: Record<string, ReportOwner>;
 };
 
 export type PeriodAnalysisOptions = { accountName: string; rangeLabel: string };
@@ -166,7 +263,7 @@ export function buildPeriodAnalysis(trades: Record<string, unknown>[], options: 
     { label: "Profit factor", value: factor(overview.profitFactor) },
     signed("Expectancy", closed ? overview.expectancy : null, value => formatMoney(value)),
     signed("Total R", overview.totalR, value => `${value >= 0 ? "+" : ""}${value.toFixed(2)}R`),
-    { label: "Max drawdown", value: closed >= 2 ? money(analysis.drawdown.maximum) : ANALYSIS_MISSING, tone: "negative" },
+    { label: "Max drawdown", value: closed >= 2 ? `-${money(analysis.drawdown.maximum).replace("-", "")}` : ANALYSIS_MISSING, tone: "negative" },
   ];
 
   /* ---- performance ---- */
@@ -189,14 +286,14 @@ export function buildPeriodAnalysis(trades: Record<string, unknown>[], options: 
     signed("Worst trade", overview.largestLoser, value => formatMoney(value)),
     { label: "Win rate range (95%)", value: closed ? `${overview.winRateInterval[0].toFixed(1)}% – ${overview.winRateInterval[1].toFixed(1)}%` : ANALYSIS_MISSING },
     { label: "Median trade", value: closed ? money(overview.medianPnl) : ANALYSIS_MISSING },
+    // Drawdown amounts are results, so the Performance page owns them.
+    { label: "Average drawdown", value: closed >= 2 ? money(analysis.drawdown.average) : ANALYSIS_MISSING },
     { label: "Data completeness", value: percent(overview.dataCompleteness, 0) },
   ];
 
-  /* ---- risk & drawdown ---- */
+  /* ---- risk control & streak context (the drawdown *amounts* belong to performance) ---- */
   const drawdownAvailable = closed >= 2;
   const riskMetrics: AnalysisMetric[] = [
-    signed("Maximum drawdown", drawdownAvailable ? analysis.drawdown.maximum : null, value => value > 0 ? `-${formatMoney(value).replace("-", "")}` : formatMoney(value)),
-    { label: "Average drawdown", value: drawdownAvailable ? money(analysis.drawdown.average) : ANALYSIS_MISSING },
     { label: "Drawdown episodes", value: drawdownAvailable ? count(analysis.drawdown.count) : ANALYSIS_MISSING },
     { label: "Longest drawdown", value: drawdownAvailable ? `${analysis.drawdown.durationTrades} trades` : ANALYSIS_MISSING },
     { label: "Longest win streak", value: count(analysis.streaks.longestWin) },
@@ -207,7 +304,8 @@ export function buildPeriodAnalysis(trades: Record<string, unknown>[], options: 
     { label: "Risk after a win", value: money(analysis.risk.afterWins) },
     { label: "Risk after a loss", value: money(analysis.risk.afterLosses) },
     { label: "Average planned R", value: rMultiple(analysis.execution.averagePlannedR) },
-    { label: "Average actual R", value: rMultiple(analysis.execution.averageActualR) },
+    { label: "Average target capture", value: percent(analysis.execution.averageTargetCapture) },
+    { label: "Reached or exceeded target", value: analysis.execution.targetCaptureAvailable ? `${analysis.execution.reachedOrExceededTarget} / ${analysis.execution.targetCaptureAvailable}` : ANALYSIS_MISSING },
   ];
 
   /* ---- process ---- */
@@ -357,9 +455,11 @@ export function buildPeriodAnalysis(trades: Record<string, unknown>[], options: 
     empty: "No patience score was saved for this period.",
   }));
 
+  // The one consolidated behaviour table. A tag can be recorded once per trade, so
+  // the trade count is the occurrence count; this dataset is never printed twice.
   const mistakesTable = table("Mistake / rule-break frequency", [
     { label: "Tag", flex: 3 },
-    { label: "Occurrences", flex: 1.3, align: "right" },
+    { label: "Trades", flex: 1.3, align: "right" },
     { label: "Net P&L", flex: 1.6, align: "right" },
   ], () => ({
     rows: analysis.behavior.tags.map(row => [row.label, String(row.sample), money(row.netPnl)]),
@@ -391,14 +491,6 @@ export function buildPeriodAnalysis(trades: Record<string, unknown>[], options: 
   }));
 
   const repeatedTags = analysis.behavior.tags.filter(row => row.sample >= 2);
-  const repeatedTable = table("Repeated behavioural patterns", [
-    { label: "Tag", flex: 2.4 },
-    { label: "Trades", flex: 1, align: "right" },
-    { label: "Net P&L", flex: 1.6, align: "right" },
-  ], () => ({
-    rows: repeatedTags.map(row => [row.label, String(row.sample), money(row.netPnl)]),
-    empty: "No tag was recorded on more than one trade in this period.",
-  }));
 
   /* ---- limitations (diagnostics, not report content) ---- */
   const limitations: string[] = [...analysis.warnings];
@@ -409,104 +501,77 @@ export function buildPeriodAnalysis(trades: Record<string, unknown>[], options: 
   if (!checklistRatios.length) limitations.push("No pre-trade checklist was saved on these trades, so checklist completion is unavailable.");
   if (processAssessments.some(item => item.notEvaluated)) limitations.push(`${processAssessments.filter(item => item.notEvaluated).length} trade(s) carry no behavioural field (typical for MT5 imports), so process metrics exclude them.`);
 
-  /* ---- observations, grouped by the question they answer ---- */
-  const observations: AnalysisObservationGroup[] = [];
-  const performanceLines: string[] = [];
+  /* ---- review summaries: factual lines only, one short section per question ---- */
+  const topSession = topByAbsolutePnl(analysis.sessions);
+  const topSetup = topByAbsolutePnl(analysis.setups);
+  const positiveDays = dailyRows.filter(row => !row[6].startsWith("-") && row[6] !== ANALYSIS_MISSING).length;
+
+  const performanceSummary: string[] = [];
   if (closed) {
-    performanceLines.push(`${overview.wins} of ${closed} closed trade${closed === 1 ? " was a win" : "s were wins"} (${rate(overview.winRate, closed)} win rate); ${overview.losses} lost and ${overview.breakEven} finished break-even.`);
-    performanceLines.push(`Net period P&L was ${money(overview.netPnl)} across ${trades.length} exported trade${trades.length === 1 ? "" : "s"}.`);
-    if (overview.profitFactor != null) performanceLines.push(`Profit factor ${overview.profitFactor.toFixed(2)} on ${money(overview.grossProfit)} gross profit and ${money(overview.grossLoss)} gross loss.`);
-    if (overview.averageWinner != null) performanceLines.push(overview.averageLoser == null
-      ? `Average win was ${money(overview.averageWinner)}; no losing trade was recorded in this period.`
-      : `Average win ${money(overview.averageWinner)} against average loss ${money(overview.averageLoser)}.`);
-    if (overview.expectancy) performanceLines.push(`Expectancy was ${money(overview.expectancy)} per closed trade${overview.totalR == null ? "" : ` (${rMultiple(overview.totalR)} in total)`}.`);
-    const best = overview.largestWinner;
-    const worst = overview.largestLoser;
-    if (best != null || worst != null) performanceLines.push(`Best trade ${money(best)} · worst trade ${money(worst)}.`);
-    const positiveDays = dailyRows.filter(row => !row[6].startsWith("-") && row[6] !== ANALYSIS_MISSING).length;
-    performanceLines.push(`${positiveDays} of ${dailyRows.length} trading day${dailyRows.length === 1 ? "" : "s"} finished flat or positive.`);
-    const topSession = topByAbsolutePnl(analysis.sessions);
-    if (topSession) performanceLines.push(`${topSession.label} contributed ${money(topSession.netPnl)} of net P&L over ${topSession.sample} trade${topSession.sample === 1 ? "" : "s"}.`);
-    const topSetup = topByAbsolutePnl(analysis.setups);
-    if (topSetup) performanceLines.push(`Most used setup context: ${topSetup.label} with ${topSetup.sample} trade${topSetup.sample === 1 ? "" : "s"} and ${money(topSetup.netPnl)} net P&L.`);
+    performanceSummary.push(`${overview.wins} of ${closed} closed trade${closed === 1 ? " was a win" : "s were wins"} (${rate(overview.winRate, closed)} win rate); ${overview.losses} lost and ${overview.breakEven} finished break-even.`);
+    performanceSummary.push(`Net period P&L ${money(overview.netPnl)} across ${trades.length} exported trade${trades.length === 1 ? "" : "s"}; profit factor ${factor(overview.profitFactor)} on ${money(overview.grossProfit)} gross profit and ${money(overview.grossLoss)} gross loss.`);
+    performanceSummary.push(`Average win ${money(overview.averageWinner)} · average loss ${money(overview.averageLoser)} · expectancy ${money(overview.expectancy)} per closed trade.`);
+    performanceSummary.push(`${positiveDays} of ${dailyRows.length} trading day${dailyRows.length === 1 ? "" : "s"} finished flat or positive.`);
   } else {
-    performanceLines.push("No closed trades are available for this period, so performance metrics are not calculated.");
+    performanceSummary.push("No closed trades are available for this period, so performance metrics are not calculated.");
   }
-  observations.push({ title: "Performance observations", lines: performanceLines });
 
-  const riskLines: string[] = [];
-  if (drawdownAvailable) riskLines.push(`Maximum closed-trade equity drawdown ${money(analysis.drawdown.maximum)} over ${analysis.drawdown.durationTrades} trade${analysis.drawdown.durationTrades === 1 ? "" : "s"}.`);
-  riskLines.push(`Longest winning streak ${analysis.streaks.longestWin} · longest losing streak ${analysis.streaks.longestLoss}.`);
-  if (analysis.risk.average != null) riskLines.push(`Average planned risk ${money(analysis.risk.average)} per trade${analysis.risk.consistency == null ? "" : `, with ${Math.round(analysis.risk.consistency * 100)}% size consistency`}.`);
-  observations.push({ title: "Risk observations", lines: riskLines });
-
-  const executionLines: string[] = [];
-  if (closed) executionLines.push(`${planned} of ${closed} closed trade${closed === 1 ? "" : "s"} were planned entries; ${unplanned} ${unplanned === 1 ? "was" : "were"} unplanned${planNotStated ? ` and ${planNotStated} had no plan status saved` : ""}.`);
-  if (analysis.execution.averageTargetCapture != null) executionLines.push(`Average target capture ${analysis.execution.averageTargetCapture.toFixed(1)}% of the planned reward (${analysis.execution.reachedOrExceededTarget} trade(s) reached or exceeded the target).`);
-  if (analysis.execution.averagePlannedR != null) executionLines.push(`Average planned R ${rMultiple(analysis.execution.averagePlannedR)} against average actual R ${rMultiple(analysis.execution.averageActualR)}.`);
-  observations.push({ title: "Execution observations", lines: executionLines.length ? executionLines : ["No execution details were recorded on these trades."] });
-
-  const processLines: string[] = [];
-  if (averageAdherence != null) processLines.push(`Rule adherence averaged ${Math.round(averageAdherence)}% across ${adherence.length} evaluated trade${adherence.length === 1 ? "" : "s"}, with a rule break recorded on ${ruleBreaks}.`);
-  if (averageChecklist != null) processLines.push(`Pre-trade checklist completion averaged ${averageChecklist.toFixed(1)}%.`);
-  if (classificationRows.length) processLines.push(`Process classification: ${classificationRows.map(row => `${row.label} ${row.sample}`).join(" · ")}.`);
-  observations.push({ title: "Process observations", lines: processLines.length ? processLines : ["No behavioural field was saved, so process metrics are unavailable."] });
-
-  const psychologyLines: string[] = [];
-  if (analysis.behavior.coverage.emotionTaggedTrades) psychologyLines.push(`An emotion was recorded on ${analysis.behavior.coverage.emotionTaggedTrades} of ${closed} closed trade${closed === 1 ? "" : "s"}.`);
-  if (analysis.behavior.tags.length) psychologyLines.push(`${analysis.behavior.tags.reduce((sum, row) => sum + row.sample, 0)} tagged observations across ${analysis.behavior.tags.length} distinct tag${analysis.behavior.tags.length === 1 ? "" : "s"}; the most recorded was ${analysis.behavior.tags[0].label} (${analysis.behavior.tags[0].sample}).`);
-  if (repeatedTags.length) psychologyLines.push(`${repeatedTags.length} tag${repeatedTags.length === 1 ? "" : "s"} appeared on more than one trade.`);
-  observations.push({ title: "Psychology observations", lines: psychologyLines.length ? psychologyLines : ["No emotion or behaviour tag was recorded for this period."] });
-  observations.push({ title: "Data-quality limitations", lines: limitations.length ? limitations : ["Every metric above was calculated from the exported trades with no missing-field warnings."] });
-
-  /* ---- review: what to repeat / review / watch ---- */
-  const repeat: string[] = [];
-  const review: string[] = [];
-  const watch: string[] = [];
-  const namedRows = (rowsToScan: MetricRow[], dimension: string) => rowsToScan.map(row => ({ ...row, dimension }));
-
+  const processSummary: string[] = [];
   if (closed) {
-    if (overview.profitFactor != null && overview.profitFactor > 1.2) repeat.push(`Profit factor ${overview.profitFactor.toFixed(2)}: the setup selection and exit rules produced a positive edge over ${closed} closed trades.`);
-    for (const row of namedRows(analysis.sessions, "Session")) if (row.sample >= 2 && row.netPnl > 0 && row.winRate >= 50) repeat.push(`${row.dimension} ${row.label}: ${row.wins} of ${row.sample} trades won for ${money(row.netPnl)} net — repeat this context.`);
-    for (const row of namedRows(analysis.setups, "Setup")) if (row.sample >= 2 && row.netPnl > 0 && row.winRate >= 50) repeat.push(`${row.dimension} ${row.label}: ${row.wins} of ${row.sample} trades won for ${money(row.netPnl)} net — repeat this context.`);
-    if (averageAdherence != null && averageAdherence >= 90) repeat.push(`Rule adherence averaged ${Math.round(averageAdherence)}% — the pre-trade routine was followed.`);
-    if (evaluated.length && ruleBreaks === 0) repeat.push(`No rule break was recorded on any of the ${evaluated.length} evaluated trade${evaluated.length === 1 ? "" : "s"}.`);
-    if (averageChecklist != null && averageChecklist >= 80) repeat.push(`Pre-trade checklist completion averaged ${averageChecklist.toFixed(1)}%.`);
-    if (!analysis.behavior.tags.length) repeat.push("No mistake tag was recorded in this period.");
-
-    for (const row of namedRows(analysis.sessions, "Session")) if (row.sample >= 2 && row.netPnl < 0) review.push(`${row.dimension} ${row.label}: ${row.losses} of ${row.sample} trades lost for ${money(row.netPnl)} net — review those entries.`);
-    for (const row of namedRows(analysis.setups, "Setup")) if (row.sample >= 2 && row.netPnl < 0) review.push(`${row.dimension} ${row.label}: ${row.losses} of ${row.sample} trades lost for ${money(row.netPnl)} net — review those entries.`);
-    for (const row of namedRows(analysis.timeframes, "Timeframe")) if (row.sample >= 2 && row.netPnl < 0) review.push(`${row.dimension} ${row.label} lost ${money(row.netPnl)} over ${row.sample} trades.`);
-    for (const row of analysis.behavior.emotions) if (row.sample >= 2 && row.netPnl < 0) review.push(`${row.label} was recorded on ${row.sample} trades totalling ${money(row.netPnl)}.`);
-    if (averageAdherence != null && (averageAdherence < 100 || ruleBreaks)) review.push(`Rule adherence was ${Math.round(averageAdherence)}% with ${ruleBreaks} trade(s) breaking a recorded rule — review those decisions.`);
-    if (averageChecklist != null && averageChecklist < 100) review.push(`Checklist completion averaged ${averageChecklist.toFixed(1)}% — some pre-trade checks were saved as unconfirmed.`);
-    if (overview.breakEven) review.push(`${overview.breakEven} break-even trade${overview.breakEven === 1 ? " was" : "s were"} recorded — review management on those positions.`);
-    if (unplanned) review.push(`${unplanned} trade${unplanned === 1 ? " was" : "s were"} logged as unplanned entries.`);
-
-    watch.push(`Longest losing streak: ${analysis.streaks.longestLoss} trade${analysis.streaks.longestLoss === 1 ? "" : "s"}.`);
-    if (drawdownAvailable) watch.push(`Maximum closed-trade equity drawdown ${money(analysis.drawdown.maximum)} — watch exposure during a drawdown.`);
-    if (analysis.risk.consistency != null && analysis.risk.consistency < 1) watch.push(`Risk size varied (${Math.round(analysis.risk.consistency * 100)}% consistency) — watch position sizing.`);
-    if (analysis.behavior.coverage.taggedTrades < closed) watch.push(`${closed - analysis.behavior.coverage.taggedTrades} of ${closed} closed trade(s) carry no behaviour tag — watch journal completeness.`);
-    if (analysis.behavior.coverage.emotionTaggedTrades < closed) watch.push(`${closed - analysis.behavior.coverage.emotionTaggedTrades} closed trade(s) have no emotion recorded — watch the emotional log.`);
-    if (analysis.behavior.coverage.patienceRatedTrades < closed) watch.push(`${closed - analysis.behavior.coverage.patienceRatedTrades} closed trade(s) have no patience score.`);
-    if (classificationGroups.get("BAD_WIN")?.length || classificationGroups.get("BAD_LOSS")?.length) {
-      const badWins = classificationGroups.get("BAD_WIN")?.length ?? 0;
-      const badLosses = classificationGroups.get("BAD_LOSS")?.length ?? 0;
-      watch.push(`Process classification flagged ${badWins} bad win(s) and ${badLosses} bad loss(es) — watch the same triggers next session.`);
-    }
-    if (closed < 20) watch.push(`Only ${closed} closed trade${closed === 1 ? "" : "s"} were exported, so every rate above is a small sample.`);
+    processSummary.push(`${planned} of ${closed} closed trade${closed === 1 ? "" : "s"} were planned entries; ${unplanned} ${unplanned === 1 ? "was" : "were"} unplanned${planNotStated ? ` and ${planNotStated} had no plan status saved` : ""}.`);
+    if (averageAdherence != null) processSummary.push(`Rule adherence averaged ${Math.round(averageAdherence)}% across ${adherence.length} evaluated trade${adherence.length === 1 ? "" : "s"}; a rule break was recorded on ${ruleBreaks}.`);
+    processSummary.push(`Pre-trade checklist completion averaged ${percent(averageChecklist)} · average patience ${averagePatience == null ? ANALYSIS_MISSING : `${averagePatience.toFixed(1)} / 5`}.`);
+    if (classificationRows.length) processSummary.push(`Process classification: ${classificationRows.map(row => `${row.label} ${row.sample}`).join(" · ")}.`);
   } else {
-    review.push("No closed trades are available for this period.");
+    processSummary.push("No closed trades are available for this period, so process metrics are not calculated.");
   }
-  if (!repeat.length) repeat.push("No context met the criteria for a repeat recommendation in this period.");
-  if (!review.length) review.push("No review trigger was recorded in this period.");
-  if (!watch.length) watch.push("No watch-out threshold was reached in this period.");
+
+  const psychologySummary: string[] = [];
+  const taggedObservations = analysis.behavior.tags.reduce((sum, row) => sum + row.sample, 0);
+  if (closed) psychologySummary.push(`An emotion was recorded on ${analysis.behavior.coverage.emotionTaggedTrades} of ${closed} closed trade${closed === 1 ? "" : "s"}.`);
+  if (analysis.behavior.tags.length) {
+    psychologySummary.push(`${taggedObservations} tagged observation${taggedObservations === 1 ? "" : "s"} across ${analysis.behavior.tags.length} distinct tag${analysis.behavior.tags.length === 1 ? "" : "s"}; ${analysis.behavior.tags[0].label} was recorded most often (${analysis.behavior.tags[0].sample}).`);
+    if (repeatedTags.length) psychologySummary.push(`${repeatedTags.length} tag${repeatedTags.length === 1 ? "" : "s"} appeared on more than one trade: ${repeatedTags.map(row => `${row.label} ${row.sample}`).join(" · ")}.`);
+  } else {
+    psychologySummary.push("No mistake, rule-break, or emotion tag was recorded for this period.");
+  }
+
+  const riskSummary: string[] = [];
+  if (drawdownAvailable) riskSummary.push(`Maximum closed-trade equity drawdown ${money(analysis.drawdown.maximum)} over ${analysis.drawdown.durationTrades} trade${analysis.drawdown.durationTrades === 1 ? "" : "s"}; average drawdown ${money(analysis.drawdown.average)}.`);
+  riskSummary.push(`Longest winning streak ${analysis.streaks.longestWin} · longest losing streak ${analysis.streaks.longestLoss}.`);
+  if (analysis.risk.average != null) riskSummary.push(`Average planned risk ${money(analysis.risk.average)} per trade${analysis.risk.consistency == null ? "" : ` with ${Math.round(analysis.risk.consistency * 100)}% size consistency`}.`);
+
+  const dataQuality: string[] = [
+    `${closed} closed trade${closed === 1 ? "" : "s"} carry an outcome; ${analysis.behavior.coverage.taggedTrades} carry a behaviour tag and ${analysis.behavior.coverage.patienceRatedTrades} carry a patience score.`,
+    limitations[0] ?? "Every figure in this report was calculated from the exported trades with no missing-field warnings.",
+  ];
+
+  /* ---- review points: what the recorded values put in front of the trader ---- */
+  const reviewPoints: string[] = [];
+  if (closed) {
+    if (topSession) reviewPoints.push(`Most traded session: ${topSession.label} with ${topSession.sample} trade${topSession.sample === 1 ? "" : "s"} and ${money(topSession.netPnl)} net P&L.`);
+    if (topSetup) reviewPoints.push(`Most traded setup: ${topSetup.label} with ${topSetup.sample} trade${topSetup.sample === 1 ? "" : "s"} and ${money(topSetup.netPnl)} net P&L.`);
+    if (averageAdherence != null) reviewPoints.push(`Rule adherence ${Math.round(averageAdherence)}% across ${adherence.length} evaluated trade${adherence.length === 1 ? "" : "s"}; ${ruleBreaks} recorded a rule break.`);
+    if (unplanned || overview.breakEven) reviewPoints.push(`${unplanned} trade${unplanned === 1 ? "" : "s"} logged as unplanned and ${overview.breakEven} finished break-even.`);
+    if (closed < 20) reviewPoints.push(`${closed} closed trade${closed === 1 ? "" : "s"} were exported, so every rate in this report is a small sample.`);
+  } else {
+    reviewPoints.push("No closed trades are available for this period.");
+  }
+
+  const review: AnalysisReviewSection[] = [
+    { title: "Performance summary", lines: performanceSummary.slice(0, 4) },
+    { title: "Process summary", lines: processSummary.slice(0, 4) },
+    { title: "Psychology summary", lines: psychologySummary.slice(0, 4) },
+    { title: "Risk summary", lines: riskSummary.slice(0, 3) },
+    { title: "Data quality", lines: dataQuality.slice(0, 2) },
+    { title: "Review points", lines: reviewPoints.slice(0, 5) },
+  ];
 
   const pages: AnalysisPage[] = [
     {
       eyebrow: "GOLD JOURNAL · PERFORMANCE REPORT",
       title: "Performance overview",
-      caption: "How the selected period performed. Every figure is calculated from the exported trades by the same engine as the Performance view.",
+      caption: "What happened to the account in the selected period. Every figure is calculated from the exported trades by the same engine as the Performance view.",
       blocks: [
         { kind: "kpis", title: "Headline figures", items: kpis },
         { kind: "metrics", title: "Period", items: periodMetrics },
@@ -519,10 +584,10 @@ export function buildPeriodAnalysis(trades: Record<string, unknown>[], options: 
     {
       eyebrow: "GOLD JOURNAL · PROCESS REPORT",
       title: "Process & behaviour",
-      caption: "How well the trading process was followed, independent of the outcome of any single trade.",
+      caption: "How consistently the intended process was followed, independent of the outcome of any single trade.",
       blocks: [
         { kind: "metrics", title: "Plan & discipline", items: disciplineMetrics },
-        { kind: "metrics", title: "Risk & drawdown", items: riskMetrics },
+        { kind: "metrics", title: "Risk & process control", items: riskMetrics },
         { kind: "tableRow", tables: [processTable, executionTypesTable] },
         { kind: "tableRow", tables: [holdQualityTable, patienceTable] },
       ],
@@ -532,31 +597,21 @@ export function buildPeriodAnalysis(trades: Record<string, unknown>[], options: 
       title: "Psychology & mistakes",
       caption: "What was recorded about behaviour and mistakes. Only recorded journal data is shown; no psychological conclusions are drawn.",
       blocks: [
-        { kind: "tableRow", tables: [mistakesTable, repeatedTable] },
-        { kind: "tableRow", tables: [categoryTable, emotionsTable] },
+        { kind: "tableRow", tables: [mistakesTable, categoryTable] },
+        { kind: "table", table: emotionsTable },
         { kind: "paragraph", title: "Data quality & limitations", flow: true, lines: limitations.length ? limitations : ["Every metric above was calculated from the exported trades with no missing-field warnings."] },
       ],
     },
     {
       eyebrow: "GOLD JOURNAL · REVIEW",
       title: "Review summary",
-      caption: "What the recorded evidence shows, grouped by the question it answers, followed by the action list for the next session.",
+      caption: "A short factual summary of each question, then what the recorded values put in front of the trader. The full tables and rankings are on the pages above.",
       twoColumn: true,
-      blocks: [
-        { kind: "paragraph", title: "Performance observations", lines: observations[0].lines },
-        { kind: "paragraph", title: "Risk observations", lines: observations[1].lines },
-        { kind: "paragraph", title: "Execution observations", lines: observations[2].lines },
-        { kind: "paragraph", title: "Process observations", lines: observations[3].lines },
-        { kind: "paragraph", title: "Psychology observations", lines: observations[4].lines },
-        { kind: "paragraph", title: "Data-quality limitations", flow: true, lines: observations[5].lines },
-        { kind: "paragraph", title: "What to repeat", lines: repeat },
-        { kind: "paragraph", title: "What to review", lines: review },
-        { kind: "paragraph", title: "What to watch next session", lines: watch },
-      ],
+      blocks: review.map(section => ({ kind: "paragraph" as const, title: section.title, lines: section.lines })),
     },
   ];
 
-  return { pages, total: trades.length, closed, review: { repeat, review, watch }, observations, limitations };
+  return { pages, total: trades.length, closed, review, limitations, ownership: REPORT_OWNERSHIP };
 }
 
 /* ------------------------------------------------------------------ *

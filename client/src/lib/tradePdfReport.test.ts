@@ -6,14 +6,19 @@ import {
   PDF_PAGE,
   PDF_SECTION_COLORS,
   SCREENSHOT_EMBED_FAILURE,
+  SECTION_GAP,
+  ascent,
   createPdfImageCache,
+  descent,
   detectImageFormat,
   fetchPdfImage,
+  findLayoutOverlaps,
   fitInside,
   hexToRgb,
   renderTradeLogPdf,
   type PdfDoc,
   type PdfImage,
+  type PdfLayoutBlock,
   type PdfTextOptions,
   type TradeLogPdfTrade,
 } from "./tradePdfReport";
@@ -399,12 +404,25 @@ describe("report structure", () => {
     const written = doc.written();
     ["NET P&L", "WIN RATE", "PROFIT FACTOR", "EXPECTANCY", "TOTAL R", "MAX DRAWDOWN"].forEach(label => expect(written).toContain(label));
     ["SESSION PERFORMANCE", "DIRECTION PERFORMANCE", "TIMEFRAME PERFORMANCE", "SETUP PERFORMANCE", "DAILY PERFORMANCE"].forEach(label => expect(written).toContain(label));
-    ["PLAN & DISCIPLINE", "RISK & DRAWDOWN", "PROCESS CLASSIFICATION", "EXECUTION TYPE", "HOLD QUALITY", "PATIENCE DISTRIBUTION"].forEach(label => expect(written).toContain(label));
-    ["MISTAKE / RULE-BREAK FREQUENCY", "PROCESS, EMOTIONAL, AND ENVIRONMENTAL TAGS", "RECORDED EMOTIONS", "REPEATED BEHAVIOURAL PATTERNS"].forEach(label => expect(written).toContain(label));
-    ["PERFORMANCE OBSERVATIONS", "RISK OBSERVATIONS", "EXECUTION OBSERVATIONS", "PROCESS OBSERVATIONS", "PSYCHOLOGY OBSERVATIONS", "WHAT TO REPEAT", "WHAT TO REVIEW", "WHAT TO WATCH NEXT SESSION"].forEach(label => expect(written).toContain(label));
+    ["PLAN & DISCIPLINE", "RISK & PROCESS CONTROL", "PROCESS CLASSIFICATION", "EXECUTION TYPE", "HOLD QUALITY", "PATIENCE DISTRIBUTION"].forEach(label => expect(written).toContain(label));
+    ["MISTAKE / RULE-BREAK FREQUENCY", "PROCESS, EMOTIONAL, AND ENVIRONMENTAL TAGS", "RECORDED EMOTIONS", "DATA QUALITY & LIMITATIONS"].forEach(label => expect(written).toContain(label));
+    ["PERFORMANCE SUMMARY", "PROCESS SUMMARY", "PSYCHOLOGY SUMMARY", "RISK SUMMARY", "DATA QUALITY", "REVIEW POINTS"].forEach(label => expect(written).toContain(label));
     expect(doc.flattened()).toContain("$60.00");
     expect(doc.violations).toEqual([]);
     expect(doc.overlaps()).toEqual([]);
+  });
+
+  it("prints the behaviour dataset once and keeps the review page free of tables", async () => {
+    const doc = await render([{ trade: completeTrade({ hasScreenshot: false }) }]);
+    const written = doc.flattened();
+    expect(written).toContain("MISTAKE / RULE-BREAK FREQUENCY");
+    expect(written).not.toContain("REPEATED BEHAVIOURAL PATTERNS");
+    // Performance, process and psychology tables stay on their own pages.
+    const reviewPage = doc.pageOf("Review summary");
+    expect(reviewPage).toBeTruthy();
+    const reviewText = doc.texts.filter(entry => entry.page === reviewPage).map(entry => entry.text);
+    ["SESSION PERFORMANCE", "TIMEFRAME PERFORMANCE", "SETUP PERFORMANCE", "DAILY PERFORMANCE", "PATIENCE DISTRIBUTION", "RECORDED EMOTIONS", "MISTAKE / RULE-BREAK FREQUENCY"]
+      .forEach(label => expect(reviewText).not.toContain(label));
   });
 
   it("lays the review page out in two balanced columns", async () => {
@@ -471,6 +489,37 @@ describe("report structure", () => {
     expect(PDF_COLORS.negative[0]).toBeGreaterThan(PDF_COLORS.negative[1]);
   });
 
+  it("renders 1, 3 and 50 trades, long text, and empty data without overlap or clipping", async () => {
+    const longTags = "Revenge|Oversize|Moved SL|Chased entry|Ignored news|Fatigue|Distracted|Late session|No confirmation|FOMO";
+    const longText = Array.from({ length: 12 }, (_, index) => `Segment ${index + 1} records what happened around this part of the session in enough words to wrap across several lines of the report.`).join("\n");
+    const datasets: TradeLogPdfTrade[][] = [
+      [{ trade: completeTrade({ hasScreenshot: false }) }],
+      Array.from({ length: 3 }, (_, index) => ({
+        trade: completeTrade({ id: index + 1, tradeDate: `2026-08-0${index + 4}T09:00:00.000Z`, result: ["WIN", "LOSS", "BREAK_EVEN"][index], pnl: ["70.90", "-48.20", "0.00"][index], hasScreenshot: false }),
+      })),
+      Array.from({ length: 50 }, (_, index) => ({
+        trade: completeTrade({ id: index + 1, tradeDate: `2026-08-${String((index % 28) + 1).padStart(2, "0")}T09:00:00.000Z`, result: ["WIN", "LOSS", "BREAK_EVEN"][index % 3], pnl: ["70.90", "-48.20", "0.00"][index % 3], session: ["New York", "London", "Asian"][index % 3], hasScreenshot: false }),
+      })),
+      [{ trade: completeTrade({ mistake: longTags, emotionBefore: longText, emotionDuring: longText, emotionAfter: longText, notes: longText, hasScreenshot: false }) }],
+      [{ trade: trade({ pnl: null, result: "", session: "", symbol: "", level: "", patienceScore: null, planChecklist: null, planStatus: null, notes: null, emotionBefore: null, mistake: null, planChecklist: null, hasScreenshot: false }) }],
+    ];
+    for (const trades of datasets) {
+      const doc = await render(trades);
+      const label = `${trades.length} trade(s)`;
+      expect(doc.violations, `clipping with ${label}`).toEqual([]);
+      expect(doc.overlaps(), `overlap with ${label}`).toEqual([]);
+      const total = doc.getNumberOfPages();
+      for (let page = 1; page <= total; page += 1) {
+        expect(doc.texts.some(entry => entry.page === page), `page ${page} of the ${label} report is empty`).toBe(true);
+        expect(doc.contentMaxY(page), `page ${page} of the ${label} report runs past the content area`).toBeLessThanOrEqual(PDF_PAGE.height - 12);
+      }
+      for (let index = 0; index < trades.length; index += 1) {
+        expect(doc.pageOf(`TRADE ${String(index + 1).padStart(2, "0")} / ${String(trades.length).padStart(2, "0")}`), `missing trade page ${index + 1} of ${label}`).not.toBeNull();
+      }
+      expect(doc.written(), `the ${label} report keeps the full schema`).toContain(PRESENTATION_MISSING);
+    }
+  });
+
   it("keeps the reference 9-trade report to exactly two pages per trade plus the analysis", async () => {
     const sessions = ["New York", "London", "Asian", "Pre-London", "New York", "London", "New York", "Asian", "London"];
     const outcomes = ["WIN", "LOSS", "BREAK_EVEN", "WIN", "LOSS", "WIN", "WIN", "LOSS", "WIN"];
@@ -500,6 +549,88 @@ describe("report structure", () => {
       expect(doc.texts.some(entry => entry.page === page), `page ${page} is empty`).toBe(true);
       expect(doc.contentMaxY(page)).toBeLessThanOrEqual(PDF_PAGE.height - 12);
     }
+  });
+});
+
+describe("layout validation", () => {
+  /** Renders the reference report and hands back its measured layout. */
+  async function measure(trades: TradeLogPdfTrade[]) {
+    const doc = new RecordingPdfDoc();
+    const result = await renderTradeLogPdf(doc, {
+      accountName: "Funded Gold",
+      rangeLabel: "2026-08-01 to 2026-08-31",
+      mode: "ALL_TIME",
+      summary: summarizeBulkPdfTrades(trades.map(row => row.trade as never)),
+      trades,
+      fetchImage: async () => ({ dataUrl: `data:image/png;base64,${PNG_1PX}`, format: "PNG" }),
+    });
+    return { doc, result };
+  }
+
+  it("flags a genuine collision and ignores containers, page breaks, and grazing blocks", () => {
+    const rect = (id: string, x: number, y: number, width: number, height: number, kind: PdfLayoutBlock["kind"]): PdfLayoutBlock => ({ id, page: 1, x, y, width, height, kind });
+    expect(findLayoutOverlaps([rect("band:A", 12, 10, 100, 4, "band"), rect("text:a", 12, 8, 100, 4, "text")])).toEqual(["band:A intersects text:a on page 1"]);
+    expect(findLayoutOverlaps([rect("table:a", 12, 10, 100, 10, "table"), rect("table:b", 12, 15, 100, 10, "table")])).toEqual(["table:a intersects table:b on page 1"]);
+    // A panel is a container: its own content is drawn inside it by design.
+    expect(findLayoutOverlaps([rect("panel:p", 12, 10, 100, 20, "panel"), rect("text:t", 14, 12, 40, 4, "text")])).toEqual([]);
+    // An image is a container too, and a hairline gap is not a collision.
+    expect(findLayoutOverlaps([rect("image:i", 12, 10, 100, 20, "image"), rect("text:t", 14, 12, 40, 4, "text")])).toEqual([]);
+    expect(findLayoutOverlaps([rect("text:a", 12, 10, 100, 4, "text"), rect("text:b", 12, 14.4, 100, 4, "text")])).toEqual([]);
+    expect(findLayoutOverlaps([rect("text:a", 12, 10, 100, 4, "text"), { ...rect("text:b", 12, 10, 100, 4, "text"), page: 2 }])).toEqual([]);
+  });
+
+  it("reports no overlapping block anywhere in a full report", async () => {
+    const { doc, result } = await measure(Array.from({ length: 9 }, (_, index) => ({
+      trade: completeTrade({
+        id: 690 + index,
+        tradeDate: `2026-09-${String(16 + Math.floor(index / 3)).padStart(2, "0")}T0${9 + (index % 3)}:15:00.000Z`,
+        result: ["WIN", "LOSS", "BREAK_EVEN"][index % 3],
+        pnl: ["70.90", "-48.20", "0.00"][index % 3],
+        hasScreenshot: index % 2 === 0,
+        screenshotUrl: index % 2 === 0 ? "https://files.test/chart.png" : null,
+      }),
+      runningBalance: 1000 + index * 10,
+    })));
+    expect(result.layout.overlaps).toEqual([]);
+    expect(result.layout.blocks.length).toBeGreaterThan(50);
+    expect(doc.violations).toEqual([]);
+  });
+
+  it("leaves the measured section gap between every band and the content it introduces", async () => {
+    const { result } = await measure([{ trade: completeTrade({ hasScreenshot: false }) }]);
+    const bands = result.layout.blocks.filter(block => block.kind === "band");
+    expect(bands.length).toBeGreaterThan(5);
+    let checked = 0;
+    for (const band of bands) {
+      const content = result.layout.blocks.find(block => block.id === `${band.id}.content`);
+      if (!content) continue;
+      expect(content.y - (band.y + band.height)).toBeGreaterThanOrEqual(SECTION_GAP - 0.01);
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThan(5);
+  });
+
+  it("keeps every coloured band clear of the text around it", async () => {
+    const { doc, result } = await measure([
+      { trade: completeTrade({ id: 1, hasScreenshot: false }) },
+      { trade: completeTrade({ id: 2, tradeDate: "2026-08-05T09:00:00.000Z", result: "LOSS", pnl: "-52.30", mistake: "Revenge|Oversize|Moved SL|Chased entry|FOMO", notes: "Closed early after a wide stop, no confirmation on the entry.", hasScreenshot: false }) },
+      { trade: completeTrade({ id: 3, tradeDate: "2026-08-06T09:00:00.000Z", result: "BREAK_EVEN", pnl: "0.00", hasScreenshot: false }) },
+    ]);
+    const bands = result.layout.blocks.filter(block => block.kind === "band");
+    expect(bands.length).toBeGreaterThan(10);
+    for (const band of bands) {
+      for (const entry of doc.texts) {
+        if (entry.page !== band.page) continue;
+        const width = entry.text.length * entry.size * 0.22;
+        const left = entry.align === "center" ? entry.x - width / 2 : entry.align === "right" ? entry.x - width : entry.x;
+        const overlapX = Math.min(left + width, band.x + band.width) - Math.max(left, band.x);
+        const overlapY = Math.min(entry.y + descent(entry.size), band.y + band.height) - Math.max(entry.y - ascent(entry.size), band.y);
+        if (overlapX <= 1 || overlapY <= 0.4) continue;
+        // The band's own title is the only text allowed inside a band.
+        expect(entry.text.toUpperCase(), `"${entry.text}" must not be drawn inside band ${band.id}`).toBe(band.title);
+      }
+    }
+    expect(result.layout.overlaps).toEqual([]);
   });
 });
 

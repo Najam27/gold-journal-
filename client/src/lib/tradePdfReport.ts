@@ -1,42 +1,63 @@
 /**
- * The PDF report renderer.
+ * The PDF report: two pages per trade (complete data, then screenshot evidence), one
+ * page per analysis question (performance, process, psychology, review), and a
+ * footer on every page.
  *
- * Design contract (a fixed, deliberately constructed document):
- *   • A4 landscape, neutral white page, dark ink, and a *section-coded* colour
- *     system taken from `TRADE_SECTION_THEME` — so the dialog, the share card, and
- *     the PDF all mark "Strategy" purple and "Risk & performance" amber. The
- *     document carries its own print palette, so neither the app theme (light or
- *     dark) nor a dark-mode class can change how it reads or prints;
- *   • two pages per trade: a complete trade-data page (coloured section bands, a
- *     KPI tile strip, and a table of every canonical field) and a screenshot
- *     evidence page;
- *   • analysis pages after the trades — performance, process, psychology, review —
- *     each answering one question, using the same coloured band language;
- *   • a footer on every page with the account, the period, and `Page X / Y`.
- *
- * It never decides what a trade contains: every value comes from
- * `buildTradePresentation` (the canonical presentation model the Trade Card and
- * the share image also render), and the analysis pages come from
- * `buildPeriodAnalysis` (computed by `@shared/analysisEngine`). No technical
- * plumbing — MT5 ticket numbers, screenshot file names, storage details, image
- * formats, or internal ids — is ever drawn.
- *
- * Layout rule: every row's height is measured from its own wrapped text before it
- * is drawn, so a long value grows its row instead of colliding with the row below.
- * A value that genuinely cannot fit continues onto a labelled continuation page —
- * nothing is truncated and no read text is driven below 7pt.
- *
- * A `PdfDoc` is passed in rather than a concrete jsPDF instance, so the layout,
- * pagination, and screenshot fitting rules are unit-testable in Node while the
- * application passes a real jsPDF document.
+ * Every value comes from `buildTradePresentation` (the canonical model the Trade Card
+ * and the share image render) and `buildPeriodAnalysis`; no MT5 ticket, screenshot
+ * file name, storage detail, image format, or internal id is ever drawn. Geometry,
+ * the vertical cursor, and the primitives live in `./tradePdfLayout`.
  */
 
 import {
+  ANALYSIS_METRICS,
+  HEADER_HEIGHT,
+  KPI_COLUMNS,
+  KPI_STRIP_HEIGHT,
+  METRIC_COLUMNS,
+  PDF_COLORS,
+  PDF_HEADER_COLOR,
+  PDF_MIN_FONT,
+  PDF_PAGE,
+  PDF_SECTION_COLORS,
+  SCREENSHOT_CAPTION,
+  SECTION_GAP,
+  TABLE_FONT,
+  TRADE_METRICS,
+  ascent,
+  compactListValue,
+  contentBottom,
+  contentWidth,
+  descent,
+  drawLines,
+  ensureSpace,
+  findLayoutOverlaps,
+  hairline,
+  nextPage,
+  paintBand,
+  panel,
+  renderSection,
+  reserveBlock,
+  sectionBandOnly,
+  setDraw,
+  setText,
+  startPage,
+  toneColor,
+  toneTint,
+  wrapText,
+  writeWrapped,
+  type Ctx,
+  type Metrics,
+  type PdfDoc,
+  type PdfImage,
+  type PdfLayoutBlock,
+  type PdfTextOptions,
+  type Rgb,
+} from "./tradePdfLayout";
+import {
   PRESENTATION_MISSING,
-  TRADE_HEADER_ACCENT,
   TRADE_SECTION_THEME,
   buildTradePresentation,
-  resolveTone,
   type TradePresentation,
   type TradePresentationChecklistItem,
   type TradePresentationField,
@@ -46,302 +67,16 @@ import {
 import { buildPeriodAnalysis, type AnalysisBlock, type AnalysisPage, type AnalysisTable, type PeriodAnalysis } from "./tradePdfAnalysis";
 import type { BulkPdfSummary } from "./bulkPdf";
 
-export type PdfImage = { dataUrl: string; format: string };
-export type PdfTextOptions = { align?: "left" | "center" | "right" };
-
-/** The slice of jsPDF this writer needs; a real jsPDF document satisfies it. */
-export type PdfDoc = {
-  addPage(): unknown;
-  setPage(page: number): unknown;
-  getNumberOfPages(): number;
-  setFillColor(red: number, green: number, blue: number): unknown;
-  setTextColor(red: number, green: number, blue: number): unknown;
-  setDrawColor?(red: number, green: number, blue: number): unknown;
-  setLineWidth?(width: number): unknown;
-  setFontSize(size: number): unknown;
-  setFont?(name: string, style?: string): unknown;
-  rect(x: number, y: number, width: number, height: number, style?: string): unknown;
-  roundedRect?(x: number, y: number, width: number, height: number, radiusX: number, radiusY: number, style?: string): unknown;
-  line?(x1: number, y1: number, x2: number, y2: number): unknown;
-  text(text: string | string[], x: number, y: number, options?: PdfTextOptions): unknown;
-  splitTextToSize(text: string, maxWidth: number): string[];
-  addImage(dataUrl: string, format: string, x: number, y: number, width: number, height: number): unknown;
-  getImageProperties(dataUrl: string): { width: number; height: number };
-};
-
-/** A4 landscape, in millimetres. */
-export const PDF_PAGE = { width: 297, height: 210, margin: 12, footerBaseline: 205 } as const;
-
-type Rgb = readonly [number, number, number];
-
-/** Converts a canonical `#rrggbb` theme colour into a jsPDF channel triple. */
-export function hexToRgb(hex: string): [number, number, number] {
-  const value = hex.replace("#", "");
-  return [parseInt(value.slice(0, 2), 16), parseInt(value.slice(2, 4), 16), parseInt(value.slice(4, 6), 16)];
-}
-
-/**
- * The document's own print palette: a neutral page, dark ink, fixed
- * positive/negative treatment, and the tinted panels the section bands use.
- */
-export const PDF_COLORS = {
-  page: [255, 255, 255],
-  ink: [26, 32, 40],
-  inkSoft: [92, 102, 114],
-  inkFaint: [138, 147, 158],
-  accent: [156, 118, 34],
-  accentSoft: [250, 246, 237],
-  panel: [246, 247, 249],
-  panelLine: [222, 227, 233],
-  rule: [214, 220, 227],
-  positive: [21, 122, 74],
-  negative: [178, 48, 48],
-  neutral: [92, 102, 114],
-  warning: [170, 110, 16],
-  accentAlt: [47, 92, 158],
-  onAccent: [255, 255, 255],
-  tintPositive: [238, 247, 242],
-  tintNegative: [252, 240, 240],
-  tintWarning: [253, 247, 235],
-  tintAccent: [242, 246, 253],
-} as const;
-
-/** The canonical section accents, resolved once for the document. */
-export const PDF_SECTION_COLORS: Record<TradePresentationSectionId, Rgb> = {
-  overview: hexToRgb(TRADE_SECTION_THEME.overview.accent),
-  strategy: hexToRgb(TRADE_SECTION_THEME.strategy.accent),
-  execution: hexToRgb(TRADE_SECTION_THEME.execution.accent),
-  risk: hexToRgb(TRADE_SECTION_THEME.risk.accent),
-  discipline: hexToRgb(TRADE_SECTION_THEME.discipline.accent),
-  checklist: hexToRgb(TRADE_SECTION_THEME.checklist.accent),
-  mistakes: hexToRgb(TRADE_SECTION_THEME.mistakes.accent),
-  psychology: hexToRgb(TRADE_SECTION_THEME.psychology.accent),
-  journal: hexToRgb(TRADE_SECTION_THEME.journal.accent),
-};
-
-export const PDF_HEADER_COLOR: Rgb = hexToRgb(TRADE_HEADER_ACCENT);
+/** The page geometry, palette, and layout primitives are the report's public surface. */
+export * from "./tradePdfLayout";
 
 /** Shown when a screenshot was recorded but could not be embedded. */
 export const SCREENSHOT_EMBED_FAILURE = "The screenshot could not be loaded for this export.";
 
-const TONE_COLORS: Record<TradeTone, Rgb> = {
-  neutral: PDF_COLORS.ink,
-  positive: PDF_COLORS.positive,
-  negative: PDF_COLORS.negative,
-  signed: PDF_COLORS.ink,
-  accent: PDF_COLORS.accent,
-  warning: PDF_COLORS.warning,
-};
-
-const TONE_TINTS: Record<TradeTone, Rgb> = {
-  neutral: PDF_COLORS.panel,
-  signed: PDF_COLORS.panel,
-  positive: PDF_COLORS.tintPositive,
-  negative: PDF_COLORS.tintNegative,
-  accent: PDF_COLORS.tintAccent,
-  warning: PDF_COLORS.tintWarning,
-};
-
-function toneColor(tone: TradeTone | undefined, value?: string): Rgb {
-  const resolved = tone === "signed" && value ? resolveTone({ tone, value }) : tone ?? "neutral";
-  if (resolved === "signed") return PDF_COLORS.ink;
-  return TONE_COLORS[resolved] ?? PDF_COLORS.ink;
-}
-
-function toneTint(tone: TradeTone | undefined, value?: string): Rgb {
-  const resolved = tone === "signed" && value ? resolveTone({ tone, value }) : tone ?? "neutral";
-  return TONE_TINTS[resolved] ?? PDF_COLORS.panel;
-}
-
-/* ------------------------------------------------------------------ *
- * Typography
- * ------------------------------------------------------------------ */
-
-type Metrics = {
-  body: number;
-  line: number;
-  label: number;
-  labelLine: number;
-  gap: number;
-  rowGap: number;
-  section: number;
-  sectionAdvance: number;
-  title: number;
-};
-
-/**
- * Readable first, compact second: the first tier that fits the page wins. No tier
- * drops a label, heading, or value below 7pt — a trade that genuinely cannot be
- * laid out at 7pt continues onto a labelled page instead of shrinking further.
- */
-const TRADE_METRICS: Metrics[] = [
-  { body: 8, line: 3.5, label: 7.4, labelLine: 3, gap: 7, rowGap: 1.2, section: 8, sectionAdvance: 4.4, title: 17 },
-  { body: 7.8, line: 3.3, label: 7.3, labelLine: 2.9, gap: 6.5, rowGap: 1, section: 7.8, sectionAdvance: 4.2, title: 16 },
-  { body: 7.5, line: 3.1, label: 7.2, labelLine: 2.8, gap: 6, rowGap: 0.8, section: 7.6, sectionAdvance: 4, title: 16 },
-  { body: 7.2, line: 3, label: 7.1, labelLine: 2.7, gap: 5.5, rowGap: 0.6, section: 7.4, sectionAdvance: 3.9, title: 15 },
-  { body: 7, line: 2.9, label: 7, labelLine: 2.6, gap: 5, rowGap: 0.5, section: 7.2, sectionAdvance: 3.8, title: 15 },
-];
-
-const ANALYSIS_METRICS: Metrics = { body: 7.6, line: 3.4, label: 7.2, labelLine: 3, gap: 6, rowGap: 1.1, section: 8, sectionAdvance: 4.8, title: 16 };
-const TABLE_FONT = { title: 7.6, header: 7, body: 7.2, line: 3.4, padding: 0.8 };
-
-/**
- * The smallest type the report's read content uses: eyebrows, KPI labels, field
- * labels, table headers, and body text all stay at or above this.
- */
-export const PDF_MIN_FONT = 7;
-const METRIC_COLUMNS = 4;
-const KPI_COLUMNS = 6;
-
-/** Height of the page header band, and of the body area it leaves behind. */
-const HEADER_HEIGHT = 15;
-const SCREENSHOT_CAPTION = 5;
-/** Height of the trade page's KPI tile strip, including its gap. */
-const KPI_STRIP_HEIGHT = 14;
-
-/* ------------------------------------------------------------------ *
- * Context and primitives
- * ------------------------------------------------------------------ */
-
-type Ctx = {
-  doc: PdfDoc;
-  /** The first page already exists in jsPDF, so it is painted rather than added. */
-  started: boolean;
-  y: number;
-  bodyTop: number;
-  bottom: number;
-  contentWidth: number;
-  metrics: Metrics;
-  header: { eyebrow: string; title: string; continued: string; caption?: string };
-  titleSize: number;
-};
-
-function setFill(doc: PdfDoc, color: Rgb) { doc.setFillColor(color[0], color[1], color[2]); }
-function setText(doc: PdfDoc, color: Rgb) { doc.setTextColor(color[0], color[1], color[2]); }
-function setDraw(doc: PdfDoc, color: Rgb) { doc.setDrawColor?.(color[0], color[1], color[2]); doc.setLineWidth?.(0.2); }
-function contentWidth() { return PDF_PAGE.width - PDF_PAGE.margin * 2; }
-function contentBottom() { return PDF_PAGE.height - PDF_PAGE.margin - 6; }
-
-function paintPage(doc: PdfDoc) {
-  setFill(doc, PDF_COLORS.page);
-  doc.rect(0, 0, PDF_PAGE.width, PDF_PAGE.height, "F");
-}
-
-function hairline(ctx: Ctx, y: number, x: number, width: number, color: Rgb = PDF_COLORS.rule, height = 0.25) {
-  setFill(ctx.doc, color);
-  ctx.doc.rect(x, y, width, height, "F");
-}
-
-function panel(ctx: Ctx, x: number, y: number, width: number, height: number, fill: Rgb = PDF_COLORS.panel, border: Rgb = PDF_COLORS.panelLine) {
-  setFill(ctx.doc, fill);
-  if (ctx.doc.roundedRect) ctx.doc.roundedRect(x, y, width, height, 1.2, 1.2, "F");
-  else ctx.doc.rect(x, y, width, height, "F");
-  setDraw(ctx.doc, border);
-  if (ctx.doc.roundedRect) ctx.doc.roundedRect(x, y, width, height, 1.2, 1.2, "S");
-  else ctx.doc.rect(x, y, width, height, "S");
-}
-
-/** Draws the page header band and returns the y the body may start at. */
-function drawHeader(ctx: Ctx, title: string) {
-  const doc = ctx.doc;
-  const margin = PDF_PAGE.margin;
-  setText(doc, PDF_COLORS.inkFaint);
-  doc.setFontSize(PDF_MIN_FONT);
-  doc.text(ctx.header.eyebrow, margin, margin + 3.2);
-  if (doc.setFont) doc.setFont("helvetica", "bold");
-  setText(doc, PDF_COLORS.ink);
-  doc.setFontSize(ctx.titleSize);
-  doc.text(doc.splitTextToSize(title, contentWidth())[0] ?? "", margin, margin + 9.8);
-  if (doc.setFont) doc.setFont("helvetica", "normal");
-  if (ctx.header.caption) {
-    setText(doc, PDF_COLORS.inkSoft);
-    doc.setFontSize(7.4);
-    doc.text(doc.splitTextToSize(ctx.header.caption, contentWidth())[0] ?? "", margin, margin + 13.4);
-  }
-  hairline(ctx, margin + 14.6, margin, contentWidth(), PDF_HEADER_COLOR, 0.6);
-  return HEADER_HEIGHT;
-}
-
-function startPage(ctx: Ctx, options: { eyebrow: string; title: string; continued: string; caption?: string; titleSize?: number; metrics?: Metrics }) {
-  if (ctx.started) ctx.doc.addPage();
-  else ctx.started = true;
-  ctx.header = { eyebrow: options.eyebrow, title: options.title, continued: options.continued, caption: options.caption };
-  ctx.titleSize = options.titleSize ?? 16;
-  ctx.metrics = options.metrics ?? TRADE_METRICS[1];
-  paintPage(ctx.doc);
-  ctx.bodyTop = PDF_PAGE.margin + drawHeader(ctx, options.title);
-  ctx.bottom = contentBottom();
-  ctx.contentWidth = contentWidth();
-  ctx.y = ctx.bodyTop;
-}
-
-function nextPage(ctx: Ctx) {
-  startPage(ctx, {
-    eyebrow: ctx.header.eyebrow,
-    title: ctx.header.continued,
-    continued: ctx.header.continued,
-    titleSize: Math.min(ctx.titleSize, 15),
-    metrics: ctx.metrics,
-  });
-}
-
-function ensureSpace(ctx: Ctx, needed: number) {
-  if (ctx.y + needed > ctx.bottom) nextPage(ctx);
-}
-
-/** A filled, coloured section band with its title in white — the report's anchor. */
-function sectionBand(ctx: Ctx, title: string, color: Rgb, x: number, width: number, options: { height?: number } = {}) {
-  const height = options.height ?? ctx.metrics.sectionAdvance;
-  ensureSpace(ctx, height + 2);
-  panel(ctx, x, ctx.y, width, height, color, color);
-  // The band title is display type, but it still never drops below the floor.
-  ctx.doc.setFontSize(Math.max(PDF_MIN_FONT, ctx.metrics.section - 0.4));
-  if (ctx.doc.setFont) ctx.doc.setFont("helvetica", "bold");
-  setText(ctx.doc, PDF_COLORS.onAccent);
-  ctx.doc.text(title.toUpperCase(), x + 2.4, ctx.y + height - 1.5);
-  if (ctx.doc.setFont) ctx.doc.setFont("helvetica", "normal");
-  ctx.y += height;
-}
-
-/* ------------------------------------------------------------------ *
- * Text utilities
- * ------------------------------------------------------------------ */
-
-/** Turns a value made of many short lines (a tag list) into one flowing line. */
-export function compactListValue(value: string): string {
-  const lines = value.split("\n").map(line => line.trim()).filter(Boolean);
-  if (lines.length >= 3 && lines.every(line => line.length <= 44)) return lines.join(" · ");
-  return value;
-}
-
-function wrapText(doc: PdfDoc, value: string, maxWidth: number): string[] {
-  const lines: string[] = [];
-  for (const paragraph of value.split("\n")) {
-    if (paragraph.trim() === "") { lines.push(""); continue; }
-    const wrapped = doc.splitTextToSize(paragraph, maxWidth) as string[];
-    if (wrapped.length) lines.push(...wrapped);
-  }
-  return lines.length ? lines : [PRESENTATION_MISSING];
-}
-
-/**
- * Writes wrapped text from x. Font and colour are re-applied per line because a
- * page break resets both (the page header sets its own type size).
- */
-function writeWrapped(ctx: Ctx, value: string, options: { x?: number; maxWidth?: number; lineHeight?: number; color?: Rgb; fontSize?: number } = {}) {
-  const x = options.x ?? PDF_PAGE.margin;
-  const lineHeight = options.lineHeight ?? ctx.metrics.line;
-  const maxWidth = options.maxWidth ?? ctx.contentWidth;
-  const fontSize = options.fontSize ?? ctx.metrics.body;
-  const color = options.color ?? PDF_COLORS.ink;
-  for (const line of wrapText(ctx.doc, value, maxWidth)) {
-    ensureSpace(ctx, lineHeight);
-    ctx.doc.setFontSize(fontSize);
-    setText(ctx.doc, color);
-    ctx.doc.text(line, x, ctx.y);
-    ctx.y += lineHeight;
-  }
-}
+/** The trailing space one trade-page block leaves before the next one starts. */
+const BLOCK_TRAILING = 0.8;
+/** Vertical space between the trade page's block rows. */
+const ROW_GAP = 1.2;
 
 /* ------------------------------------------------------------------ *
  * Trade page blocks
@@ -357,23 +92,17 @@ type Cell = {
   tone?: TradeTone;
 };
 
+/** A trade-page block: a coloured band plus the measured content beneath it. */
 type Block =
   | { kind: "section"; id: string; title: string; accent: Rgb; rows: Array<{ cells: Cell[]; height: number }>; height: number }
   | { kind: "checklist"; id: "checklist"; title: string; accent: Rgb; columns: TradePresentationChecklistItem[][]; rowHeight: number; height: number }
-  | { kind: "process"; id: "process"; title: string; accent: Rgb; label: string; summary: string; reviewLines: string[]; tone: TradeTone; height: number }
-  | { kind: "psychology"; id: "psychology"; title: string; accent: Rgb; cells: Array<{ label: string; lines: string[] }>; height: number }
-  | { kind: "note"; id: "journal"; title: string; accent: Rgb; label: string; text: string; lines: string[]; height: number };
+  | { kind: "process"; id: "process"; title: string; accent: Rgb; label: string; summaryLines: string[]; reviewLines: string[]; tone: TradeTone; panelHeight: number; summaryTop: number; reviewTop: number; reviewLinesTop: number; height: number }
+  | { kind: "psychology"; id: "psychology"; title: string; accent: Rgb; cells: Array<{ label: string; lines: string[] }>; boxHeight: number; linesTop: number; height: number }
+  | { kind: "note"; id: "journal"; title: string; accent: Rgb; label: string; text: string; lines: string[]; boxHeight: number; textTop: number; height: number };
 
 function columnWidth(ctx: Ctx) { return (ctx.contentWidth - ctx.metrics.gap) / 2; }
 
-/**
- * Measures one field cell at the width it will occupy.
- *
- * `stacked` is decided by the caller when the cell was first probed at the grid's
- * cell width and found to need a whole row; it is then re-measured at the full row
- * width while staying stacked. Deciding it again after that re-measure is what
- * once let a long label run underneath its own value.
- */
+/** Measures one field cell at the width it will actually occupy. */
 function buildCell(ctx: Ctx, field: TradePresentationField, width: number, stacked?: boolean): Cell {
   const metrics = ctx.metrics;
   const value = compactListValue(field.value);
@@ -389,18 +118,16 @@ function buildCell(ctx: Ctx, field: TradePresentationField, width: number, stack
   return { key: field.key, label: field.label.toUpperCase(), value, lines: lines.length ? lines : [PRESENTATION_MISSING], labelLines: labelLines.length ? labelLines : [field.label.toUpperCase()], stacked: layoutStacked, tone: field.tone };
 }
 
+/**
+ * The exact height of one field cell: its label lines (when the cell stacks), then
+ * its value lines, each expressed as `ascent + (lines - 1) * line + descent`.
+ */
 function cellHeight(cell: Cell, metrics: Metrics) {
-  const labelBlock = cell.stacked ? cell.labelLines.length * metrics.labelLine : 0;
-  const valueBlock = cell.lines.length * metrics.line;
-  return labelBlock + valueBlock + metrics.rowGap;
+  const labelBlock = cell.stacked ? cell.labelLines.length * metrics.labelLine : Math.max(ascent(metrics.label), ascent(metrics.body));
+  return labelBlock + ascent(metrics.body) + Math.max(0, cell.lines.length - 1) * metrics.line + descent(metrics.body) + metrics.rowGap;
 }
 
-/**
- * A section as a table: coloured band, then rows of up to `columns` field cells.
- * A `wide` field (long prose) always takes a full row. Each row's height is the
- * tallest cell in it, so a wrapped value grows its own row and never overlaps the
- * row below.
- */
+/** A coloured section band, then rows of up to `columns` measured field cells. */
 function compileSection(ctx: Ctx, model: TradePresentation, id: TradePresentationSectionId, width: number, columns: number, options: { skip?: string[] } = {}): Block | null {
   const metrics = ctx.metrics;
   const section = model.sections.find(entry => entry.id === id);
@@ -434,7 +161,7 @@ function compileSection(ctx: Ctx, model: TradePresentation, id: TradePresentatio
     current.push(cell);
   }
   flush();
-  return { kind: "section", id, title: section.title, accent: PDF_SECTION_COLORS[id], rows, height: metrics.sectionAdvance + rows.reduce((sum, row) => sum + row.height, 0) + 1.5 };
+  return { kind: "section", id, title: section.title, accent: PDF_SECTION_COLORS[id], rows, height: metrics.sectionAdvance + SECTION_GAP + rows.reduce((sum, row) => sum + row.height, 0) + BLOCK_TRAILING };
 }
 
 /** The checklist as two columns of confirmed / not-confirmed items. */
@@ -442,8 +169,8 @@ function compileChecklist(ctx: Ctx, model: TradePresentation): Block {
   const metrics = ctx.metrics;
   const half = Math.ceil(model.checklist.length / 2);
   const columns = [model.checklist.slice(0, half), model.checklist.slice(half)];
-  const rowHeight = metrics.line + 0.4;
-  const height = metrics.sectionAdvance + Math.max(...columns.map(column => column.length)) * rowHeight + 1.5;
+  const rowHeight = Math.max(metrics.line, ascent(metrics.body) + descent(metrics.body) + 0.6) + 0.15;
+  const height = metrics.sectionAdvance + SECTION_GAP + Math.max(...columns.map(column => column.length)) * rowHeight + BLOCK_TRAILING;
   return { kind: "checklist", id: "checklist", title: TRADE_SECTION_THEME.checklist.title, accent: PDF_SECTION_COLORS.checklist, columns, rowHeight, height };
 }
 
@@ -454,18 +181,27 @@ function compileProcess(ctx: Ctx, model: TradePresentation, width: number): Bloc
   const summaryLines = (ctx.doc.splitTextToSize(model.classification.summary, width - 8) as string[]).slice(0, 2);
   const review = model.sections.find(section => section.id === "discipline")?.fields.find(field => field.key === "processReview")?.value ?? PRESENTATION_MISSING;
   const reviewLines = (ctx.doc.splitTextToSize(review, width - 4) as string[]).slice(0, 3);
-  // Band + classification panel (label, summary) + "process review" caption + lines.
-  const height = metrics.sectionAdvance + 8 + summaryLines.length * metrics.line + 3 + metrics.labelLine + reviewLines.length * metrics.line + 1.5;
+  // Band, then the classification panel (label + summary), then the process-review
+  // caption and its lines. Each offset is measured once and reused when drawing.
+  const summaryTop = 3.4 + descent(10) + 2;
+  const panelHeight = summaryTop + Math.max(0, summaryLines.length - 1) * metrics.line + descent(metrics.body) + 1;
+  const reviewTop = panelHeight + 2.6 + ascent(metrics.label);
+  const reviewLinesTop = reviewTop + descent(metrics.label) + 0.8 + ascent(metrics.body);
+  const contentHeight = reviewLinesTop + Math.max(0, reviewLines.length - 1) * metrics.line + descent(metrics.body) + BLOCK_TRAILING;
   return {
     kind: "process",
     id: "process",
     title: "Process",
     accent: PDF_SECTION_COLORS.discipline,
     label: model.classification.label,
-    summary: model.classification.summary,
+    summaryLines,
     reviewLines,
     tone: model.classification.tone,
-    height,
+    panelHeight,
+    summaryTop,
+    reviewTop,
+    reviewLinesTop,
+    height: metrics.sectionAdvance + SECTION_GAP + contentHeight,
   };
 }
 
@@ -482,127 +218,117 @@ function compilePsychology(ctx: Ctx, model: TradePresentation, width: number): B
     label: labels[index] ?? TRADE_SECTION_THEME.psychology.title,
     lines: ctx.doc.splitTextToSize(value.trim() === "" ? PRESENTATION_MISSING : value, cellWidth - 6) as string[],
   }));
-  const height = metrics.sectionAdvance + 4 + Math.max(1, ...cells.map(cell => cell.lines.length)) * metrics.line + 3;
-  return { kind: "psychology", id: "psychology", title: TRADE_SECTION_THEME.psychology.title, accent: PDF_SECTION_COLORS.psychology, cells, height };
+  const rows = Math.max(1, ...cells.map(cell => cell.lines.length));
+  const linesTop = 3.2 + descent(metrics.label) + 2;
+  const boxHeight = linesTop + (rows - 1) * metrics.line + descent(metrics.body) + 1.1;
+  return { kind: "psychology", id: "psychology", title: TRADE_SECTION_THEME.psychology.title, accent: PDF_SECTION_COLORS.psychology, cells, boxHeight, linesTop, height: metrics.sectionAdvance + SECTION_GAP + boxHeight + BLOCK_TRAILING };
 }
 
-/**
- * The journal note, measured in the box it will occupy.
- *
- * An ordinary note sits beside the psychology block — the two then share one band
- * row instead of stacking, which is most of what keeps a populated trade on a
- * single page. A genuinely long entry takes the full width instead, so it wraps in
- * half as many lines before it has to continue onto another page.
- */
+/** The journal note, measured in the exact box it will occupy. */
 function compileNote(ctx: Ctx, model: TradePresentation, width: number): Extract<Block, { kind: "note" }> {
   const metrics = ctx.metrics;
   const label = model.sections.find(section => section.id === "journal")?.fields[0]?.label ?? TRADE_SECTION_THEME.journal.title;
   ctx.doc.setFontSize(metrics.body);
   const value = model.journalNotes.trim() === "" ? PRESENTATION_MISSING : model.journalNotes;
   const lines = ctx.doc.splitTextToSize(value, width - 6) as string[];
-  return { kind: "note", id: "journal", title: TRADE_SECTION_THEME.journal.title, accent: PDF_SECTION_COLORS.journal, label, text: value, lines, height: metrics.sectionAdvance + metrics.labelLine + Math.max(1, lines.length) * metrics.line + 6 };
+  const textTop = 3.2 + descent(metrics.label) + 2.2;
+  const boxHeight = textTop + Math.max(0, lines.length - 1) * metrics.line + descent(metrics.body) + 1.2;
+  return { kind: "note", id: "journal", title: TRADE_SECTION_THEME.journal.title, accent: PDF_SECTION_COLORS.journal, label, text: value, lines, boxHeight, textTop, height: metrics.sectionAdvance + SECTION_GAP + boxHeight + BLOCK_TRAILING };
 }
 
+/** Draws one trade-page block inside the box measured for it; the cursor never moves. */
 function renderBlock(ctx: Ctx, block: Block, x: number, width: number) {
   const metrics = ctx.metrics;
   const doc = ctx.doc;
-  ensureSpace(ctx, block.height);
-  sectionBand(ctx, block.title, block.accent, x, width);
-
-  if (block.kind === "section") {
-    block.rows.forEach((row, rowIndex) => {
-      // A row with fewer cells than the section's grid is wider than measured; the
-      // pre-wrapped lines are redrawn as they are, so the row height still holds.
-      const cellWidth = row.cells.length === 1 ? width : (width - metrics.gap * (row.cells.length - 1)) / row.cells.length;
-      let cursor = x;
-      for (const cell of row.cells) {
-        doc.setFontSize(metrics.label);
-        setText(doc, PDF_COLORS.inkSoft);
-        cell.labelLines.forEach((line, index) => doc.text(line, cursor, ctx.y + metrics.labelLine - 0.4 + index * metrics.labelLine));
-        const valueTop = cell.stacked ? ctx.y + cell.labelLines.length * metrics.labelLine : ctx.y;
-        doc.setFontSize(metrics.body);
-        setText(doc, toneColor(cell.tone, cell.value));
-        const valueX = cell.stacked ? cursor : cursor + cellWidth * 0.44;
-        cell.lines.forEach((line, index) => doc.text(line, valueX, valueTop + metrics.line - 0.4 + index * metrics.line));
-        cursor += cellWidth + metrics.gap;
-      }
-      ctx.y += row.height;
-      if (rowIndex < block.rows.length - 1) hairline(ctx, ctx.y - metrics.rowGap + 0.2, x, width, PDF_COLORS.panelLine, 0.15);
-    });
-    ctx.y += 1.5;
-    return;
-  }
-
-  if (block.kind === "checklist") {
-    const half = (width - metrics.gap) / 2;
-    block.columns.forEach((items, columnIndex) => {
-      items.forEach((item, index) => {
-        const lineY = ctx.y + index * block.rowHeight + metrics.line - 0.4;
-        const mark = item.confirmed ? "✓" : "✗";
-        doc.setFontSize(metrics.body);
-        setText(doc, item.confirmed ? PDF_COLORS.positive : item.recorded ? PDF_COLORS.negative : PDF_COLORS.inkFaint);
-        doc.text(mark, x + columnIndex * (half + metrics.gap), lineY);
-        setText(doc, item.confirmed ? PDF_COLORS.ink : PDF_COLORS.inkSoft);
-        doc.text(doc.splitTextToSize(item.label, half - 5)[0] ?? item.label, x + columnIndex * (half + metrics.gap) + 4, lineY);
+  renderSection(ctx, `${block.kind}:${block.id}`, block.title, block.accent, x, width, block.height, contentTop => {
+    if (block.kind === "section") {
+      let rowTop = contentTop;
+      block.rows.forEach((row, rowIndex) => {
+        // A row with fewer cells than the section's grid is wider than measured; the
+        // pre-wrapped lines are redrawn as they are, so the row height still holds.
+        const cellWidth = row.cells.length === 1 ? width : (width - metrics.gap * (row.cells.length - 1)) / row.cells.length;
+        let cursor = x;
+        for (const cell of row.cells) {
+          // The first baseline sits one ascender below the top of its line box, so a
+          // label or value can never reach up into the band or the row above.
+          const labelTop = rowTop + ascent(metrics.label);
+          doc.setFontSize(metrics.label);
+          setText(doc, PDF_COLORS.inkSoft);
+          cell.labelLines.forEach((line, index) => doc.text(line, cursor, labelTop + index * metrics.labelLine));
+          const valueTop = cell.stacked ? rowTop + cell.labelLines.length * metrics.labelLine : rowTop;
+          doc.setFontSize(metrics.body);
+          setText(doc, toneColor(cell.tone, cell.value));
+          const valueX = cell.stacked ? cursor : cursor + cellWidth * 0.44;
+          cell.lines.forEach((line, index) => doc.text(line, valueX, valueTop + ascent(metrics.body) + index * metrics.line));
+          cursor += cellWidth + metrics.gap;
+        }
+        rowTop += row.height;
+        if (rowIndex < block.rows.length - 1) hairline(ctx, rowTop - metrics.rowGap + 0.2, x, width, PDF_COLORS.panelLine, 0.15);
       });
-    });
-    ctx.y += Math.max(...block.columns.map(column => column.length)) * block.rowHeight + 1.5;
-    return;
-  }
+      return;
+    }
 
-  if (block.kind === "process") {
-    const fill = toneTint(block.tone);
-    const summaryLines = (doc.splitTextToSize(block.summary, width - 8) as string[]).slice(0, 2);
-    const boxHeight = 7 + summaryLines.length * metrics.line + 1.5;
-    panel(ctx, x, ctx.y, width, boxHeight, fill, PDF_COLORS.panelLine);
-    doc.setFontSize(10);
-    if (doc.setFont) doc.setFont("helvetica", "bold");
-    setText(doc, toneColor(block.tone));
-    doc.text(block.label.toUpperCase(), x + 3.4, ctx.y + 6);
-    if (doc.setFont) doc.setFont("helvetica", "normal");
-    doc.setFontSize(metrics.body);
-    setText(doc, PDF_COLORS.inkSoft);
-    summaryLines.forEach((line, index) => doc.text(line, x + 3.4, ctx.y + 9.4 + index * metrics.line));
-    let cursor = ctx.y + boxHeight + 2.4;
-    doc.setFontSize(metrics.label);
-    setText(doc, PDF_COLORS.inkSoft);
-    doc.text("PROCESS REVIEW", x, cursor);
-    cursor += metrics.labelLine;
-    doc.setFontSize(metrics.body);
-    setText(doc, PDF_COLORS.ink);
-    for (const line of block.reviewLines) { doc.text(line, x, cursor); cursor += metrics.line; }
-    ctx.y = cursor + 1.5;
-    return;
-  }
+    if (block.kind === "checklist") {
+      const half = (width - metrics.gap) / 2;
+      const baseline = contentTop + ascent(metrics.body);
+      block.columns.forEach((items, columnIndex) => {
+        items.forEach((item, index) => {
+          const lineY = baseline + index * block.rowHeight;
+          const mark = item.confirmed ? "✓" : "✗";
+          doc.setFontSize(metrics.body);
+          setText(doc, item.confirmed ? PDF_COLORS.positive : item.recorded ? PDF_COLORS.negative : PDF_COLORS.inkFaint);
+          doc.text(mark, x + columnIndex * (half + metrics.gap), lineY);
+          setText(doc, item.confirmed ? PDF_COLORS.ink : PDF_COLORS.inkSoft);
+          doc.text(doc.splitTextToSize(item.label, half - 5)[0] ?? item.label, x + columnIndex * (half + metrics.gap) + 4, lineY);
+        });
+      });
+      return;
+    }
 
-  if (block.kind === "psychology") {
-    const cellWidth = (width - metrics.gap * 2) / 3;
-    const lines = Math.max(1, ...block.cells.map(cell => cell.lines.length));
-    const boxHeight = 4 + lines * metrics.line + 3;
-    block.cells.forEach((cell, index) => {
-      const cellX = x + index * (cellWidth + metrics.gap);
-      panel(ctx, cellX, ctx.y, cellWidth, boxHeight, PDF_COLORS.panel, PDF_COLORS.panelLine);
+    if (block.kind === "process") {
+      const fill = toneTint(block.tone);
+      panel(ctx, x, contentTop, width, block.panelHeight, fill, PDF_COLORS.panelLine);
+      doc.setFontSize(10);
+      if (doc.setFont) doc.setFont("helvetica", "bold");
+      setText(doc, toneColor(block.tone));
+      doc.text(block.label.toUpperCase(), x + 3.4, contentTop + ascent(10));
+      if (doc.setFont) doc.setFont("helvetica", "normal");
+      doc.setFontSize(metrics.body);
+      setText(doc, PDF_COLORS.inkSoft);
+      block.summaryLines.forEach((line, index) => doc.text(line, x + 3.4, contentTop + block.summaryTop + index * metrics.line));
       doc.setFontSize(metrics.label);
       setText(doc, PDF_COLORS.inkSoft);
-      doc.text(cell.label.toUpperCase(), cellX + 2.6, ctx.y + 4);
+      doc.text("PROCESS REVIEW", x, contentTop + block.reviewTop);
       doc.setFontSize(metrics.body);
       setText(doc, PDF_COLORS.ink);
-      cell.lines.forEach((line, lineIndex) => doc.text(line, cellX + 2.6, ctx.y + 7.4 + lineIndex * metrics.line));
-    });
-    ctx.y += boxHeight + 1.5;
-    return;
-  }
+      block.reviewLines.forEach((line, index) => doc.text(line, x, contentTop + block.reviewLinesTop + index * metrics.line));
+      return;
+    }
 
-  // note: a bordered text box so the journal entry reads as one passage.
-  const boxHeight = metrics.labelLine + Math.max(1, block.lines.length) * metrics.line + 5;
-  panel(ctx, x, ctx.y, width, boxHeight, [252, 252, 251], PDF_COLORS.rule);
-  doc.setFontSize(metrics.label);
-  setText(doc, PDF_COLORS.inkSoft);
-  doc.text(block.label.toUpperCase(), x + 3, ctx.y + 3.6);
-  doc.setFontSize(metrics.body);
-  setText(doc, PDF_COLORS.ink);
-  block.lines.forEach((line, index) => doc.text(line, x + 3, ctx.y + 3.6 + metrics.labelLine + index * metrics.line));
-  ctx.y += boxHeight + 1.5;
+    if (block.kind === "psychology") {
+      const cellWidth = (width - metrics.gap * 2) / 3;
+      block.cells.forEach((cell, index) => {
+        const cellX = x + index * (cellWidth + metrics.gap);
+        panel(ctx, cellX, contentTop, cellWidth, block.boxHeight, PDF_COLORS.panel, PDF_COLORS.panelLine);
+        doc.setFontSize(metrics.label);
+        setText(doc, PDF_COLORS.inkSoft);
+        doc.text(cell.label.toUpperCase(), cellX + 2.6, contentTop + 3.2);
+        doc.setFontSize(metrics.body);
+        setText(doc, PDF_COLORS.ink);
+        cell.lines.forEach((line, lineIndex) => doc.text(line, cellX + 2.6, contentTop + block.linesTop + lineIndex * metrics.line));
+      });
+      return;
+    }
+
+    // note: a bordered text box so the journal entry reads as one passage.
+    panel(ctx, x, contentTop, width, block.boxHeight, [252, 252, 251], PDF_COLORS.rule);
+    doc.setFontSize(metrics.label);
+    setText(doc, PDF_COLORS.inkSoft);
+    doc.text(block.label.toUpperCase(), x + 3, contentTop + 3.2);
+    doc.setFontSize(metrics.body);
+    setText(doc, PDF_COLORS.ink);
+    block.lines.forEach((line, index) => doc.text(line, x + 3, contentTop + block.textTop + index * metrics.line));
+  });
 }
 
 /* ------------------------------------------------------------------ *
@@ -811,19 +537,12 @@ async function renderScreenshotPage(ctx: Ctx, options: ScreenshotContext) {
  * Trade page
  * ------------------------------------------------------------------ */
 
-/**
- * Measures the trade data page for every typography tier.
- *
- * The first tier whose layout fits one page wins, so an ordinary trade is always
- * exactly one data page; the smallest tier is only used, and content only
- * continues onto another page, when the recorded data genuinely cannot be laid
- * out otherwise.
- */
+/** Measures the trade data page at every typography tier; the first tier that fits wins. */
 export function measureTradeDataPage(doc: PdfDoc, model: TradePresentation) {
   const available = contentBottom() - (PDF_PAGE.margin + HEADER_HEIGHT) - KPI_STRIP_HEIGHT - 4;
   const ctx: Ctx = {
     doc, started: false, y: 0, bodyTop: 0, bottom: contentBottom(), contentWidth: contentWidth(),
-    metrics: TRADE_METRICS[1], header: { eyebrow: "", title: "", continued: "" }, titleSize: 16,
+    metrics: TRADE_METRICS[1], header: { eyebrow: "", title: "", continued: "" }, titleSize: 16, page: 1, blocks: [],
   };
   const measured = TRADE_METRICS.map(tier => {
     ctx.metrics = tier;
@@ -880,7 +599,7 @@ function compileAdditional(ctx: Ctx, model: TradePresentation): Block {
   const width = ctx.contentWidth;
   const cells = model.additionalFields.map(field => buildCell(ctx, field, width));
   const rows = cells.map(cell => ({ cells: [cell], height: cellHeight(cell, metrics) }));
-  return { kind: "section", id: "additional", title: "Additional recorded fields", accent: PDF_COLORS.inkSoft, rows, height: metrics.sectionAdvance + rows.reduce((sum, row) => sum + row.height, 0) + 1.5 };
+  return { kind: "section", id: "additional", title: "Additional recorded fields", accent: PDF_COLORS.inkSoft, rows, height: metrics.sectionAdvance + SECTION_GAP + rows.reduce((sum, row) => sum + row.height, 0) + BLOCK_TRAILING };
 }
 
 /** The full height of a trade data page: both columns, then every block below them. */
@@ -922,13 +641,13 @@ function renderTradeDataPage(ctx: Ctx, model: TradePresentation, index: number, 
   const rightBottom = ctx.y;
 
   // Checklist beside the recorded mistakes, matching the report's reading order.
-  const bandTop = Math.max(leftBottom, rightBottom) + 2;
+  const bandTop = Math.max(leftBottom, rightBottom) + ROW_GAP;
   ctx.y = bandTop;
   renderBlock(ctx, blocks.checklist, PDF_PAGE.margin, column);
   const checklistBottom = ctx.y;
   ctx.y = bandTop;
   renderBlock(ctx, blocks.mistakes, PDF_PAGE.margin + column + metrics.gap, column);
-  ctx.y = Math.max(checklistBottom, ctx.y) + 2;
+  ctx.y = Math.max(checklistBottom, ctx.y) + ROW_GAP;
 
   const note = blocks.note;
   // Band 7-8: an ordinary journal note shares a band row with psychology, which is
@@ -944,7 +663,7 @@ function renderTradeDataPage(ctx: Ctx, model: TradePresentation, index: number, 
     const psychologyBottom = ctx.y;
     ctx.y = rowTop;
     renderBlock(ctx, note, PDF_PAGE.margin + column + metrics.gap, column);
-    ctx.y = Math.max(psychologyBottom, ctx.y) + 2;
+    ctx.y = Math.max(psychologyBottom, ctx.y) + ROW_GAP;
     noteDrawn = true;
   } else {
     renderBlock(ctx, blocks.psychology, PDF_PAGE.margin, ctx.contentWidth);
@@ -960,32 +679,38 @@ function renderTradeDataPage(ctx: Ctx, model: TradePresentation, index: number, 
   if (ctx.y + note.height <= ctx.bottom) {
     renderBlock(ctx, note, PDF_PAGE.margin, ctx.contentWidth);
   } else {
-    sectionBand(ctx, note.title, note.accent, PDF_PAGE.margin, ctx.contentWidth);
     const lines = ctx.doc.splitTextToSize(note.text, ctx.contentWidth - 6) as string[];
-    const room = Math.max(1, Math.floor((ctx.bottom - ctx.y - metrics.labelLine - 4) / metrics.line));
+    // Band, gap, then the first box: the same arithmetic the block renderer uses,
+    // so the box and its label sit below the band exactly as a normal note does.
+    const bandHeight = metrics.sectionAdvance;
+    const boxTop = 3.2 + descent(metrics.label) + 2.6;
+    ensureSpace(ctx, bandHeight + SECTION_GAP + boxTop + metrics.line);
+    const top = ctx.y;
+    paintBand(ctx, note.title, note.accent, PDF_PAGE.margin, top, ctx.contentWidth, bandHeight);
+    ctx.blocks.push({ id: `band:${note.title.toUpperCase()}`, page: ctx.page, x: PDF_PAGE.margin, y: top, width: ctx.contentWidth, height: bandHeight, kind: "band", title: note.title.toUpperCase() });
+    const contentTop = top + bandHeight + SECTION_GAP;
+    const room = Math.max(1, Math.floor((ctx.bottom - contentTop - boxTop - descent(metrics.body)) / metrics.line));
     const firstPage = lines.slice(0, room);
     const rest = lines.slice(room);
-    if (firstPage.length) {
-      panel(ctx, PDF_PAGE.margin, ctx.y, ctx.contentWidth, metrics.labelLine + firstPage.length * metrics.line + 5, [252, 252, 251], PDF_COLORS.rule);
-      ctx.doc.setFontSize(metrics.label);
-      setText(ctx.doc, PDF_COLORS.inkSoft);
-      ctx.doc.text(note.label.toUpperCase(), PDF_PAGE.margin + 3, ctx.y + 3.6);
-      ctx.doc.setFontSize(metrics.body);
-      setText(ctx.doc, PDF_COLORS.ink);
-      firstPage.forEach((line, lineIndex) => ctx.doc.text(line, PDF_PAGE.margin + 3, ctx.y + 3.6 + metrics.labelLine + lineIndex * metrics.line));
-    }
+    const boxHeight = boxTop + Math.max(0, firstPage.length - 1) * metrics.line + descent(metrics.body) + 1.8;
+    panel(ctx, PDF_PAGE.margin, contentTop, ctx.contentWidth, boxHeight, [252, 252, 251], PDF_COLORS.rule);
+    ctx.doc.setFontSize(metrics.label);
+    setText(ctx.doc, PDF_COLORS.inkSoft);
+    ctx.doc.text(note.label.toUpperCase(), PDF_PAGE.margin + 3, contentTop + 3.2);
+    ctx.doc.setFontSize(metrics.body);
+    setText(ctx.doc, PDF_COLORS.ink);
+    firstPage.forEach((line, lineIndex) => ctx.doc.text(line, PDF_PAGE.margin + 3, contentTop + boxTop + lineIndex * metrics.line));
+    ctx.blocks.push({ id: `note:${note.id}.content`, page: ctx.page, x: PDF_PAGE.margin, y: contentTop, width: ctx.contentWidth, height: boxHeight, kind: "text" });
+    ctx.y = contentTop + boxHeight;
     if (rest.length) {
       nextPage(ctx);
-      sectionBand(ctx, `${note.title} (continued)`, note.accent, PDF_PAGE.margin, ctx.contentWidth);
-      // The continuation may itself span pages, so the text style is re-applied
-      // for every line rather than once before the loop.
-      rest.forEach(line => {
-        ensureSpace(ctx, metrics.line);
-        ctx.doc.setFontSize(metrics.body);
-        setText(ctx.doc, PDF_COLORS.ink);
-        ctx.doc.text(line, PDF_PAGE.margin, ctx.y);
-        ctx.y += ctx.metrics.line;
-      });
+      const continuationTop = ctx.y;
+      paintBand(ctx, `${note.title} (continued)`, note.accent, PDF_PAGE.margin, continuationTop, ctx.contentWidth, bandHeight);
+      ctx.blocks.push({ id: `band:${note.title.toUpperCase()} (continued)`, page: ctx.page, x: PDF_PAGE.margin, y: continuationTop, width: ctx.contentWidth, height: bandHeight, kind: "band", title: `${note.title.toUpperCase()} (CONTINUED)` });
+      ctx.y = continuationTop + bandHeight + SECTION_GAP;
+      // The continuation may itself span pages, so it paginates line by line and
+      // registers one measured block per page it reaches.
+      drawLines(ctx, `note:${note.id}.continued`, rest, PDF_PAGE.margin, { lineHeight: metrics.line, fontSize: metrics.body });
     }
   }
 
@@ -996,33 +721,58 @@ function renderTradeDataPage(ctx: Ctx, model: TradePresentation, index: number, 
  * Analysis pages
  * ------------------------------------------------------------------ */
 
-function metricGrid(ctx: Ctx, items: { label: string; value: string; tone?: TradeTone }[], columns = METRIC_COLUMNS) {
+type MetricGridItem = { label: string; value: string; tone?: TradeTone };
+type MetricGridCell = { item: MetricGridItem; stacked: boolean; labelLines: string[]; lines: string[]; height: number };
+type MetricGridRow = { cells: MetricGridCell[]; height: number };
+
+/** Measures a metric grid before drawing it, so its heading and grid are reserved together. */
+function measureMetricGrid(ctx: Ctx, items: MetricGridItem[], columns: number = METRIC_COLUMNS): MetricGridRow[] {
   const metrics = ctx.metrics;
   const doc = ctx.doc;
   const width = (ctx.contentWidth - metrics.gap * (columns - 1)) / columns;
   const labelWidth = width * 0.5;
+  const rows: MetricGridRow[] = [];
   for (let index = 0; index < items.length; index += columns) {
     const slice = items.slice(index, index + columns);
     doc.setFontSize(metrics.label);
-    const cells = slice.map(item => {
-      const inline = doc.splitTextToSize(item.label.toUpperCase(), labelWidth - 1).length === 1;
+    const cells: MetricGridCell[] = slice.map(item => {
+      const labelLines = doc.splitTextToSize(item.label.toUpperCase(), labelWidth - 1) as string[];
+      // A label too long for its half of the cell stacks above the value, so the
+      // two never share a line and never collide with the neighbouring metric.
+      const stacked = labelLines.length > 1;
       doc.setFontSize(metrics.body);
-      const lines = doc.splitTextToSize(item.value, Math.max(8, inline ? width - labelWidth - 2 : width)) as string[];
-      return { item, inline, lines: lines.length ? lines : [PRESENTATION_MISSING] };
+      const valueLines = doc.splitTextToSize(item.value, Math.max(8, stacked ? width : width - labelWidth - 2)) as string[];
+      const lines = valueLines.length ? valueLines : [PRESENTATION_MISSING];
+      const labelBlock = stacked ? labelLines.length * metrics.labelLine : Math.max(ascent(metrics.label), ascent(metrics.body));
+      const height = labelBlock + ascent(metrics.body) + Math.max(0, lines.length - 1) * metrics.line + descent(metrics.body);
+      return { item, stacked, labelLines, lines, height };
     });
-    const height = Math.max(...cells.map(cell => (cell.inline ? 0 : metrics.labelLine) + cell.lines.length * metrics.line)) + metrics.rowGap;
-    ensureSpace(ctx, height);
-    cells.forEach((cell, cellIndex) => {
+    rows.push({ cells, height: Math.max(...cells.map(cell => cell.height)) + metrics.rowGap });
+  }
+  return rows;
+}
+
+function metricGridHeight(rows: MetricGridRow[]) { return rows.reduce((sum, row) => sum + row.height, 0); }
+
+/** Draws a measured grid inside the box that was reserved for it. */
+function drawMetricGrid(ctx: Ctx, rows: MetricGridRow[], top: number, columns: number = METRIC_COLUMNS) {
+  const metrics = ctx.metrics;
+  const doc = ctx.doc;
+  const width = (ctx.contentWidth - metrics.gap * (columns - 1)) / columns;
+  const labelWidth = width * 0.5;
+  let rowTop = top;
+  for (const row of rows) {
+    row.cells.forEach((cell, cellIndex) => {
       const x = PDF_PAGE.margin + cellIndex * (width + metrics.gap);
       doc.setFontSize(metrics.label);
       setText(doc, PDF_COLORS.inkSoft);
-      doc.text(cell.item.label.toUpperCase(), x, ctx.y);
+      cell.labelLines.forEach((line, lineIndex) => doc.text(line, x, rowTop + ascent(metrics.label) + lineIndex * metrics.labelLine));
       doc.setFontSize(metrics.body);
       setText(doc, toneColor(cell.item.tone, cell.item.value));
-      const top = ctx.y + (cell.inline ? 0 : metrics.labelLine);
-      cell.lines.forEach((line, lineIndex) => doc.text(line, cell.inline ? x + labelWidth : x, top + lineIndex * metrics.line));
+      const valueTop = cell.stacked ? rowTop + cell.labelLines.length * metrics.labelLine : rowTop;
+      cell.lines.forEach((line, lineIndex) => doc.text(line, cell.stacked ? x : x + labelWidth, valueTop + ascent(metrics.body) + lineIndex * metrics.line));
     });
-    ctx.y += height;
+    rowTop += row.height;
   }
 }
 
@@ -1055,8 +805,23 @@ function tableColumnWidths(table: AnalysisTable, width: number) {
   return table.columns.map(column => (width * column.flex) / total);
 }
 
-/** The vertical space a table's title, coloured header band, and first row need. */
-const TABLE_HEADER_BLOCK = 2.8 + 5.2;
+/** The coloured column-header band of a table, and the clear space after it. */
+const TABLE_HEADER_HEIGHT = 5;
+const TABLE_HEADER_GAP = 2.4;
+
+/** The table's title, its column-header band, and the gap before the first row. */
+function tableHeaderHeight() {
+  return ascent(TABLE_FONT.title) + descent(TABLE_FONT.title) + 1.4 + TABLE_HEADER_HEIGHT + TABLE_HEADER_GAP;
+}
+
+/**
+ * One table row: the ascender of its first line, the remaining wrapped lines, and
+ * the descender plus padding of its last — so a two-line cell grows its own row
+ * instead of printing over the row beneath it.
+ */
+function tableRowHeight(lines: number) {
+  return ascent(TABLE_FONT.body) + Math.max(0, lines - 1) * TABLE_FONT.line + descent(TABLE_FONT.body) + TABLE_FONT.padding;
+}
 
 /**
  * The exact height `renderTable` will consume, so a pair of tables only moves to
@@ -1066,42 +831,53 @@ function measureTable(ctx: Ctx, table: AnalysisTable, width: number) {
   const doc = ctx.doc;
   const perCell = tableColumnWidths(table, width);
   doc.setFontSize(TABLE_FONT.body);
+  if (!table.rows.length) return tableHeaderHeight() + tableRowHeight(1) + TABLE_FONT.line + 2.6;
   const rows = table.rows.map(row => {
     const lines = Math.max(1, ...row.map((value, index) => doc.splitTextToSize(String(value), Math.max(4, perCell[index] - 3)).length));
-    return lines * TABLE_FONT.line + TABLE_FONT.padding;
+    return tableRowHeight(lines);
   });
-  const empty = table.rows.length ? 0 : TABLE_FONT.line * 2;
-  return TABLE_HEADER_BLOCK + rows.reduce((sum, height) => sum + height, 0) + empty;
+  return tableHeaderHeight() + rows.reduce((sum, height) => sum + height, 0) + 2.6;
 }
 
-/** Draws a table with a tinted header band, repeating it after a page break. */
+/** Draws a table, repeating its measured header band after each page break. */
 function renderTable(ctx: Ctx, table: AnalysisTable, width: number, x: number = PDF_PAGE.margin, accent: Rgb = PDF_HEADER_COLOR) {
   const doc = ctx.doc;
   const perCell = tableColumnWidths(table, width);
+  // Each page the table reaches registers one measured block, so a table that
+  // continues onto the next page is validated on both pages.
+  let segmentTop = 0;
+  let segmentPage = 0;
+  const openSegment = () => { segmentTop = ctx.y; segmentPage = ctx.page; };
+  const closeSegment = () => {
+    if (ctx.y - segmentTop > 0.2) ctx.blocks.push({ id: `table:${table.title}`, page: segmentPage, x, y: segmentTop, width, height: ctx.y - segmentTop, kind: "table" });
+  };
   const drawHeader = () => {
     doc.setFontSize(TABLE_FONT.title);
     if (doc.setFont) doc.setFont("helvetica", "bold");
     setText(doc, PDF_COLORS.ink);
-    doc.text(table.title.toUpperCase(), x, ctx.y);
+    doc.text(table.title.toUpperCase(), x, ctx.y + ascent(TABLE_FONT.title));
     if (doc.setFont) doc.setFont("helvetica", "normal");
-    ctx.y += 2.8;
-    panel(ctx, x, ctx.y, width, 5, accent, accent);
+    const bandTop = ctx.y + ascent(TABLE_FONT.title) + descent(TABLE_FONT.title) + 1.4;
+    panel(ctx, x, bandTop, width, TABLE_HEADER_HEIGHT, accent, accent);
     doc.setFontSize(TABLE_FONT.header);
     setText(doc, PDF_COLORS.onAccent);
     let cursor = x;
     table.columns.forEach((column, index) => {
-      doc.text(column.label.toUpperCase(), column.align === "right" ? cursor + perCell[index] - 2 : cursor + 2, ctx.y + 3.6, column.align === "right" ? { align: "right" } : undefined);
+      doc.text(column.label.toUpperCase(), column.align === "right" ? cursor + perCell[index] - 2 : cursor + 2, bandTop + 3.4, column.align === "right" ? { align: "right" } : undefined);
       cursor += perCell[index];
     });
-    ctx.y += TABLE_FONT.line + 1.8;
+    ctx.y = bandTop + TABLE_HEADER_HEIGHT + TABLE_HEADER_GAP;
   };
-  ensureSpace(ctx, TABLE_HEADER_BLOCK + 2);
+  ensureSpace(ctx, tableHeaderHeight() + tableRowHeight(1));
+  openSegment();
   drawHeader();
   if (!table.rows.length) {
     doc.setFontSize(TABLE_FONT.body);
     setText(doc, PDF_COLORS.inkFaint);
-    doc.text(table.empty, x, ctx.y);
-    ctx.y += TABLE_FONT.line * 2;
+    doc.text(table.empty, x, ctx.y + ascent(TABLE_FONT.body));
+    ctx.y += tableRowHeight(1) + TABLE_FONT.line;
+    closeSegment();
+    ctx.y += 2.6;
     return;
   }
   table.rows.forEach((row, rowIndex) => {
@@ -1110,9 +886,11 @@ function renderTable(ctx: Ctx, table: AnalysisTable, width: number, x: number = 
       const lines = doc.splitTextToSize(String(value), Math.max(4, perCell[index] - 3)) as string[];
       return lines.length ? lines : [PRESENTATION_MISSING];
     });
-    const height = Math.max(...wrapped.map(lines => lines.length)) * TABLE_FONT.line + TABLE_FONT.padding;
+    const height = tableRowHeight(Math.max(...wrapped.map(lines => lines.length)));
     if (ctx.y + height > ctx.bottom) {
+      closeSegment();
       nextPage(ctx);
+      openSegment();
       drawHeader();
       doc.setFontSize(TABLE_FONT.body);
     }
@@ -1122,24 +900,34 @@ function renderTable(ctx: Ctx, table: AnalysisTable, width: number, x: number = 
       const isNumeric = column.align === "right";
       setText(doc, isNumeric ? toneColor("signed", lines[0]) : PDF_COLORS.ink);
       lines.forEach((line: string, lineIndex: number) => {
-        doc.text(line, isNumeric ? cursor + perCell[index] - 2 : cursor + 2, ctx.y + lineIndex * TABLE_FONT.line, isNumeric ? { align: "right" } : undefined);
+        doc.text(line, isNumeric ? cursor + perCell[index] - 2 : cursor + 2, ctx.y + ascent(TABLE_FONT.body) + lineIndex * TABLE_FONT.line, isNumeric ? { align: "right" } : undefined);
       });
       cursor += perCell[index];
     });
     ctx.y += height;
     if (rowIndex < table.rows.length - 1) hairline(ctx, ctx.y - TABLE_FONT.padding + 0.3, x, width, PDF_COLORS.panelLine, 0.15);
   });
+  closeSegment();
   ctx.y += 2.6;
 }
 
 function renderAnalysisBlock(ctx: Ctx, block: AnalysisBlock) {
-  if (block.kind === "heading") { sectionBand(ctx, block.title, PDF_HEADER_COLOR, PDF_PAGE.margin, ctx.contentWidth); return; }
+  if (block.kind === "heading") { sectionBandOnly(ctx, `heading:${block.title}`, block.title, PDF_HEADER_COLOR, PDF_PAGE.margin, ctx.contentWidth); return; }
   // The cards are self-labelling, so the KPI band needs no heading; every metric
   // grid does, otherwise its title would be silently dropped from the page.
   if (block.kind === "kpis") { renderKpiCards(ctx, block.items); return; }
   if (block.kind === "metrics") {
-    if (block.title) sectionBand(ctx, block.title, PDF_COLORS.accentAlt, PDF_PAGE.margin, ctx.contentWidth);
-    metricGrid(ctx, block.items);
+    const rows = measureMetricGrid(ctx, block.items);
+    if (!rows.length) return;
+    const content = metricGridHeight(rows);
+    if (!block.title) {
+      const top = reserveBlock(ctx, { id: `metrics:${block.items[0].label}`, kind: "text", x: PDF_PAGE.margin, width: ctx.contentWidth, height: content });
+      drawMetricGrid(ctx, rows, top);
+      return;
+    }
+    // The heading and the grid are reserved together, so the heading can never be
+    // drawn over the first row of the metrics it introduces.
+    renderSection(ctx, `metrics:${block.title}`, block.title, PDF_COLORS.accentAlt, PDF_PAGE.margin, ctx.contentWidth, ctx.metrics.sectionAdvance + SECTION_GAP + content + 1.5, contentTop => drawMetricGrid(ctx, rows, contentTop));
     return;
   }
   if (block.kind === "table") { renderTable(ctx, block.table, ctx.contentWidth); return; }
@@ -1161,54 +949,60 @@ function renderAnalysisBlock(ctx: Ctx, block: AnalysisBlock) {
     ctx.y = startY + tallest;
     return;
   }
-  if (block.title) sectionBand(ctx, block.title, PDF_SECTION_COLORS.psychology, PDF_PAGE.margin, ctx.contentWidth);
-  if (block.flow) {
-    writeWrapped(ctx, block.lines.join(" · "), { color: PDF_COLORS.inkSoft, lineHeight: 3.5, fontSize: ANALYSIS_METRICS.body });
-    return;
-  }
-  for (const line of block.lines) {
-    ensureSpace(ctx, 3.6);
-    ctx.doc.setFontSize(ANALYSIS_METRICS.body);
-    setText(ctx.doc, PDF_HEADER_COLOR);
-    ctx.doc.text("•", PDF_PAGE.margin, ctx.y);
-    writeWrapped(ctx, line, { x: PDF_PAGE.margin + 4, maxWidth: ctx.contentWidth - 4, color: PDF_COLORS.ink, lineHeight: 3.6, fontSize: ANALYSIS_METRICS.body });
-  }
-  ctx.y += 1.5;
+  renderParagraphBlock(ctx, block, PDF_PAGE.margin, ctx.contentWidth);
 }
 
 type ParagraphBlock = Extract<AnalysisBlock, { kind: "paragraph" }>;
 
-/** The height a bullet block occupies at a given width, so columns can balance. */
-function measureParagraphBlock(ctx: Ctx, block: ParagraphBlock, width: number) {
+/** The exact height a bullet block occupies at a given width, so columns can balance. */
+function paragraphHeight(ctx: Ctx, block: ParagraphBlock, width: number) {
   const metrics = ANALYSIS_METRICS;
-  let height = block.title ? metrics.sectionAdvance : 0;
-  ctx.doc.setFontSize(metrics.body);
+  const doc = ctx.doc;
+  doc.setFontSize(metrics.body);
+  let height = block.title ? metrics.sectionAdvance + SECTION_GAP : 0;
   if (block.flow) {
-    const lines = ctx.doc.splitTextToSize(block.lines.join(" · "), width) as string[];
-    return height + Math.max(1, lines.length) * 3.5 + 3;
+    const lines = wrapText(doc, block.lines.join(" · "), width);
+    return height + ascent(metrics.body) + Math.max(0, lines.length - 1) * 3.5 + descent(metrics.body) + 3;
   }
   for (const line of block.lines) {
-    const wrapped = ctx.doc.splitTextToSize(line, width - 4) as string[];
-    height += Math.max(1, wrapped.length) * 3.6 + 0.4;
+    const wrapped = wrapText(doc, line, width - 4);
+    height += ascent(metrics.body) + Math.max(0, wrapped.length - 1) * 3.6 + descent(metrics.body) + 0.9;
   }
   return height + 2;
 }
 
+/** Draws one bullet (or flow) block inside the box measured for it. */
 function renderParagraphBlock(ctx: Ctx, block: ParagraphBlock, x: number, width: number) {
-  if (block.title) sectionBand(ctx, block.title, PDF_SECTION_COLORS.psychology, x, width);
-  if (block.flow) {
-    writeWrapped(ctx, block.lines.join(" · "), { x, maxWidth: width, color: PDF_COLORS.inkSoft, lineHeight: 3.5, fontSize: ANALYSIS_METRICS.body });
-    ctx.y += 3;
+  const metrics = ANALYSIS_METRICS;
+  const doc = ctx.doc;
+  const total = paragraphHeight(ctx, block, width);
+  const body = (contentTop: number) => {
+    if (block.flow) {
+      const lines = wrapText(doc, block.lines.join(" · "), width);
+      lines.forEach((line, index) => {
+        doc.setFontSize(metrics.body);
+        setText(doc, PDF_COLORS.inkSoft);
+        doc.text(line, x, contentTop + ascent(metrics.body) + index * 3.5);
+      });
+      return;
+    }
+    let lineTop = contentTop;
+    for (const line of block.lines) {
+      const wrapped = wrapText(doc, line, width - 4);
+      doc.setFontSize(metrics.body);
+      setText(doc, PDF_HEADER_COLOR);
+      doc.text("•", x, lineTop + ascent(metrics.body));
+      setText(doc, PDF_COLORS.ink);
+      wrapped.forEach((text, index) => doc.text(text, x + 4, lineTop + ascent(metrics.body) + index * 3.6));
+      lineTop += ascent(metrics.body) + Math.max(0, wrapped.length - 1) * 3.6 + descent(metrics.body) + 0.9;
+    }
+  };
+  if (block.title) {
+    renderSection(ctx, `paragraph:${block.title}`, block.title, PDF_SECTION_COLORS.psychology, x, width, total, body);
     return;
   }
-  for (const line of block.lines) {
-    ensureSpace(ctx, 3.6);
-    ctx.doc.setFontSize(ANALYSIS_METRICS.body);
-    setText(ctx.doc, PDF_HEADER_COLOR);
-    ctx.doc.text("•", x, ctx.y);
-    writeWrapped(ctx, line, { x: x + 4, maxWidth: width - 4, color: PDF_COLORS.ink, lineHeight: 3.6, fontSize: ANALYSIS_METRICS.body });
-  }
-  ctx.y += 2;
+  const top = reserveBlock(ctx, { id: "paragraph:flow", kind: "text", x, width, height: total });
+  body(top);
 }
 
 /**
@@ -1226,7 +1020,7 @@ function renderTwoColumnParagraphs(ctx: Ctx, blocks: ParagraphBlock[]) {
   for (const block of blocks) {
     const target = columns[0].height <= columns[1].height ? columns[0] : columns[1];
     target.blocks.push(block);
-    target.height += measureParagraphBlock(ctx, block, width);
+    target.height += paragraphHeight(ctx, block, width);
   }
   const tallest = Math.max(...columns.map(column => column.height));
   if (ctx.y + tallest > ctx.bottom) {
@@ -1312,6 +1106,20 @@ export type TradeLogPdfOptions = {
  * screenshot evidence), the analysis pages, and a footer on every page — all from
  * the same exported trade set, with one screenshot fetch per unique URL.
  */
+/**
+ * Validates the measured layout of the finished document.
+ *
+ * Every block the renderer reserved is compared with every other block on the same
+ * page; a collision is reported on the console with both block ids, so a layout
+ * regression is diagnosable from a development run instead of from paper. The result
+ * is also returned so a test can assert a clean document.
+ */
+function validateLayout(ctx: Ctx) {
+  const overlaps = findLayoutOverlaps(ctx.blocks);
+  if (overlaps.length) console.error(`PDF OVERLAP:\n${overlaps.join("\n")}`);
+  return { blocks: ctx.blocks, overlaps };
+}
+
 export async function renderTradeLogPdf(doc: PdfDoc, options: TradeLogPdfOptions) {
   const ctx: Ctx = {
     doc,
@@ -1323,12 +1131,14 @@ export async function renderTradeLogPdf(doc: PdfDoc, options: TradeLogPdfOptions
     metrics: TRADE_METRICS[1],
     header: { eyebrow: "", title: "", continued: "" },
     titleSize: 16,
+    page: 1,
+    blocks: [],
   };
   if (!options.trades.length) {
     renderEmptyReport(ctx, options);
     const total = doc.getNumberOfPages();
     renderFooters(doc, options, total);
-    return { pages: total, trades: 0 };
+    return { pages: total, trades: 0, layout: validateLayout(ctx) };
   }
   const fetchImage = createPdfImageCache(options.fetchImage ?? fetchPdfImage);
   for (let index = 0; index < options.trades.length; index += 1) {
@@ -1342,5 +1152,5 @@ export async function renderTradeLogPdf(doc: PdfDoc, options: TradeLogPdfOptions
   for (const page of analysis.pages) renderAnalysisPage(ctx, page, options.rangeLabel, options.mode, analysis.total);
   const total = doc.getNumberOfPages();
   renderFooters(doc, options, total);
-  return { pages: total, trades: options.trades.length, summary: options.summary, analysis };
+  return { pages: total, trades: options.trades.length, summary: options.summary, analysis, layout: validateLayout(ctx) };
 }
