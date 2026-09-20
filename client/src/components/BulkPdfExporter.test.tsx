@@ -96,11 +96,11 @@ describe("BulkPdfExporter", () => {
     await waitFor(() => expect(doc.savedAs).toContain("Funded-Gold"));
     const written = doc.texts.join("\n");
     // The complete canonical model reaches the document, not a hand-picked subset.
-    ["TRADE ID", "MT5 TICKET", "SETUP QUALITY", "CONFIRMATION", "PLANNED R:R", "ACTUAL P&L", "RUNNING BALANCE", "PRE-TRADE CHECKLIST", "JOURNAL NOTE", "BEFORE TRADE", "SCREENSHOT EVIDENCE"].forEach(label => expect(written).toContain(label));
-    expect(written).toContain("#987654");
+    ["TRADE ID", "SETUP QUALITY", "CONFIRMATION SIGNALS", "PLANNED R:R", "ACTUAL P&L", "RUNNING BALANCE", "PRE-TRADE CHECKLIST", "JOURNAL NOTES", "BEFORE TRADE", "SCREENSHOT EVIDENCE"].forEach(label => expect(written).toContain(label));
     expect(written).toContain("Waited for the retest");
     expect(written).toContain("calm");
-    expect(written).toContain("london.png");
+    // Technical/sync/storage metadata is deliberately absent from the document.
+    ["MT5", "987654", "london.png", ".png", "userId", "accountId"].forEach(secret => expect(written).not.toContain(secret));
     expect(doc.images).toBe(1);
     // Only the selected account is exported, even though the fetch returned another account's row.
     expect(written).not.toContain("OTHER ACCOUNT");

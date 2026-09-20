@@ -19,13 +19,13 @@ import { buildAnalysis, metricRow, type AnalysisTrade, type MetricRow } from "@s
 import { MISTAKE_BY_TAG, TRADE_CLASSIFICATION_LABELS, classifyTradeProcess, detectBehavioralTags, type TradeClassification } from "@/lib/psychology";
 import type { MistakeCategory } from "@shared/psychologyEngine";
 import { groupTradesByPktDay, summarizeTradeRows } from "@/lib/performanceSummary";
-import { checklistCompletionRatio, type TradePdfTone } from "@/lib/tradePdfModel";
+import { checklistCompletionRatio, type TradeTone } from "@/lib/tradePresentation";
 import { formatMoney } from "@/lib/gold";
 
 /** Rendered when a metric cannot be calculated from the selected trades. */
 export const ANALYSIS_MISSING = "—";
 
-export type AnalysisMetric = { label: string; value: string; tone?: TradePdfTone };
+export type AnalysisMetric = { label: string; value: string; tone?: TradeTone };
 export type AnalysisColumn = { label: string; flex: number; align?: "left" | "right" };
 export type AnalysisTable = { title: string; columns: AnalysisColumn[]; rows: string[][]; empty: string };
 
@@ -72,7 +72,7 @@ const factor = (value: number | null | undefined): string => (value == null || !
 const rMultiple = (value: number | null | undefined): string => (value == null || !Number.isFinite(value) ? ANALYSIS_MISSING : `${value >= 0 ? "+" : ""}${value.toFixed(2)}R`);
 const percent = (value: number | null | undefined, digits = 1): string => (value == null || !Number.isFinite(value) ? ANALYSIS_MISSING : `${value.toFixed(digits)}%`);
 const clean = (value: unknown): string => String(value ?? "").trim().replace(/\s+/g, " ");
-const toneFor = (value: number): TradePdfTone => (value > 0 ? "positive" : value < 0 ? "negative" : "neutral");
+const toneFor = (value: number): TradeTone => (value > 0 ? "positive" : value < 0 ? "negative" : "neutral");
 
 /** Picks the row with the largest absolute net P&L, if any. */
 function topByAbsolutePnl(rows: MetricRow[]) {

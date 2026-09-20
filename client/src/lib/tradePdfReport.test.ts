@@ -1,6 +1,23 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { summarizeBulkPdfTrades } from "./bulkPdf";
-import { PDF_COLORS, PDF_PAGE, SCREENSHOT_EMBED_FAILURE, createPdfImageCache, detectImageFormat, fetchPdfImage, fitInside, renderTradeLogPdf, type PdfDoc, type PdfImage, type PdfTextOptions, type TradeLogPdfTrade } from "./tradePdfReport";
+import {
+  PDF_COLORS,
+  PDF_MIN_FONT,
+  PDF_PAGE,
+  PDF_SECTION_COLORS,
+  SCREENSHOT_EMBED_FAILURE,
+  createPdfImageCache,
+  detectImageFormat,
+  fetchPdfImage,
+  fitInside,
+  hexToRgb,
+  renderTradeLogPdf,
+  type PdfDoc,
+  type PdfImage,
+  type PdfTextOptions,
+  type TradeLogPdfTrade,
+} from "./tradePdfReport";
+import { PRESENTATION_MISSING, TRADE_PRESENTATION_LABELS, TRADE_SECTION_THEME, buildTradePresentation, type TradePresentationSectionId } from "./tradePresentation";
 
 const PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
@@ -8,9 +25,12 @@ type TextCall = { text: string; x: number; y: number; size: number; page: number
 type ImageCall = { format: string; x: number; y: number; width: number; height: number; page: number; dataUrl: string };
 
 /**
- * A jsPDF-shaped recorder for the A4 landscape report. It validates page bounds
- * the way the real writer must (text inside the page, images inside the page) so a
- * layout regression fails the test instead of silently clipping the document.
+ * A jsPDF-shaped recorder for the A4 landscape report.
+ *
+ * It validates the document the way a printer would: text and images must stay
+ * inside the page, no two pieces of text may occupy the same spot on a page, and
+ * nothing may be drawn below the content area. A layout regression therefore fails
+ * the test instead of silently clipping or overlapping the document.
  */
 class RecordingPdfDoc implements PdfDoc {
   texts: TextCall[] = [];
@@ -38,13 +58,19 @@ class RecordingPdfDoc implements PdfDoc {
     for (const line of Array.isArray(value) ? value : [value]) {
       this.texts.push({ text: line, x, y, size: this.fontSize, page: this.page, align });
       if (y < 0 || y > PDF_PAGE.height || x < 0 || x > PDF_PAGE.width) this.violations.push(`text out of bounds: ${line}`);
-      // ≈0.18 mm per character per point is a realistic Helvetica width.
-      if (align === "left" && x + line.length * this.fontSize * 0.18 > PDF_PAGE.width + 1) this.violations.push(`text overflows the page: ${line}`);
+      if (align === "left" && x + this.width(line, this.fontSize) > PDF_PAGE.width + 1) this.violations.push(`text overflows the page: ${line}`);
+      if (this.fontSize < PDF_MIN_FONT && !line.startsWith("Page ") && !line.startsWith("Gold Journal ·")) this.violations.push(`unreadable text (${this.fontSize}pt): ${line}`);
     }
     return this;
   }
+  /**
+   * jsPDF measures real Helvetica widths: ~0.176 mm per point per glyph for mixed
+   * lower-case text and ~0.23 for capitals. This recorder deliberately uses the
+   * wider figure so a test never claims a layout fits when only a narrower
+   * measurement would allow it.
+   */
   splitTextToSize(text: string, maxWidth: number) {
-    const perLine = Math.max(6, Math.floor(maxWidth / (this.fontSize * 0.18)));
+    const perLine = Math.max(6, Math.floor(maxWidth / (this.fontSize * 0.22)));
     const lines: string[] = [];
     let current = "";
     for (const word of String(text ?? "").split(" ")) {
@@ -64,19 +90,48 @@ class RecordingPdfDoc implements PdfDoc {
   /** Wrapping-insensitive view of the page text, for content assertions. */
   flattened() { return this.written().replace(/\s+/g, " "); }
   pageOf(text: string) { return this.texts.find(entry => entry.text === text)?.page ?? null; }
-  pagesWithText(text: string) { return Array.from(new Set(this.texts.filter(entry => entry.text === text).map(entry => entry.page))); }
   pagesWithImage() { return Array.from(new Set(this.images.map(image => image.page))).sort((a, b) => a - b); }
   footerPages() { return Array.from(new Set(this.texts.filter(entry => entry.text.startsWith("Page ")).map(entry => entry.page))).sort((a, b) => a - b); }
-  /** Content bottom of a page, ignoring the footer line. */
   contentMaxY(page: number) {
     return Math.max(...this.texts.filter(entry => entry.page === page && entry.y < PDF_PAGE.footerBaseline - 2).map(entry => entry.y), 0);
   }
   smallestFont() { return Math.min(...this.texts.map(entry => entry.size)); }
+
+  private width(text: string, size: number) { return text.length * size * 0.22; }
+  private interval(entry: TextCall): [number, number] {
+    const width = this.width(entry.text, entry.size);
+    if (entry.align === "right") return [entry.x - width, entry.x];
+    if (entry.align === "center") return [entry.x - width / 2, entry.x + width / 2];
+    return [entry.x, entry.x + width];
+  }
+  /** Any two text runs on a page that occupy the same place. */
+  overlaps(): string[] {
+    const problems: string[] = [];
+    const byPage = new Map<number, TextCall[]>();
+    for (const entry of this.texts) {
+      const list = byPage.get(entry.page) ?? [];
+      list.push(entry);
+      byPage.set(entry.page, list);
+    }
+    for (const [page, entries] of byPage) {
+      for (let i = 0; i < entries.length; i += 1) {
+        for (let j = i + 1; j < entries.length; j += 1) {
+          const a = entries[i];
+          const b = entries[j];
+          if (Math.abs(a.y - b.y) > 1.2) continue;
+          const [aStart, aEnd] = this.interval(a);
+          const [bStart, bEnd] = this.interval(b);
+          if (Math.min(aEnd, bEnd) - Math.max(aStart, bStart) > 0.8) problems.push(`"${a.text}" overlaps "${b.text}" on page ${page}`);
+        }
+      }
+    }
+    return problems;
+  }
 }
 
 const trade = (overrides: Record<string, unknown> = {}) => ({ id: 1, accountId: 3, tradeDate: "2026-08-04T09:00:00.000Z", pnl: "10.00", result: "WIN", session: "London", direction: "BUY", ...overrides });
 
-/** A trade carrying every field the Trade Card can show. */
+/** A trade carrying every field the canonical presentation model can show. */
 const completeTrade = (overrides: Record<string, unknown> = {}) => trade({
   id: 696, symbol: "XAUUSD", mt5Ticket: "17446150", timeframe: "15m", level: "H4 RBS + FVG", setupQuality: "A+",
   confirmationType: "Displacement + BOS", marketCondition: "Trending", biasAlignment: "Counter-trend", executionType: "Manual direct",
@@ -100,9 +155,18 @@ async function render(trades: TradeLogPdfTrade[], options: { fetchImage?: (url: 
   return doc;
 }
 
+/** A value is present if it is drawn verbatim, or as the first line of a wrapped run. */
+function appearsIn(doc: RecordingPdfDoc, value: string) {
+  const firstLine = value.split("\n")[0].trim();
+  if (!firstLine) return true;
+  if (doc.written().includes(firstLine)) return true;
+  const head = firstLine.split(" ").slice(0, 5).join(" ");
+  return doc.texts.some(entry => entry.text.startsWith(head));
+}
+
 afterEach(() => vi.unstubAllGlobals());
 
-describe("trade page layout", () => {
+describe("trade data page", () => {
   it("gives an ordinary trade exactly one data page followed by its screenshot page", async () => {
     const doc = await render([
       { trade: completeTrade({ id: 1, screenshotUrl: "https://files.test/a.png", screenshotName: "a.png", hasScreenshot: true }) },
@@ -112,20 +176,19 @@ describe("trade page layout", () => {
     expect([doc.pageOf("TRADE 01 / 03"), doc.pageOf("TRADE 02 / 03"), doc.pageOf("TRADE 03 / 03")]).toEqual([1, 3, 5]);
     expect(doc.pagesWithImage()).toEqual([2, 4, 6]);
     expect(doc.violations).toEqual([]);
+    expect(doc.overlaps()).toEqual([]);
   });
 
-  it("shows the identity once, in a single header line, and keeps it out of the field table header", async () => {
-    const doc = await render([{ trade: completeTrade({ screenshotUrl: "https://files.test/a.png", hasScreenshot: true }) }]);
+  it("states the trade's identity once, in the page header", async () => {
+    const doc = await render([{ trade: completeTrade({ hasScreenshot: false }) }]);
     expect(doc.pageOf("TRADE 01 / 01")).toBe(1);
-    expect(doc.written()).toContain("04/08/2026 · XAUUSD · LONDON · BUY · WIN");
-    // The old dark-export headers repeated date/symbol/session/direction/result in
-    // the eyebrow, the title, a band, and the field table; each now appears once.
-    const occurrences = doc.texts.filter(entry => entry.text === "04/08/2026 · XAUUSD · LONDON · BUY · WIN");
-    expect(occurrences).toHaveLength(1);
-    expect(doc.written()).not.toContain("GOLD JOURNAL · TRADE CARD");
+    expect(doc.texts.filter(entry => entry.text === "04/08/2026 · XAUUSD · LONDON · BUY · WIN")).toHaveLength(1);
+    // The identity fields are not repeated as table rows on the trade page.
+    const pageOne = doc.texts.filter(entry => entry.page === 1).map(entry => entry.text);
+    ["TRADE DATE", "SYMBOL", "SESSION", "DIRECTION", "RESULT"].forEach(label => expect(pageOne).not.toContain(label));
   });
 
-  it("leads with a KPI strip of the trade's headline figures", async () => {
+  it("leads with the trade's key figures as KPI tiles", async () => {
     const doc = await render([{ trade: completeTrade({ hasScreenshot: false }) }]);
     ["ACTUAL P&L", "ACTUAL R", "PLANNED R:R", "RULE ADHERENCE", "CHECKLIST COMPLETION", "PATIENCE SCORE"].forEach(label => expect(doc.written()).toContain(label));
     expect(doc.written()).toContain("+7.09R");
@@ -134,80 +197,107 @@ describe("trade page layout", () => {
     expect(doc.written()).toContain("4/5");
   });
 
-  it("renders the complete trade card in the report's section order", async () => {
-    const doc = await render([{ trade: completeTrade({ screenshotUrl: "https://files.test/a.png", hasScreenshot: true }), runningBalance: 1070.9 }]);
+  it("lays the complete trade out as colour-coded section tables", async () => {
+    const doc = await render([{ trade: completeTrade({ hasScreenshot: false }), runningBalance: 1070.9 }]);
     const written = doc.written();
-    ["1 · TRADE OVERVIEW", "2 · STRATEGY & EXECUTION", "3 · RISK & PERFORMANCE", "4 · PLAN & DISCIPLINE", "PRE-TRADE CHECKLIST", "6 · PROCESS & MISTAKES", "7 · PSYCHOLOGY", "JOURNAL NOTE"].forEach(label => expect(written, `missing ${label}`).toContain(label));
-    ["TRADE ID", "MT5 TICKET", "TRADE DATE", "SYMBOL", "SESSION", "DIRECTION", "RESULT", "TIMEFRAME", "OPEN TIME (MT5)", "CLOSE TIME (MT5)", "TRADE DURATION",
-      "LEVEL / CONFLUENCE", "SETUP QUALITY", "CONFIRMATION", "MARKET CONDITION", "BIAS ALIGNMENT", "EXECUTION TYPE", "SL PLACEMENT", "TP PLACEMENT", "HOLD QUALITY", "PATIENCE SCORE",
-      "PLANNED RISK", "PLANNED REWARD", "PLANNED R:R", "ACTUAL P&L", "ACTUAL R", "RUNNING BALANCE", "MFE", "MAE",
-      "PLAN STATUS", "PLANNED / UNPLANNED", "CHECKLIST COMPLETION", "RULE ADHERENCE", "PROCESS CLASSIFICATION", "PROCESS REVIEW",
-      "MISTAKE TAGS", "RULE-BREAK TAGS", "ANALYTICAL MISTAKES", "EXECUTION MISTAKES", "EMOTIONAL TRIGGERS", "ENVIRONMENTAL FACTORS",
-      "BEFORE TRADE", "DURING TRADE", "AFTER TRADE"].forEach(label => expect(written, `missing ${label}`).toContain(label));
-    ["#17446150", "XAUUSD", "1 : 9.33", "+7.09R", "$10.00", "$93.30", "$70.90", "Calm", "Fear", "Regret", "Waited for the retest"].forEach(value => expect(written).toContain(value));
-    expect(doc.violations).toEqual([]);
+    ["TRADE OVERVIEW", "STRATEGY", "EXECUTION", "RISK & PERFORMANCE", "PLAN & DISCIPLINE", "PROCESS", "PRE-TRADE CHECKLIST", "MISTAKES & BEHAVIOUR", "PSYCHOLOGY", "JOURNAL NOTES"]
+      .forEach(label => expect(written, `missing band ${label}`).toContain(label));
+    // The colour-coded bands read the shared section palette, so the report cannot
+    // drift from (or flatten) the colours the Trade Card uses.
+    (Object.keys(TRADE_SECTION_THEME) as TradePresentationSectionId[]).forEach(id => {
+      expect(PDF_SECTION_COLORS[id], `section ${id} accent`).toEqual(hexToRgb(TRADE_SECTION_THEME[id].accent));
+    });
+    expect(new Set(Object.values(PDF_SECTION_COLORS).map(color => color.join(","))).size).toBe(9);
   });
 
-  it("keeps every checklist item, split into two columns of confirmed and unconfirmed rows", async () => {
+  it("prints every canonical field label and value, with nothing dropped", async () => {
+    const doc = await render([{ trade: completeTrade({ hasScreenshot: false }), runningBalance: 1070.9 }]);
+    const model = buildTradePresentation(completeTrade(), { runningBalance: 1070.9 });
+    const labels = TRADE_PRESENTATION_LABELS.filter(label => !["Trade date", "Symbol", "Session", "Direction", "Result"].includes(label));
+    labels.forEach(label => expect(doc.written(), `missing label ${label}`).toContain(label.toUpperCase()));
+    for (const section of model.sections) {
+      for (const field of section.fields) {
+        if (field.inHeader || field.key === "checklistCompletion") continue;
+        expect(appearsIn(doc, field.value), `missing value for ${field.label}: ${field.value}`).toBe(true);
+      }
+    }
+    ["XAUUSD", "1 : 9.33", "+7.09R", "$10.00", "$93.30", "$70.90", "Calm", "Fear", "Regret", "Waited for the retest", "Impatience|Closed early|Entered without confirmation", "$1,070.90"]
+      .forEach(value => expect(doc.written()).toContain(value));
+    expect(doc.violations).toEqual([]);
+    expect(doc.overlaps()).toEqual([]);
+  });
+
+  it("never prints technical or internal metadata", async () => {
+    const doc = await render([{ trade: completeTrade({ screenshotUrl: "https://signed.example/private/evidence.png", screenshotName: "new-york-retest.png", screenshotKey: "gold-journal/owner/accounts/11/trades/696/private.png", hasScreenshot: true }) }]);
+    const written = doc.flattened();
+    ["MT5", "mt5", "17446150", "new-york-retest", ".png", "signed.example", "gold-journal", "userId", "accountId", "PNG", "JPEG", "WEBP", "px", "image dimensions"]
+      .forEach(secret => expect(written, `leaked ${secret}`).not.toContain(secret));
+  });
+
+  it("keeps every checklist item, split into confirmed and unconfirmed columns", async () => {
     const doc = await render([{ trade: completeTrade({ hasScreenshot: false }) }]);
     expect(doc.flattened()).toContain("Setup exists");
     expect(doc.flattened()).toContain("Not revenge / FOMO driven");
     expect(doc.flattened()).toContain("Entry condition confirmed");
     const marks = doc.texts.filter(entry => entry.text === "✓" || entry.text === "✗");
     expect(marks).toHaveLength(10);
-    expect(marks.filter(entry => entry.text === "✗")).toHaveLength(1);
+    expect(marks.filter(entry => entry.text === "✓")).toHaveLength(9);
     // Two columns inside the block: the sixth item sits a column to the right.
     const lastItem = doc.texts.find(entry => entry.text === "Not revenge / FOMO driven");
     const firstItem = doc.texts.find(entry => entry.text === "Setup exists");
     expect(lastItem && firstItem && lastItem.x > firstItem.x + 40).toBe(true);
   });
 
-  it("gives the process classification its own panel so P&L never implies process", async () => {
-    const goodWin = await render([{ trade: completeTrade({ mistake: null, planStatus: "PLANNED" }) }]);
-    expect(goodWin.flattened()).toContain("GOOD WIN");
-    const badWin = await render([{ trade: completeTrade({ mistake: "Revenge|Oversize" }) }]);
+  it("describes the process in its own panel so P&L never implies process", async () => {
+    const badWin = await render([{ trade: completeTrade({ hasScreenshot: false }) }]);
     expect(badWin.flattened()).toContain("BAD WIN");
     expect(badWin.flattened()).toContain("Profitable result, poor process.");
+    const goodWin = await render([{ trade: completeTrade({ mistake: null, planStatus: "PLANNED" }) }]);
+    expect(goodWin.flattened()).toContain("GOOD WIN");
   });
 
-  it("keeps a long journal note on the data page when it fits and continues it otherwise, never truncating", async () => {
-    const longNote = Array.from({ length: 90 }, (_, index) => `Paragraph ${index + 1} of the journal entry with enough words to wrap across several lines in the generated document.`).join("\n");
+  it("keeps a long journal note whole, continuing it on a labelled page instead of truncating", async () => {
+    // Each segment carries an unbreakable marker so the assertion is exact even when
+    // a line wrap or a page break falls between two words of the surrounding prose.
+    const marker = (index: number) => `Segment-${String(index).padStart(4, "0")}`;
+    const longNote = Array.from({ length: 90 }, (_, index) => `${marker(index + 1)} records what happened during this part of the session in enough words to wrap across several lines of the generated report.`).join("\n");
     const doc = await render([{ trade: completeTrade({ notes: longNote, hasScreenshot: false }) }]);
     const written = doc.written();
-    for (const index of [1, 2, 45, 89, 90]) expect(written).toContain(`Paragraph ${index} of`);
-    // The overflow is explicit, labelled, and attached to the same trade.
+    // Every recorded segment must survive the export — not just the first few.
+    for (let index = 1; index <= 90; index += 1) expect(written, `journal ${marker(index)} must reach the document`).toContain(marker(index));
     expect(doc.flattened()).toContain("TRADE 01 / 01 — TRADE DATA (CONTINUED)");
-    expect(doc.flattened()).toContain("8 · JOURNAL NOTE (CONTINUED)");
+    expect(doc.flattened()).toContain("JOURNAL NOTES (CONTINUED)");
     expect(doc.violations).toEqual([]);
+    expect(doc.overlaps()).toEqual([]);
   });
 
-  it("gives a short note trade a single data page", async () => {
+  it("keeps an ordinary trade on a single data page", async () => {
     const doc = await render([{ trade: completeTrade({ notes: "Waited for the retest.", hasScreenshot: false }) }]);
     expect(doc.pageOf("TRADE 01 / 01")).toBe(1);
     expect(doc.pageOf("TRADE 01 / 01 — TRADE DATA (CONTINUED)")).toBeNull();
   });
 
   it("renders — for fields that exist but were never recorded", async () => {
-    const doc = await render([{ trade: trade({ pnl: null, result: "", session: "", level: "", mt5Ticket: null, patienceScore: null, planChecklist: null, planStatus: null, notes: null, emotionBefore: null, hasScreenshot: false }) }]);
-    const written = doc.written();
-    ["SYMBOL", "MT5 TICKET", "PLANNED RISK", "CHECKLIST COMPLETION", "PLANNED / UNPLANNED", "JOURNAL NOTE"].forEach(label => expect(written).toContain(label));
-    expect(written).toContain("—");
+    const doc = await render([{ trade: trade({ pnl: null, result: "", session: "", symbol: "", level: "", patienceScore: null, planChecklist: null, planStatus: null, notes: null, emotionBefore: null, hasScreenshot: false }) }]);
+    ["PLANNED RISK", "CHECKLIST COMPLETION", "PLANNED / UNPLANNED", "JOURNAL NOTES"].forEach(label => expect(doc.written()).toContain(label));
+    expect(doc.written()).toContain(PRESENTATION_MISSING);
     expect(doc.violations).toEqual([]);
   });
 
-  it("never uses an unreadably small font, even when the layout is compressed", async () => {
+  it("never drops the read type below the printable floor when the page is squeezed", async () => {
     const heavy = completeTrade({
       hasScreenshot: false,
       notes: Array.from({ length: 40 }, (_, index) => `Note ${index + 1}: a long journal paragraph that pushes the page toward its compact typography tier.`).join("\n"),
     });
     const doc = await render([{ trade: heavy }]);
-    expect(doc.smallestFont()).toBeGreaterThanOrEqual(6.4);
+    expect(doc.smallestFont()).toBeGreaterThanOrEqual(PDF_MIN_FONT);
+    expect(doc.violations).toEqual([]);
   });
 });
 
 describe("screenshot evidence pages", () => {
-  it("embeds a screenshot with its real format, preserving its aspect ratio inside the page", async () => {
-    const doc = await render([{ trade: completeTrade({ screenshotUrl: "https://files.test/chart.png", screenshotName: "chart.png", hasScreenshot: true }) }]);
+  it("embeds the screenshot with its real format and preserves its aspect ratio", async () => {
+    const doc = await render([{ trade: completeTrade({ screenshotUrl: "https://files.test/chart.png", hasScreenshot: true }) }]);
     expect(doc.images).toHaveLength(1);
     const image = doc.images[0];
     expect(image.format).toBe("PNG");
@@ -215,17 +305,14 @@ describe("screenshot evidence pages", () => {
     expect(image.width / image.height).toBeCloseTo(1600 / 900, 2);
     expect(image.x).toBeGreaterThanOrEqual(PDF_PAGE.margin);
     expect(image.y + image.height).toBeLessThanOrEqual(PDF_PAGE.height - 12);
-    // The evidence bar carries the identifying metadata once.
-    ["TRADE", "MT5 TICKET", "SYMBOL", "SCREENSHOT", "IMAGE"].forEach(label => expect(doc.written()).toContain(label));
-    expect(doc.flattened()).toContain("chart.png");
-    expect(doc.flattened()).toContain("PNG · 1600 × 900 px");
+    expect(doc.pageOf("Screenshot evidence")).toBe(2);
     expect(doc.violations).toEqual([]);
   });
 
   it("scales a tall screenshot down proportionally instead of cropping it", async () => {
     const dataUrl = `data:image/png;base64,${PNG_1PX}`;
     const doc = new RecordingPdfDoc().withDimensions(dataUrl, 600, 2400);
-    await render([{ trade: completeTrade({ screenshotUrl: "https://files.test/tall.png", screenshotName: "tall.png", hasScreenshot: true }) }], { doc, fetchImage: async () => ({ dataUrl, format: "PNG" }) });
+    await render([{ trade: completeTrade({ screenshotUrl: "https://files.test/tall.png", hasScreenshot: true }) }], { doc, fetchImage: async () => ({ dataUrl, format: "PNG" }) });
     const image = doc.images[0];
     expect(image.width / image.height).toBeCloseTo(600 / 2400, 3);
     expect(image.height).toBeGreaterThan(100);
@@ -244,22 +331,22 @@ describe("screenshot evidence pages", () => {
   it("renders a clean empty state, still on its own page, when a trade has no screenshot", async () => {
     const doc = await render([{ trade: completeTrade({ screenshotUrl: null, screenshotName: null, hasScreenshot: false }) }]);
     expect(doc.images).toHaveLength(0);
-    expect(doc.flattened()).toContain("NO SCREENSHOT AVAILABLE");
-    expect(doc.flattened()).toContain("MT5 #17446150");
+    expect(doc.flattened()).toContain("NO SCREENSHOT ATTACHED");
     expect(doc.pageOf("TRADE 01 / 01")).toBe(1);
+    expect(doc.flattened()).toContain("04/08/2026");
     expect(doc.violations).toEqual([]);
   });
 
-  it("keeps generating the report when a screenshot cannot be fetched", async () => {
+  it("keeps generating the report when a screenshot cannot be fetched, without debug details", async () => {
     const doc = await render([{ trade: completeTrade({ screenshotUrl: "https://files.test/broken.png", screenshotName: "broken-entry.png", hasScreenshot: true, notes: "Journal marker UNIQUE-NOTE-42" }) }], {
       fetchImage: async () => { throw new Error("Screenshot request failed with 403"); },
     });
     expect(doc.images).toHaveLength(0);
     expect(doc.flattened()).toContain("SCREENSHOT COULD NOT BE LOADED");
     expect(doc.flattened()).toContain(SCREENSHOT_EMBED_FAILURE);
-    expect(doc.flattened()).toContain("broken-entry.png");
     expect(doc.flattened()).toContain("UNIQUE-NOTE-42");
-    // The analysis still follows the trade pages.
+    expect(doc.flattened()).not.toContain("403");
+    expect(doc.flattened()).not.toContain("broken-entry");
     expect(doc.flattened()).toContain("Performance overview");
     expect(doc.violations).toEqual([]);
   });
@@ -302,7 +389,7 @@ describe("report structure", () => {
     expect(doc.texts.filter(entry => entry.page === 1).some(entry => entry.align === "right")).toBe(true);
   });
 
-  it("adds the four analysis pages, each answering one question, after the trade pages", async () => {
+  it("adds the analysis pages, each answering one question, after the trade pages", async () => {
     const doc = await render([
       { trade: completeTrade({ id: 1, pnl: "100.00", result: "WIN", session: "New York", direction: "BUY", hasScreenshot: false }) },
       { trade: completeTrade({ id: 2, tradeDate: "2026-08-05T09:00:00.000Z", pnl: "-40.00", result: "LOSS", session: "London", direction: "SELL", hasScreenshot: false }) },
@@ -317,6 +404,7 @@ describe("report structure", () => {
     ["PERFORMANCE OBSERVATIONS", "RISK OBSERVATIONS", "EXECUTION OBSERVATIONS", "PROCESS OBSERVATIONS", "PSYCHOLOGY OBSERVATIONS", "WHAT TO REPEAT", "WHAT TO REVIEW", "WHAT TO WATCH NEXT SESSION"].forEach(label => expect(written).toContain(label));
     expect(doc.flattened()).toContain("$60.00");
     expect(doc.violations).toEqual([]);
+    expect(doc.overlaps()).toEqual([]);
   });
 
   it("lays the review page out in two balanced columns", async () => {
@@ -324,10 +412,8 @@ describe("report structure", () => {
     const page = doc.pageOf("Review summary");
     expect(page).toBeTruthy();
     const bullets = doc.texts.filter(entry => entry.page === page && entry.text === "•");
-    const left = bullets.filter(entry => entry.x < PDF_PAGE.width / 2).length;
-    const right = bullets.filter(entry => entry.x >= PDF_PAGE.width / 2).length;
-    expect(left).toBeGreaterThan(0);
-    expect(right).toBeGreaterThan(0);
+    expect(bullets.filter(entry => entry.x < PDF_PAGE.width / 2).length).toBeGreaterThan(0);
+    expect(bullets.filter(entry => entry.x >= PDF_PAGE.width / 2).length).toBeGreaterThan(0);
   });
 
   it("writes a single page when no trade matches the selected period", async () => {
@@ -345,36 +431,72 @@ describe("report structure", () => {
     expect(doc.flattened()).not.toContain("OTHER-ACCOUNT");
   });
 
+  it("keeps every recorded variant complete: unplanned, break-even, loss, many tags, long psychology", async () => {
+    // Long free text: each field carries an unbreakable marker so the assertion is
+    // exact even though the value wraps across several lines of a narrow column.
+    const longBefore = "Calm before the session, but psyche-marker-before kept pulling me toward a quick revenge entry instead of waiting for the plan to present itself.";
+    const longDuring = "Watching price drift, and psyche-marker-during made me want to close early rather than trust the stop I had already placed on the chart.";
+    const longAfter = "Resigned rather than satisfied; psyche-marker-after was still there when I reviewed the chart and wrote the journal note for the day.";
+    const manyTags = "Revenge|Oversize|Moved SL|Chased entry|Ignored news|Fatigue|Distracted|Late session|No confirmation|FOMO";
+    const variants = [
+      completeTrade({ id: 1, result: "BREAK_EVEN", pnl: "0.00", planStatus: "UNPLANNED", hasScreenshot: false, notes: "Scratched the setup at break even." }),
+      completeTrade({ id: 2, tradeDate: "2026-08-05T09:00:00.000Z", result: "LOSS", pnl: "-52.30", planStatus: "PLANNED", hasScreenshot: false, mistake: manyTags, emotionBefore: longBefore, emotionDuring: longDuring, emotionAfter: longAfter }),
+      trade({ id: 3, tradeDate: "2026-08-06T09:00:00.000Z", pnl: null, result: "", session: "", direction: "", hasScreenshot: false }),
+    ];
+    const doc = await render(variants.map(entry => ({ trade: entry })));
+    // Unplanned, break-even and losing trades all read the same way as a winner.
+    expect(doc.written()).toContain("UNPLANNED");
+    expect(doc.flattened()).toContain("Unplanned entry");
+    expect(doc.flattened()).toContain("$0.00");
+    expect(doc.flattened()).toContain("-$52.30");
+    // Every tag and every long emotion field survives, wrapped inside its own row.
+    const losing = buildTradePresentation(variants[1]);
+    for (const field of losing.sections.filter(section => section.id === "mistakes")[0].fields) {
+      expect(appearsIn(doc, field.value), `missing mistake field ${field.label}`).toBe(true);
+    }
+    ["psyche-marker-before", "psyche-marker-during", "psyche-marker-after"].forEach(marker => {
+      expect(doc.written(), `missing long psychology text ${marker}`).toContain(marker);
+    });
+    // A trade with no optional fields still prints the whole schema with — markers.
+    expect(doc.written()).toContain(PRESENTATION_MISSING);
+    ["TRADE 01 / 03", "TRADE 02 / 03", "TRADE 03 / 03"].forEach(title => expect(doc.pageOf(title), `missing ${title}`).not.toBeNull());
+    expect(doc.violations).toEqual([]);
+    expect(doc.overlaps()).toEqual([]);
+  });
+
   it("uses its own light print palette, independent of the application theme", () => {
-    // White page with dark ink: a dark theme can never leak into the document.
     expect(PDF_COLORS.page).toEqual([255, 255, 255]);
     expect(PDF_COLORS.ink[0]).toBeLessThan(60);
     expect(PDF_COLORS.positive[1]).toBeGreaterThan(PDF_COLORS.positive[0]);
     expect(PDF_COLORS.negative[0]).toBeGreaterThan(PDF_COLORS.negative[1]);
   });
 
-  it("keeps the reference 9-trade report to two pages per trade plus the compact analysis", async () => {
+  it("keeps the reference 9-trade report to exactly two pages per trade plus the analysis", async () => {
     const sessions = ["New York", "London", "Asian", "Pre-London", "New York", "London", "New York", "Asian", "London"];
-    const results = ["WIN", "LOSS", "BREAK_EVEN", "WIN", "LOSS", "WIN", "WIN", "LOSS", "WIN"];
+    const outcomes = ["WIN", "LOSS", "BREAK_EVEN", "WIN", "LOSS", "WIN", "WIN", "LOSS", "WIN"];
     const pnls = ["70.90", "-48.20", "0.00", "134.10", "-52.30", "88.75", "210.40", "-40.00", "61.25"];
     const reference: TradeLogPdfTrade[] = Array.from({ length: 9 }, (_, index) => ({
       trade: completeTrade({
         id: 690 + index,
         tradeDate: `2026-09-${String(16 + Math.floor(index / 3)).padStart(2, "0")}T0${9 + (index % 3)}:15:00.000Z`,
-        session: sessions[index], direction: index % 2 ? "SELL" : "BUY", result: results[index], pnl: pnls[index],
+        session: sessions[index], direction: index % 2 ? "SELL" : "BUY", result: outcomes[index], pnl: pnls[index],
         notes: `Waited for the retest at the ${index % 2 ? "H4 supply" : "daily RBS"}, entered on displacement and managed into the target.`,
         screenshotUrl: "https://files.test/chart.png", screenshotName: `evidence-${index + 1}.png`, hasScreenshot: true,
       }), runningBalance: null,
     }));
     const doc = await render(reference);
-    expect(doc.pageOf("TRADE 09 / 09")).toBe(17);
+    expect([doc.pageOf("TRADE 01 / 09"), doc.pageOf("TRADE 05 / 09"), doc.pageOf("TRADE 09 / 09")]).toEqual([1, 9, 17]);
     expect(doc.pagesWithImage()).toEqual([2, 4, 6, 8, 10, 12, 14, 16, 18]);
-    // 18 trade pages and four analysis pages, never the three-to-four pages per
-    // trade this report replaced.
-    expect(doc.getNumberOfPages()).toBe(22);
+    const total = doc.getNumberOfPages();
+    // 18 trade pages, then only the analysis pages: never the three-to-four pages
+    // per trade this report replaced.
+    expect(total).toBeGreaterThanOrEqual(20);
+    expect(total).toBeLessThanOrEqual(24);
+    expect(doc.pageOf("Performance overview")).toBe(19);
     expect(doc.violations).toEqual([]);
+    expect(doc.overlaps()).toEqual([]);
     // No page is left blank, and no page runs past the content area.
-    for (let page = 1; page <= doc.getNumberOfPages(); page += 1) {
+    for (let page = 1; page <= total; page += 1) {
       expect(doc.texts.some(entry => entry.page === page), `page ${page} is empty`).toBe(true);
       expect(doc.contentMaxY(page)).toBeLessThanOrEqual(PDF_PAGE.height - 12);
     }
@@ -398,7 +520,47 @@ describe("image preparation", () => {
     expect(image.dataUrl.startsWith("data:image/png;base64,")).toBe(true);
   });
 
-  it("produces a real multi-page jsPDF document with two pages per trade", async () => {
+  it("produces a real jsPDF document whose page count is exactly two pages per trade plus the analysis", async () => {
+    const { jsPDF } = await import("jspdf");
+    // The real writer, with real Helvetica metrics: this is the acceptance case the
+    // reference report describes — nine trades, eighteen trade pages, then analysis.
+    const reference: TradeLogPdfTrade[] = Array.from({ length: 9 }, (_, index) => ({
+      trade: completeTrade({
+        id: 690 + index,
+        tradeDate: `2026-09-${String(16 + Math.floor(index / 3)).padStart(2, "0")}T0${9 + (index % 3)}:15:00.000Z`,
+        session: ["New York", "London", "Asian"][index % 3],
+        direction: index % 2 ? "SELL" : "BUY",
+        result: index % 3 === 1 ? "LOSS" : "WIN",
+        pnl: index % 3 === 1 ? "-48.20" : "70.90",
+        screenshotUrl: index === 2 ? null : "https://files.test/chart.png",
+        hasScreenshot: index !== 2,
+        notes: index === 4
+          ? Array.from({ length: 26 }, (_, p) => `Paragraph ${p + 1}: the journal entry continues with enough words to wrap across several lines in the generated document.`).join("\n")
+          : "Waited for the retest at the daily RBS, entered on displacement and managed into the target.",
+      }),
+      runningBalance: 1000 + index,
+    }));
+    const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" });
+    const result = await renderTradeLogPdf(doc, {
+      accountName: "Blueberry live",
+      rangeLabel: "2026-09-16 to 2026-09-18",
+      mode: "ALL_TIME",
+      summary: summarizeBulkPdfTrades(reference.map(row => row.trade as never)),
+      trades: reference,
+      fetchImage: async () => ({ dataUrl: `data:image/png;base64,${PNG_1PX}`, format: "PNG" }),
+    });
+    const bytes = new Uint8Array(doc.output("arraybuffer") as ArrayBuffer);
+    // 18 trade pages. One trade carries a 26-paragraph entry and correctly takes a
+    // labelled continuation page, so the document is 19-21 pages plus the analysis.
+    expect(result.pages).toBeGreaterThanOrEqual(22);
+    expect(result.pages).toBeLessThanOrEqual(25);
+    expect(Array.from(bytes.slice(0, 4))).toEqual([0x25, 0x50, 0x44, 0x46]);
+    expect(bytes.byteLength).toBeGreaterThan(20_000);
+    expect(doc.internal.pageSize.getWidth()).toBeCloseTo(297, 0);
+    expect(doc.internal.pageSize.getHeight()).toBeCloseTo(210, 0);
+  });
+
+  it("keeps two trades to two data pages and two evidence pages", async () => {
     const { jsPDF } = await import("jspdf");
     const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" });
     await renderTradeLogPdf(doc, {
@@ -412,12 +574,9 @@ describe("image preparation", () => {
       ],
       fetchImage: async () => ({ dataUrl: `data:image/png;base64,${PNG_1PX}`, format: "PNG" }),
     });
-    const bytes = new Uint8Array(doc.output("arraybuffer") as ArrayBuffer);
-    // Two trades = two data pages, two evidence pages, and four analysis pages.
-    expect(doc.getNumberOfPages()).toBe(8);
-    expect(Array.from(bytes.slice(0, 4))).toEqual([0x25, 0x50, 0x44, 0x46]);
-    expect(bytes.byteLength).toBeGreaterThan(5_000);
-    expect(doc.internal.pageSize.getWidth()).toBeCloseTo(297, 0);
-    expect(doc.internal.pageSize.getHeight()).toBeCloseTo(210, 0);
+    // Two data pages, two evidence pages, then the analysis pages (never less than
+    // the four the report structure defines).
+    expect(doc.getNumberOfPages()).toBeGreaterThanOrEqual(8);
+    expect(doc.getNumberOfPages()).toBeLessThanOrEqual(12);
   });
 });

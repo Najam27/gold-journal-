@@ -1,22 +1,184 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { formatActualR, formatDate, formatMoney, formatRr, toNumber } from "@/lib/gold";
+import {
+  PRESENTATION_MISSING,
+  TRADE_EVIDENCE_THEME,
+  buildTradePresentation,
+  resolveTone,
+  type TradePresentation,
+  type TradePresentationField,
+  type TradeTone,
+} from "@/lib/tradePresentation";
 
 /**
- * The journal's single trade viewer. The Trade Log opens it from a table row and
- * the P&L calendar's daily drill-down opens the same dialog from a trade card,
- * so both entry points always show one identical viewer (and its fields) rather
- * than two parallel trade-detail implementations.
+ * The journal's single trade viewer.
+ *
+ * The dialog renders the canonical Trade Presentation Model — the same model the
+ * share image and the PDF report render — instead of its own hand-written field
+ * list. That is what keeps the three surfaces in step: a field the trader records
+ * in Edit Trade appears here, on the shared card, and in the export, with one
+ * label and one formatting rule. MT5 ticket numbers, storage keys, file names, and
+ * audit timestamps are deliberately absent: they belong to synchronisation, not to
+ * the trader's review of a trade.
  */
-function Detail({ label, value }: { label: string; value: React.ReactNode }) {
-  return <div className="trade-detail"><span>{label}</span><strong>{value || "—"}</strong></div>;
+
+const TONE_COLORS: Record<string, string> = {
+  positive: "var(--gj-positive, #157a4a)",
+  negative: "var(--gj-negative, #b23030)",
+  accent: "var(--gj-gold-text, #8a6a1f)",
+  warning: "#a0570e",
+};
+
+function fieldColor(field: { tone?: TradeTone; value: string }) {
+  return TONE_COLORS[resolveTone(field)];
 }
 
-export function TradeDetailDialog({ trade, balance, balanceLabel = "Running balance", open, onOpenChange }: any) {
-  if (!trade) return null;
-  const pnl = toNumber(trade.pnl);
-  const result = String(trade.result || "OPEN").replace("_", " ");
-  const ticket = trade.mt5Ticket ? String(trade.mt5Ticket) : "";
-  const symbol = trade.symbol ? String(trade.symbol) : "";
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="trade-view-dialog"><DialogHeader><DialogTitle>Trade card</DialogTitle><DialogDescription>{formatDate(trade.tradeDate)} · {trade.session} · {trade.direction} · {result}</DialogDescription></DialogHeader><article className="trade-card-detail"><header><span className={`side-badge ${String(trade.direction || "").toLowerCase()}`}>{trade.direction}</span><span className={`result-badge ${String(trade.result || "OPEN").toLowerCase()}`}>{result}</span><b className={`data-text ${pnl >= 0 ? "positive" : "negative"}`}>{formatMoney(pnl)}</b></header><section className="trade-detail-grid"><Detail label="Trade date" value={formatDate(trade.tradeDate)} />{symbol && <Detail label="Symbol" value={symbol} />}{ticket && <Detail label="MT5 ticket" value={`#${ticket}`} />}<Detail label="Session" value={trade.session} /><Detail label="Direction" value={trade.direction} /><Detail label="Result" value={result} /><Detail label="Level" value={trade.level} /><Detail label="Timeframe" value={trade.timeframe} /><Detail label="Setup quality" value={trade.setupQuality} /><Detail label="Confirmation" value={trade.confirmationType} /><Detail label="Execution type" value={trade.executionType} /><Detail label="Market condition" value={trade.marketCondition} /><Detail label="Bias alignment" value={trade.biasAlignment} /><Detail label="SL placement" value={trade.slPlacement} /><Detail label="TP placement" value={trade.tpPlacement} /><Detail label="Mistake" value={trade.mistake} /><Detail label="Hold quality" value={trade.holdQuality} /><Detail label="Patience score" value={trade.patienceScore ? `${trade.patienceScore}/5` : "—"} /><Detail label="Planned risk" value={formatMoney(trade.risk)} /><Detail label="Planned reward" value={formatMoney(trade.reward)} /><Detail label="Planned R:R" value={formatRr(trade.risk, trade.reward)} /><Detail label="Actual P&L" value={formatMoney(trade.pnl)} /><Detail label="Actual R" value={formatActualR(trade.risk, trade.pnl)} /><Detail label={balanceLabel} value={balance == null ? "—" : formatMoney(balance)} /></section><section className="trade-notes"><div><span>EMOTION BEFORE</span><p>{trade.emotionBefore || "No entry recorded."}</p></div><div><span>EMOTION DURING</span><p>{trade.emotionDuring || "No entry recorded."}</p></div><div><span>EMOTION AFTER</span><p>{trade.emotionAfter || "No entry recorded."}</p></div><div><span>JOURNAL NOTES</span><p>{trade.notes || "No notes recorded."}</p></div></section>{trade.screenshotUrl && <section className="trade-evidence"><span>SCREENSHOT EVIDENCE</span><img src={trade.screenshotUrl} alt={`Trade screenshot from ${formatDate(trade.tradeDate)}`} /></section>}</article></DialogContent></Dialog>;
+function Field({ field }: { field: TradePresentationField }) {
+  return (
+    <div className="tp-field" data-field={field.key}>
+      <span>{field.label}</span>
+      <strong style={{ color: fieldColor(field) }}>{field.value}</strong>
+    </div>
+  );
+}
+
+function Section({ title, accent, children }: { title: string; accent: string; children: React.ReactNode }) {
+  return (
+    <section className="tp-section">
+      <div className="tp-band" style={{ background: accent }}>{title}</div>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * The complete canonical trade card, shared by the viewer and the print view.
+ *
+ * The KPI strip already carries the headline figures, so the tables below omit
+ * those exact fields rather than repeating the same value twice — the identity
+ * fields are shown once in the header for the same reason. Nothing is lost: every
+ * omitted field is on screen in the strip above.
+ */
+export function TradePresentationView({ model, heading = "Trade card", balanceLabel }: { model: TradePresentation; heading?: string; balanceLabel?: string }) {
+  const kpiKeys = new Set(model.kpis.map(kpi => kpi.key));
+  const fieldsOf = (id: string) => (model.sections.find(section => section.id === id)?.fields ?? [])
+    .filter(field => !field.inHeader && !kpiKeys.has(field.key))
+    // The running-balance row is labelled by whoever opened the viewer ("Current
+    // MT5 balance" on a connected broker account), matching the Trade Log.
+    .map(field => (field.key === "runningBalance" && balanceLabel ? { ...field, label: balanceLabel } : field));
+  const identity = model.identity;
+  const processReview = fieldsOf("discipline").find(field => field.key === "processReview");
+  return (
+    <article className="trade-presentation">
+      <header className="tp-head">
+        <div className="tp-identity">
+          <span className="tp-date">{heading.toUpperCase()} · {identity.idLabel === PRESENTATION_MISSING ? "Trade" : `#${identity.idLabel}`}</span>
+          <p className="tp-line">{[identity.tradeDate, identity.symbol, identity.session, identity.direction, identity.result].filter(value => value !== PRESENTATION_MISSING).join(" · ")}</p>
+        </div>
+        <b className={`tp-pnl data-text ${identity.pnlValue >= 0 ? "positive" : "negative"}`}>{identity.pnl}</b>
+      </header>
+
+      <div className="tp-kpis">
+        {model.kpis.map(kpi => (
+          <div className="tp-kpi" key={kpi.key} data-kpi={kpi.key}>
+            <span>{kpi.label}</span>
+            <b style={{ color: TONE_COLORS[kpi.tone] }}>{kpi.value}</b>
+          </div>
+        ))}
+      </div>
+
+      <Section title="1 · Trade overview" accent={model.sections[0]?.accent ?? "#2F5C9E"}>
+        <div className="tp-fields">{fieldsOf("overview").map(field => <Field field={field} key={field.key} />)}</div>
+      </Section>
+
+      <Section title="2 · Strategy" accent={model.sections.find(section => section.id === "strategy")?.accent ?? "#7C4DBE"}>
+        <div className="tp-fields">{fieldsOf("strategy").map(field => <Field field={field} key={field.key} />)}</div>
+      </Section>
+
+      <Section title="3 · Execution" accent={model.sections.find(section => section.id === "execution")?.accent ?? "#0E7C86"}>
+        <div className="tp-fields">{fieldsOf("execution").map(field => <Field field={field} key={field.key} />)}</div>
+      </Section>
+
+      <Section title="4 · Risk & performance" accent={model.sections.find(section => section.id === "risk")?.accent ?? "#A97B12"}>
+        <div className="tp-fields">{fieldsOf("risk").map(field => <Field field={field} key={field.key} />)}</div>
+      </Section>
+
+      <Section title="5 · Plan & discipline" accent={model.sections.find(section => section.id === "discipline")?.accent ?? "#3B4CC0"}>
+        <div className="tp-fields">
+          {fieldsOf("discipline").filter(field => field.key !== "processReview" && field.key !== "processClassification").map(field => <Field field={field} key={field.key} />)}
+        </div>
+        <div className="tp-process">
+          <strong style={{ color: TONE_COLORS[model.classification.tone] ?? "inherit" }} data-classification={model.classification.key}>
+            {model.classification.label}
+          </strong>
+          {model.classification.summary ? <span className="tp-field-note">{model.classification.summary}</span> : null}
+          <p>{processReview?.value ?? PRESENTATION_MISSING}</p>
+        </div>
+      </Section>
+
+      <Section title="6 · Pre-trade checklist" accent={model.sections.find(section => section.id === "checklist")?.accent ?? "#5C6BC0"}>
+        <ul className="tp-checklist">
+          {model.checklist.map(item => (
+            <li className={`tp-check ${item.confirmed ? "confirmed" : ""}`} key={item.label}>
+              <b style={{ color: item.confirmed ? TONE_COLORS.positive : item.recorded ? TONE_COLORS.negative : "var(--gj-dim)" }}>{item.confirmed ? "✓" : "✗"}</b>
+              <span>{item.label}{item.recorded ? "" : " — not recorded"}</span>
+            </li>
+          ))}
+        </ul>
+      </Section>
+
+      <Section title="7 · Mistakes & behaviour" accent={model.sections.find(section => section.id === "mistakes")?.accent ?? "#C2453E"}>
+        <div className="tp-fields">{fieldsOf("mistakes").map(field => <Field field={field} key={field.key} />)}</div>
+      </Section>
+
+      <Section title="8 · Psychology" accent={model.sections.find(section => section.id === "psychology")?.accent ?? "#A34FC0"}>
+        <div className="tp-blocks">
+          {fieldsOf("psychology").map(field => (
+            <div className="tp-block" key={field.key}>
+              <span>{field.label}</span>
+              <strong>{field.value === PRESENTATION_MISSING ? "No entry recorded." : field.value}</strong>
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="9 · Journal notes" accent={model.sections.find(section => section.id === "journal")?.accent ?? "#5C6672"}>
+        <div className="tp-note">
+          <span>Trade notes</span>
+          <strong style={{ whiteSpace: "pre-wrap" }}>{model.journalNotes.trim() ? model.journalNotes : "No notes recorded."}</strong>
+        </div>
+      </Section>
+
+      <Section title={`10 · ${TRADE_EVIDENCE_THEME.title}`} accent={TRADE_EVIDENCE_THEME.accent}>
+        <div className="tp-evidence">
+          {model.evidence.url ? (
+            <img src={model.evidence.url} alt={`Trade screenshot from ${identity.tradeDate}`} />
+          ) : (
+            <p className="tp-empty">
+              {model.evidence.hasScreenshot
+                ? "A screenshot is stored for this trade, but it could not be loaded just now."
+                : "No screenshot attached to this trade."}
+            </p>
+          )}
+        </div>
+      </Section>
+    </article>
+  );
+}
+
+/** The Trade Log / day-drill-down entry point for the canonical trade card. */
+export function TradeDetailDialog({ trade, balance, balanceLabel, open, onOpenChange }: any) {
+  const model = useMemo(() => (trade ? buildTradePresentation(trade, { runningBalance: balance ?? null }) : null), [trade, balance]);
+  if (!trade || !model) return null;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="trade-view-dialog">
+        <DialogHeader>
+          <DialogTitle>Trade card</DialogTitle>
+          <DialogDescription>{model.identity.line || balanceLabel}</DialogDescription>
+        </DialogHeader>
+        <TradePresentationView model={model} balanceLabel={balanceLabel} />
+      </DialogContent>
+    </Dialog>
+  );
 }
