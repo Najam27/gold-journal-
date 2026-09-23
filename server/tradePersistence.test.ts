@@ -513,6 +513,55 @@ describe("trade persistence against the database", () => {
     expect(mocks.database.current.objects.has(uploaded.key)).toBe(false);
   });
 
+  it("discards an orphan draft screenshot whose trade write never landed", async () => {
+    // The browser uploads evidence FIRST and then writes the trade. When that
+    // write fails (here: a future trade date, which the server refuses) the
+    // object would otherwise stay in private storage for a trade that does not
+    // exist, so the dialog asks for it to be discarded.
+    const uploaded = await caller().trades.uploadScreenshotDraft({
+      accountId: ACCOUNT_A,
+      clientMutationId: "mutation-orphan-0001",
+      fileName: "orphan.png",
+      mimeType: "image/png",
+      base64: PNG_BYTES.toString("base64"),
+    });
+    expect(mocks.database.current.objects.has(uploaded.key)).toBe(true);
+
+    await expect(
+      caller().trades.create(validTrade({ tradeDate: Date.now() + 86_400_000, screenshotKey: uploaded.key, screenshotName: uploaded.name }) as any)
+    ).rejects.toThrow(/Future trade dates/i);
+    expect(mocks.database.current.rows("gj_trades")).toHaveLength(0);
+
+    const discarded = await caller().trades.discardScreenshotDraft({ accountId: ACCOUNT_A, key: uploaded.key });
+    expect(discarded.removed).toBe(true);
+    expect(mocks.database.current.objects.has(uploaded.key)).toBe(false);
+  });
+
+  it("refuses to discard anything but an unclaimed draft inside the caller's own account", async () => {
+    // A stored trade's evidence must never be removable through the draft path:
+    // that would leave the row pointing at a deleted object.
+    const uploaded = await caller().trades.uploadScreenshotDraft({
+      accountId: ACCOUNT_A,
+      clientMutationId: "mutation-draft-guard-1",
+      fileName: "kept.png",
+      mimeType: "image/png",
+      base64: PNG_BYTES.toString("base64"),
+    });
+    const created = await caller().trades.create(validTrade({ screenshotKey: uploaded.key, screenshotName: uploaded.name }) as any);
+    const [row] = mocks.database.current.rows("gj_trades");
+    expect(row.screenshotKey).toBe(uploaded.key);
+
+    await expect(
+      caller().trades.discardScreenshotDraft({ accountId: ACCOUNT_A, key: `journal-owner/accounts/12/trades/${created.id}/claimed.png` })
+    ).rejects.toThrow(/unclaimed draft/i);
+    await expect(
+      caller().trades.discardScreenshotDraft({ accountId: ACCOUNT_B, key: uploaded.key })
+    ).rejects.toThrow(/does not belong to this account/i);
+
+    // Neither refusal touched the stored object.
+    expect(mocks.database.current.objects.has(uploaded.key)).toBe(true);
+  });
+
   it("removes every stored screenshot when the account's whole journal is cleared, and only that account's", async () => {
     const cleared = await caller().trades.uploadScreenshotDraft({
       accountId: ACCOUNT_A,

@@ -10,7 +10,7 @@ describe("Gold Journal account switching", () => {
     const source = readJournal();
 
     expect(source).toContain(
-      'import { beginAccountSwitchForApp, invalidateAccountScopedQueries, payloadBelongsToAccount, refreshCurrentAccount, resolveActiveAccount } from "@/lib/accountScope";'
+      'import { beginAccountSwitchForApp, payloadBelongsToAccount, refreshCurrentAccount, resolveActiveAccount } from "@/lib/accountScope";'
     );
     // The transaction order: mark the switch, publish the selection, then cancel
     // the previous account's in-flight requests and drop its cached payloads.
@@ -41,48 +41,98 @@ describe("Gold Journal account switching", () => {
 
     // The client half of "old account data must never reach the new account UI":
     // React Query placeholder data and late responses still carry the previous
-    // account's activeAccount.id, so the server payload, the reconciled payload,
-    // and the durable local snapshot are all ownership-checked before `data`.
+    // account's activeAccount.id, so the server payload is ownership-checked
+    // before it becomes `data`. There is no local snapshot to merge in, because
+    // the database is the only source of trades.
     expect(source).toMatch(
       /const journalPayload = payloadBelongsToAccount\(journalQuery\.data, accountId\)/
     );
-    expect(source).toMatch(/const localSnapshot = payloadBelongsToAccount\(/);
-    expect(source).toMatch(/const reconciledPayload = payloadBelongsToAccount\(/);
-    expect(source).toMatch(/const data =\s*reconciledPayload \?\? journalPayload \?\? localSnapshot \?\? undefined;/);
+    expect(source).toMatch(/const data = journalPayload;/);
+    expect(source).not.toMatch(/const data =\s*reconciledPayload/);
   });
 
-  it("renders the server payload reconciled with still-queued local edits, not the raw server payload", () => {
+  it("renders the SERVER journal payload and never merges a local snapshot or a pending queue", () => {
     const source = readJournal();
 
-    // A trade the user just logged must not vanish from the dashboard, calendar,
-    // goal math, or the Trade Log the instant the next journal read lands and
-    // before the queue has drained. The reconciled payload is the server payload
-    // with the queued mutations overlaid, so server data stays the base and
-    // local intent is only ever layered on top of it.
-    expect(source).toContain("localJournal.reconciled");
-    expect(source).not.toMatch(/const data = journalPayload \?\? localSnapshot/);
-    // Pending (unacknowledged) trades are labelled in the table and queued
-    // deletes are hidden immediately, both driven by the queue itself.
-    expect(source).toContain("localJournal.pendingDeletedIds");
-    expect(source).toContain("localJournal.pendingTrades");
-    expect(source).toMatch(/const serverPageTrades = \(tradeListQuery\.data\?\.trades \?\? \[\]\)\.filter\(/);
+    // Trade persistence is direct: the journal payload IS the server payload, so
+    // a trade appears only because Supabase returned it. There is no local
+    // snapshot to fall back to and no queued mutation to overlay.
+    expect(source).toMatch(
+      /const journalPayload = payloadBelongsToAccount\(journalQuery\.data, accountId\)/
+    );
+    expect(source).toMatch(/const data = journalPayload;/);
+    for (const removed of [
+      "useLocalJournal",
+      "localJournal",
+      "reconciledPayload",
+      "localSnapshot",
+      "pendingTrades",
+      "pendingDeletedIds",
+      "journalSync",
+      "journalStore",
+      "enqueueJournalMutation",
+      "flushJournalMutations",
+      "offlineMutationQueue",
+      "JOURNAL_LOCAL_EVENT",
+    ]) {
+      expect(source, `${removed} must not come back into the journal page`).not.toContain(removed);
+    }
   });
 
-  it("writes, updates, and deletes trades through the durable queue and only reports success once the backend confirms", () => {
+  it("saves, updates, and deletes trades by calling the backend directly", () => {
     const source = readJournal();
 
-    expect(source).toMatch(/kind: editing \? "trade\.update" : "trade\.create"/);
-    expect(source).toMatch(/dispatch: async \(mutation: JournalMutation\) => \{[\s\S]*?canonicalTradeOutcome\(await createTrade\.mutateAsync\(payload\)\)/);
-    // A delete is a queued journal write like any other, so it survives a reload
-    // and is applied exactly once instead of being lost with one request.
-    expect(source).toMatch(/kind: "trade\.delete"/);
-    expect(source).not.toMatch(/await deleteTrade\.mutateAsync\(\{ tradeId: id \}\)/);
-    // The screenshot is uploaded to persistent storage FIRST and its stable key
+    // Save / edit go STRAIGHT to the tRPC mutations. Nothing is written to the
+    // browser first, and there is no queue between the click and Supabase.
+    expect(source).toMatch(/await createTrade\.mutateAsync\(tradePayload as any\)/);
+    expect(source).toMatch(/await updateTrade\.mutateAsync\(\{ \.\.\.tradePayload, tradeId: editingId \} as any\)/);
+    expect(source).not.toMatch(/kind: editing \? "trade\.update" : "trade\.create"/);
+    expect(source).not.toMatch(/kind: "trade\.delete"/);
+    // A delete is a direct backend DELETE of a stored row.
+    expect(source).toMatch(/await deleteTrade\.mutateAsync\(\{ tradeId \}\)/);
+    // The screenshot is uploaded to private storage FIRST and its stable key
     // travels inside the trade payload, so the row and its evidence are one write.
     expect(source).toMatch(/uploadScreenshotDraft\.mutateAsync\(\{/);
     expect(source).toMatch(/evidence\.screenshotKey = uploaded\.key;/);
     expect(source).toMatch(/evidence\.screenshotRemoved = true;/);
     expect(source).not.toMatch(/Re-open it after sync to attach the screenshot/);
+  });
+
+  it("reports Saving… / Saved / Save failed and blocks duplicate saves", () => {
+    const source = readJournal();
+
+    // Idle -> Saving… -> Saved | Save failed is driven by the real request state.
+    expect(source).toMatch(/const \[saveStatus, setSaveStatus\] = useState</);
+    expect(source).toMatch(/setSaveStatus\("saving"\)/);
+    expect(source).toMatch(/setSaveStatus\("saved"\)/);
+    expect(source).toMatch(/setSaveStatus\("error"\)/);
+    // A second click while the first attempt is in flight can never save twice.
+    expect(source).toMatch(/const saveInFlightRef = useRef\(false\)/);
+    expect(source).toMatch(/if \(saveInFlightRef\.current\) return;/);
+    expect(source).toMatch(/saveInFlightRef\.current = false;/);
+    // "Saved" is only reported after the backend confirmed, and a failure shows
+    // the server's own safe message instead of a fake success.
+    expect(source).toMatch(/await refreshCurrentAccount\(utils\)[\s\S]*?setSaveStatus\("saved"\)/);
+    expect(source).toMatch(/Save failed\. \$\{message\}/);
+    // The orphan screenshot of a failed write is cleaned up where safe.
+    expect(source).toMatch(/discardScreenshotDraft[\s\S]*?\.mutateAsync\(\{ accountId: account\.id, key: uploadedKey \}\)/);
+  });
+
+  it("populates the Trade Log only from the paginated server read", () => {
+    const source = readJournal();
+
+    expect(source).toMatch(/const pagedTrades = \(tradeListQuery\.data\?\.trades \?\? \[\]\) as any\[\];/);
+    expect(source).not.toContain("pendingRowsForView");
+    expect(source).not.toContain("serverPageTrades");
+  });
+
+  it("removes the legacy IndexedDB journal store once, without re-uploading local trades", () => {
+    const source = readJournal();
+
+    // A device that still holds the old local-first copy must not resurrect it
+    // and must not push it back to the backend as duplicate trades.
+    expect(source).toContain("purgeLegacyLocalJournalStore");
+    expect(source).toMatch(/useEffect\(\(\) => \{\s*void purgeLegacyLocalJournalStore\(\);/);
   });
 
   it("publishes every user-initiated switch through the shared account selection", () => {

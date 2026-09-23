@@ -420,7 +420,7 @@ function ScreenshotEvidence({ screenshot, setScreenshot, editing, removeScreensh
   );
 }
 
-export function TradeDialogWithCustomOptions({ open, setOpen, form, setForm, editing, onSave, pending, screenshot, setScreenshot, progress, plans, dayTrades, behaviorConfig }: any) {
+export function TradeDialogWithCustomOptions({ open, setOpen, form, setForm, editing, onSave, pending, saveState, saveError, screenshot, setScreenshot, progress, plans, dayTrades, behaviorConfig }: any) {
   const fileRef = useRef<HTMLInputElement>(null);
   // Removal intent belongs to the dialog, because the dialog is the surface that
   // knows which image is currently stored and whether the user asked to drop it.
@@ -444,7 +444,22 @@ export function TradeDialogWithCustomOptions({ open, setOpen, form, setForm, edi
     <ScreenshotEvidence screenshot={screenshot} setScreenshot={setScreenshot} editing={editing} removeScreenshot={removeStoredScreenshot} setRemoveScreenshot={setRemoveStoredScreenshot} progress={progress} uploading={pending && Boolean(screenshot)} fileRef={fileRef} />
     <Section title="Notes"><Field label="Trade notes" className="field-span-full"><Textarea value={form.notes} rows={4} placeholder="What happened, how you felt, lessons…" onChange={event => patch("notes", event.target.value)} /></Field></Section>
     <Section title="Emotions"><Field label="Before trade" className="field-span-full"><Textarea value={form.emotionBefore} placeholder="How were you feeling before entering? e.g. calm, focused, dar raha tha, nervous about news…" onChange={event => patch("emotionBefore", event.target.value)} /></Field><Field label="During trade" className="field-span-full"><Textarea value={form.emotionDuring} placeholder="What were you thinking while in the trade? e.g. confident in setup, wanted to exit early…" onChange={event => patch("emotionDuring", event.target.value)} /></Field><Field label="After trade" className="field-span-full"><Textarea value={form.emotionAfter} placeholder="How did you feel after closing? e.g. satisfied, frustrated, gussa aya, should have held longer…" onChange={event => patch("emotionAfter", event.target.value)} /></Field></Section>
-  </div><div className="dialog-actions"><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button disabled={pending} onClick={() => onSave({ removeScreenshot: removeStoredScreenshot })}>{pending ? "Saving…" : editing ? "Save changes" : "Save trade"}</Button></div>
+  </div>
+    {/*
+      The save state machine, reported by the page from the REAL backend write:
+      Idle -> Saving… -> Saved / Save failed. There is no local write and no
+      queue, so "Saved" is only ever shown after Supabase confirmed the row, and
+      a failure keeps the dialog open with the server's own reason.
+    */}
+    <div className="dialog-actions">
+      {saveState === "error" && saveError ? (
+        <p className="plan-save-error" role="alert">Save failed — {saveError}</p>
+      ) : null}
+      <Button variant="outline" disabled={pending} onClick={() => setOpen(false)}>Cancel</Button>
+      <Button disabled={pending} onClick={() => onSave({ removeScreenshot: removeStoredScreenshot })}>
+        {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : editing ? "Save changes" : "Save trade"}
+      </Button>
+    </div>
     {manageCategory ? (
       <Dialog open onOpenChange={next => { if (!next) setManageCategory(null); }}>
         <DialogContent className="option-manager-dialog"><DialogHeader><DialogTitle>Manage options</DialogTitle><DialogDescription>Rename, disable, or add options for this field. Changes apply to every trade form immediately.</DialogDescription></DialogHeader><TradeOptionManager variant="dialog" initialCategory={manageCategory} onClose={() => setManageCategory(null)} /></DialogContent>
