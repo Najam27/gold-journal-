@@ -40,6 +40,16 @@ import {
 
 const MAX_MONEY = 999_999_999_999.99;
 const optionalText = (max = 5000) => z.string().trim().max(max).optional().default("");
+// Free-form journal text.
+//
+// The trade journal stores whatever the trader actually wrote — a long mistake
+// explanation, a multi-sentence note, an imported MT5 comment, an emotional
+// write-up — so these fields deliberately carry NO character budget. A length
+// cap here was the reason editing a trade with a long Mistake/Notes value was
+// rejected by the server even though the UI accepted it. `.trim()` is the only
+// transformation applied: meaningful user text is never truncated or sliced,
+// on the way in or on the way out.
+const freeText = z.string().trim().optional().default("");
 const money = (min = -MAX_MONEY) => z.number().finite().min(min).max(MAX_MONEY);
 const timestampInput = z.number().finite().int().positive().max(8_640_000_000_000_000);
 const accountIdInput = z.object({ accountId: z.number().int().positive() });
@@ -67,7 +77,10 @@ const screenshotBase64Input = z.string().trim().min(40).max(7_000_000).regex(/^(
 const screenshotKeyInput = z.string().trim().min(1).max(500).nullable().optional();
 const screenshotNameInput = z.string().trim().min(1).max(255).nullable().optional();
 const pktDateInput = z.string().refine(isPktDateKey, "Use a valid PKT calendar date.");
-const analysisFiltersInput = z.object({ startDate: pktDateInput.nullable().optional(), endDate: pktDateInput.nullable().optional(), session: z.string().trim().max(40).nullable().optional(), timeframe: z.string().trim().max(20).nullable().optional(), level: z.string().trim().max(100).nullable().optional(), setup: z.string().trim().max(40).nullable().optional(), direction: z.enum(["BUY", "SELL"]).nullable().optional(), result: z.enum(["WIN", "LOSS", "BREAK_EVEN", "OPEN"]).nullable().optional() }).default({});
+// Analysis filters echo values the trader already stored on a trade row, so they
+// must accept exactly the same text a trade can hold. Bounding them would make a
+// trade with a long Level/Setup un-filterable in analysis.
+const analysisFiltersInput = z.object({ startDate: pktDateInput.nullable().optional(), endDate: pktDateInput.nullable().optional(), session: z.string().trim().nullable().optional(), timeframe: z.string().trim().nullable().optional(), level: z.string().trim().nullable().optional(), setup: z.string().trim().nullable().optional(), direction: z.enum(["BUY", "SELL"]).nullable().optional(), result: z.enum(["WIN", "LOSS", "BREAK_EVEN", "OPEN"]).nullable().optional() }).default({});
 const isFuturePktTimestamp = (timestamp: number, now = new Date()) => getPktDateKey(timestamp) > getPktDateKey(now);
 const canonicalPktPlanDate = (timestamp: number) => new Date(pktDateToTimestamp(getPktDateKey(timestamp)));
 const analysisInput = z.object({ accountId: z.number().int().positive(), filters: analysisFiltersInput });
@@ -94,28 +107,28 @@ const behaviorConfigInput = z.object({ maxTradesPerDay: z.number().int().min(1).
 const tradeInput = z.object({
   accountId: z.number().int().positive(),
   tradeDate: timestampInput,
-  session: z.string().min(1).max(40),
+  session: z.string().trim().min(1),
   direction: z.enum(["BUY", "SELL"]),
   result: z.enum(["WIN", "LOSS", "BREAK_EVEN", "OPEN"]),
-  level: optionalText(100),
-  timeframe: optionalText(20),
-  setupQuality: optionalText(40),
-  executionType: optionalText(80),
-  marketCondition: optionalText(40),
-  biasAlignment: optionalText(40),
-  confirmationType: optionalText(60),
-  slPlacement: optionalText(60),
-  tpPlacement: optionalText(60),
-  mistake: optionalText(80),
-  holdQuality: optionalText(60),
+  level: freeText,
+  timeframe: freeText,
+  setupQuality: freeText,
+  executionType: freeText,
+  marketCondition: freeText,
+  biasAlignment: freeText,
+  confirmationType: freeText,
+  slPlacement: freeText,
+  tpPlacement: freeText,
+  mistake: freeText,
+  holdQuality: freeText,
   patienceScore: z.number().int().min(1).max(5).nullable(),
   risk: money(0).nullable(),
   reward: money(0).nullable(),
   pnl: money(),
-  notes: optionalText(6000),
-  emotionBefore: optionalText(2000),
-  emotionDuring: optionalText(2000),
-  emotionAfter: optionalText(2000),
+  notes: freeText,
+  emotionBefore: freeText,
+  emotionDuring: freeText,
+  emotionAfter: freeText,
   planStatus: planStatusInput,
   planChecklist: planChecklistInput,
   mt5Ticket: mt5TicketInput,
@@ -407,7 +420,7 @@ export const goldRouter = router({
     }),
   }),
   trades: router({
-    list: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(50).default(12), search: z.string().trim().max(160).optional().default(""), result: z.enum(["WIN", "LOSS", "BREAK_EVEN", "OPEN"]).optional() })).query(async ({ ctx, input }) => {
+    list: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(50).default(12), search: z.string().trim().optional().default(""), result: z.enum(["WIN", "LOSS", "BREAK_EVEN", "OPEN"]).optional() })).query(async ({ ctx, input }) => {
       // Pure read: the Trade Log must render from the paginated trade list alone,
       // without waiting for MT5 reconciliation, analysis, or notifications.
       const account = await getOwnedAccount(ctx.user.id, input.accountId);
@@ -671,7 +684,7 @@ export const goldRouter = router({
       return rows.map(toTradeOptionView);
     }),
     add: protectedProcedure
-      .input(z.object({ category: z.string().trim().min(1).max(80), value: z.string().trim().min(1).max(160), active: z.boolean().optional().default(true) }))
+      .input(z.object({ category: z.string().trim().min(1).max(80), value: z.string().trim().min(1), active: z.boolean().optional().default(true) }))
       .mutation(async ({ ctx, input }) => {
         const definition = requireTradeOptionCategory(input.category);
         const value = input.value.trim();
@@ -698,7 +711,7 @@ export const goldRouter = router({
         return { success: true, option: toTradeOptionView(row) };
       }),
     rename: protectedProcedure
-      .input(z.object({ optionId: z.number().int().positive(), value: z.string().trim().min(1).max(160) }))
+      .input(z.object({ optionId: z.number().int().positive(), value: z.string().trim().min(1) }))
       .mutation(async ({ ctx, input }) => {
         const existing = await findOwnedTradeOption(ctx.user.id, input.optionId);
         if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "That option is no longer available. Reload the list and try again." });

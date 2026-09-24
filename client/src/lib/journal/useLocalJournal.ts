@@ -323,6 +323,12 @@ export function useLocalJournal(options: {
     pendingDeletedIds,
     syncState,
     pendingCount,
+    /**
+     * The real, safe reason the newest queued write failed to reach the backend
+     * (for example a validation message). Surfaced so the UI can explain WHY a
+     * save is not yet committed instead of showing a generic failure.
+     */
+    lastError: queued.find(item => item.lastError)?.lastError ?? null,
     online,
     queueMutation,
     flush,

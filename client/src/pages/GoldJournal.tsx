@@ -1383,6 +1383,18 @@ export default function GoldJournal() {
             <WifiOff size={15} /> You are offline — showing last synced data.
           </div>
         )}
+        {isOnline && localJournal.syncState === "failed" && (
+          <div className="offline-banner save-failed-banner" role="alert">
+            <RefreshCcw size={15} />
+            <span>
+              A journal change could not be saved to the server
+              {localJournal.lastError ? `: ${localJournal.lastError}` : ". Retrying automatically."}
+            </span>
+            <button type="button" onClick={() => void localJournal.flush()} disabled={localJournal.pendingCount === 0}>
+              Retry sync
+            </button>
+          </div>
+        )}
         {authMeError && (
           <AuthProfileRecovery
             error={authMeError}

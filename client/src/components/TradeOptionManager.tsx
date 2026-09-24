@@ -176,7 +176,6 @@ export function TradeOptionManager({
           <form className="trade-option-add" onSubmit={create}>
             <Input
               value={draft}
-              maxLength={definition.maxLength}
               aria-label={`Add custom ${definition.category} option`}
               placeholder={`+ Add ${definition.label} option`}
               onChange={event => {
@@ -264,7 +263,6 @@ export function TradeOptionManager({
             <Input
               id="trade-option-name"
               value={editValue}
-              maxLength={editing ? tradeOptionCategory(editing.category)?.maxLength ?? 160 : 160}
               autoFocus
               onChange={event => {
                 setEditValue(event.target.value);

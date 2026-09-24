@@ -65,10 +65,15 @@ describe("Trade Log option registry", () => {
     expect(tradeOptionDefaults("Not a category")).toEqual([]);
   });
 
-  it("validates option names against the category length budget", () => {
+  it("accepts option names of any length and rejects only an empty name or an unknown category", () => {
     expect(validateTradeOptionValue("Setup quality", "   ")).toBe("Enter a name for this option.");
     expect(validateTradeOptionValue("Setup quality", "A+ Institutional")).toBeNull();
-    expect(validateTradeOptionValue("Setup quality", "x".repeat(41))).toContain("at most 40 characters");
-    expect(validateTradeOptionValue("Trading rule", "x".repeat(161))).toContain("at most 160 characters");
+    // A long, descriptive label is a legitimate option — there is no character
+    // budget on free-text option names any more.
+    expect(validateTradeOptionValue("Setup quality", "x".repeat(41))).toBeNull();
+    expect(validateTradeOptionValue("Setup quality", "x".repeat(500))).toBeNull();
+    expect(validateTradeOptionValue("Trading rule", "x".repeat(161))).toBeNull();
+    // Category validation still rejects an unregistered category.
+    expect(validateTradeOptionValue("Not a category", "Anything")).toContain("not a manageable");
   });
 });

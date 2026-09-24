@@ -33,8 +33,6 @@ export type TradeOptionCategory = {
   defaults: readonly string[];
   /** Multi-select fields store a pipe-separated list. */
   multi: boolean;
-  /** Longest value the corresponding trade column can hold. */
-  maxLength: number;
   /** Trade form field this category feeds, when it feeds one. */
   field: TradeOptionField | null;
 };
@@ -61,7 +59,6 @@ export const TRADE_OPTION_CATEGORIES: readonly TradeOptionCategory[] = [
     description: "Trading sessions you record against a trade.",
     defaults: ["Pre-Asian", "Asian", "Post-Asian", "Pre-London", "London", "Post-London", "Pre-NY", "New York", "Post-NY"],
     multi: false,
-    maxLength: 40,
     field: "session",
   },
   {
@@ -71,7 +68,6 @@ export const TRADE_OPTION_CATEGORIES: readonly TradeOptionCategory[] = [
     description: "Levels and confluence models used for entries.",
     defaults: ["SBR/TJL1", "RBS/TJL1", "TJL2", "QML", "FIB", "LVL4", "LVL2"],
     multi: true,
-    maxLength: 100,
     field: "level",
   },
   {
@@ -81,7 +77,6 @@ export const TRADE_OPTION_CATEGORIES: readonly TradeOptionCategory[] = [
     description: "Chart timeframes you analyse a setup on.",
     defaults: ["1m", "5m", "15m", "H1", "4H"],
     multi: false,
-    maxLength: 20,
     field: "timeframe",
   },
   {
@@ -91,7 +86,6 @@ export const TRADE_OPTION_CATEGORIES: readonly TradeOptionCategory[] = [
     description: "Your setup grading scale. Rename A+ to match your own language.",
     defaults: ["A+", "A", "B"],
     multi: false,
-    maxLength: 40,
     field: "setupQuality",
   },
   {
@@ -101,7 +95,6 @@ export const TRADE_OPTION_CATEGORIES: readonly TradeOptionCategory[] = [
     description: "How the entry was actually executed.",
     defaults: ["Manual Direct", "Limit Order", "Stop Order", "Manual After Confirmation"],
     multi: false,
-    maxLength: 80,
     field: "executionType",
   },
   {
@@ -111,7 +104,6 @@ export const TRADE_OPTION_CATEGORIES: readonly TradeOptionCategory[] = [
     description: "The market context the trade was taken in.",
     defaults: ["Trending", "Ranging", "Volatile", "News-driven", "Low liquidity"],
     multi: true,
-    maxLength: 40,
     field: "marketCondition",
   },
   {
@@ -121,7 +113,6 @@ export const TRADE_OPTION_CATEGORIES: readonly TradeOptionCategory[] = [
     description: "Whether the trade agreed with your higher-timeframe bias.",
     defaults: ["Aligned", "Counter-trend", "Neutral"],
     multi: false,
-    maxLength: 40,
     field: "biasAlignment",
   },
   {
@@ -131,7 +122,6 @@ export const TRADE_OPTION_CATEGORIES: readonly TradeOptionCategory[] = [
     description: "Confirmation triggers that validated the entry.",
     defaults: ["BOS", "CHoCH", "Liquidity sweep", "Engulfing", "Rejection", "Displacement"],
     multi: true,
-    maxLength: 60,
     field: "confirmationType",
   },
   {
@@ -141,7 +131,6 @@ export const TRADE_OPTION_CATEGORIES: readonly TradeOptionCategory[] = [
     description: "Where the stop loss was placed.",
     defaults: ["Below swing", "Above swing", "Structure", "Fixed points"],
     multi: false,
-    maxLength: 60,
     field: "slPlacement",
   },
   {
@@ -151,7 +140,6 @@ export const TRADE_OPTION_CATEGORIES: readonly TradeOptionCategory[] = [
     description: "What the target was based on.",
     defaults: ["Prior high", "Prior low", "Liquidity", "R multiple"],
     multi: false,
-    maxLength: 60,
     field: "tpPlacement",
   },
   {
@@ -162,7 +150,6 @@ export const TRADE_OPTION_CATEGORIES: readonly TradeOptionCategory[] = [
       "The behavioural mistake taxonomy. Built-in tags can be renamed or disabled; psychology detection keeps matching their documented aliases.",
     defaults: MISTAKE_TAXONOMY.map(item => item.label),
     multi: true,
-    maxLength: 80,
     field: "mistake",
   },
   {
@@ -172,7 +159,6 @@ export const TRADE_OPTION_CATEGORIES: readonly TradeOptionCategory[] = [
     description: "How well the position was managed after entry.",
     defaults: ["Excellent", "Good", "Average", "Poor"],
     multi: false,
-    maxLength: 60,
     field: "holdQuality",
   },
   {
@@ -182,7 +168,6 @@ export const TRADE_OPTION_CATEGORIES: readonly TradeOptionCategory[] = [
     description: "Reusable rules used by the Plan & Execution checklists.",
     defaults: [],
     multi: true,
-    maxLength: 160,
     field: null,
   },
 ];
@@ -250,14 +235,20 @@ export function tradeOptionDefaults(category: string): readonly string[] {
   return TRADE_OPTION_CATEGORY_BY_CATEGORY[category]?.defaults ?? [];
 }
 
-/** Validates a value for a category, returning a helpful error or null. */
+/**
+ * Validates a value for a category, returning a helpful error or null.
+ *
+ * Only emptiness is rejected. An option label is free text — a trader may name a
+ * setup, a mistake, or a rule at whatever length the idea needs — so there is no
+ * character budget here. Duplicate detection (case/whitespace-insensitive, via
+ * `normalizeTradeOptionValue`) still runs, and the category must exist in the
+ * registry, so no invalid category can be injected.
+ */
 export function validateTradeOptionValue(category: string, value: string): string | null {
   const trimmed = String(value ?? "").trim();
   if (!trimmed) return "Enter a name for this option.";
-  const definition = TRADE_OPTION_CATEGORY_BY_CATEGORY[category];
-  const maxLength = definition?.maxLength ?? 160;
-  if (trimmed.length > maxLength) {
-    return `${definition?.label ?? category} options can be at most ${maxLength} characters.`;
+  if (!TRADE_OPTION_CATEGORY_BY_CATEGORY[category]) {
+    return `“${category}” is not a manageable Trade Log option category.`;
   }
   return null;
 }

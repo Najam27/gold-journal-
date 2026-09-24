@@ -123,7 +123,6 @@ function CustomSelect({
       <Input
         aria-label={`Add custom ${category} option`}
         value={draft}
-        maxLength={160}
         onChange={event => setDraft(event.target.value)}
         placeholder={`+ Add ${displayLabel} option`}
         onKeyDown={event => {
@@ -273,7 +272,6 @@ function MistakeTaxonomy({ value, onChange, store, onManage }: { value: string; 
         <Input
           aria-label="Add custom Mistake option"
           value={draft}
-          maxLength={70}
           onChange={event => setDraft(event.target.value)}
           placeholder="+ Add custom mistake tag"
           onKeyDown={event => {
@@ -442,8 +440,8 @@ export function TradeDialogWithCustomOptions({ open, setOpen, form, setForm, edi
     <Section title="Risk"><Field label="Planned risk $"><Input type="number" min="0" step="0.01" value={form.risk} onChange={event => patch("risk", event.target.value)} /></Field><Field label="Planned reward $"><Input type="number" min="0" step="0.01" value={form.reward} onChange={event => patch("reward", event.target.value)} /></Field><Field label="Actual P&amp;L $"><Input type="number" step="0.01" value={form.pnl} placeholder="Realized profit/loss" onChange={event => patch("pnl", event.target.value)} /></Field><div className="rr-live"><span>PLANNED R:R</span><strong className="data-text">{formatRr(form.risk, form.reward)}</strong></div><div className="rr-live"><span>ACTUAL R</span><strong className="data-text">{formatActualR(form.risk, form.pnl)}</strong></div></Section>
     <PlanLinkSection form={form} patch={patch} context={planContext} />
     <ScreenshotEvidence screenshot={screenshot} setScreenshot={setScreenshot} editing={editing} removeScreenshot={removeStoredScreenshot} setRemoveScreenshot={setRemoveStoredScreenshot} progress={progress} uploading={pending && Boolean(screenshot)} fileRef={fileRef} />
-    <Section title="Notes"><Field label="Trade notes" className="field-span-full"><Textarea value={form.notes} rows={4} placeholder="What happened, how you felt, lessons…" onChange={event => patch("notes", event.target.value)} /></Field></Section>
-    <Section title="Emotions"><Field label="Before trade" className="field-span-full"><Textarea value={form.emotionBefore} placeholder="How were you feeling before entering? e.g. calm, focused, dar raha tha, nervous about news…" onChange={event => patch("emotionBefore", event.target.value)} /></Field><Field label="During trade" className="field-span-full"><Textarea value={form.emotionDuring} placeholder="What were you thinking while in the trade? e.g. confident in setup, wanted to exit early…" onChange={event => patch("emotionDuring", event.target.value)} /></Field><Field label="After trade" className="field-span-full"><Textarea value={form.emotionAfter} placeholder="How did you feel after closing? e.g. satisfied, frustrated, gussa aya, should have held longer…" onChange={event => patch("emotionAfter", event.target.value)} /></Field></Section>
+    <Section title="Notes"><Field label="Trade notes" className="field-span-full"><Textarea className="journal-long-text" value={form.notes} rows={6} placeholder="What happened, how you felt, lessons… Write as much as the trade needs. Notes are never truncated." onChange={event => patch("notes", event.target.value)} /></Field></Section>
+    <Section title="Emotions"><Field label="Before trade" className="field-span-full"><Textarea className="journal-long-text" value={form.emotionBefore} rows={4} placeholder="How were you feeling before entering? e.g. calm, focused, dar raha tha, nervous about news…" onChange={event => patch("emotionBefore", event.target.value)} /></Field><Field label="During trade" className="field-span-full"><Textarea className="journal-long-text" value={form.emotionDuring} rows={4} placeholder="What were you thinking while in the trade? e.g. confident in setup, wanted to exit early…" onChange={event => patch("emotionDuring", event.target.value)} /></Field><Field label="After trade" className="field-span-full"><Textarea className="journal-long-text" value={form.emotionAfter} rows={4} placeholder="How did you feel after closing? e.g. satisfied, frustrated, gussa aya, should have held longer…" onChange={event => patch("emotionAfter", event.target.value)} /></Field></Section>
   </div><div className="dialog-actions"><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button disabled={pending} onClick={() => onSave({ removeScreenshot: removeStoredScreenshot })}>{pending ? "Saving…" : editing ? "Save changes" : "Save trade"}</Button></div>
     {manageCategory ? (
       <Dialog open onOpenChange={next => { if (!next) setManageCategory(null); }}>

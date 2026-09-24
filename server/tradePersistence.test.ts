@@ -609,6 +609,109 @@ describe("trade persistence against the database", () => {
   });
 });
 
+/* ------------------------------------------------------------------ *
+ * Free-form trade text: no arbitrary character limit, no silent truncation
+ * ------------------------------------------------------------------ */
+
+describe("unbounded trade text", () => {
+  // The exact sentinel the acceptance criteria name, wrapped around long filler
+  // so a value that survived only partially is obvious in a failure message.
+  const sentinel = (label: string) => `START-1234567890-${label}-${"x".repeat(220)}-END`;
+
+  it("saves a Mistake value far beyond the old 80-character limit", async () => {
+    const mistake = `Mistake ${"A".repeat(300)}`;
+    const created = await caller().trades.create(validTrade({ mistake, clientMutationId: "mutation-long-mistake-01" }) as any);
+
+    const page = await caller().trades.list({ accountId: ACCOUNT_A, page: 1, pageSize: 12, search: "" } as any);
+    expect(page.trades[0]).toMatchObject({ id: created.id, mistake });
+    expect((mocks.database.current.rows("gj_trades")[0] as Row).mistake).toBe(mistake);
+  });
+
+  it("saves Level, Execution type, Notes, and Emotions far beyond their old limits", async () => {
+    const trade = validTrade({
+      level: sentinel("LEVEL-CONFLUENCE"),
+      executionType: `${"E".repeat(200)}`,
+      notes: `${"N".repeat(5_000)}`,
+      emotionBefore: `${"B".repeat(1_200)}`,
+      emotionDuring: `${"D".repeat(1_200)}`,
+      emotionAfter: `${"F".repeat(1_200)}`,
+    });
+
+    const created = await caller().trades.create(trade as any);
+    const page = await caller().trades.list({ accountId: ACCOUNT_A, page: 1, pageSize: 12, search: "" } as any);
+
+    expect(page.trades[0]).toMatchObject({
+      id: created.id,
+      level: trade.level,
+      executionType: trade.executionType,
+      notes: trade.notes,
+      emotionBefore: trade.emotionBefore,
+      emotionDuring: trade.emotionDuring,
+      emotionAfter: trade.emotionAfter,
+    });
+  });
+
+  it("round-trips every free-text field with byte-for-byte equality (no truncation)", async () => {
+    const long = validTrade({
+      level: sentinel("LEVEL"),
+      timeframe: sentinel("TIMEFRAME"),
+      setupQuality: sentinel("SETUP"),
+      executionType: sentinel("EXECUTION"),
+      marketCondition: sentinel("MARKET"),
+      biasAlignment: sentinel("BIAS"),
+      confirmationType: sentinel("CONFIRMATION"),
+      slPlacement: sentinel("SL"),
+      tpPlacement: sentinel("TP"),
+      mistake: "START-1234567890-VERY-LONG-TRADE-MISTAKE-CONTENT-END",
+      holdQuality: sentinel("HOLD"),
+      notes: sentinel("NOTES"),
+      emotionBefore: sentinel("EMOTION-BEFORE"),
+      emotionDuring: sentinel("EMOTION-DURING"),
+      emotionAfter: sentinel("EMOTION-AFTER"),
+    });
+
+    const created = await caller().trades.create(long as any);
+    // A fresh caller with no in-memory state is the "reload" this must survive.
+    const page = await caller().trades.list({ accountId: ACCOUNT_A, page: 1, pageSize: 12, search: "" } as any);
+    const saved = page.trades.find((trade: any) => trade.id === created.id) as any;
+
+    for (const field of ["level", "timeframe", "setupQuality", "executionType", "marketCondition", "biasAlignment", "confirmationType", "slPlacement", "tpPlacement", "mistake", "holdQuality", "notes", "emotionBefore", "emotionDuring", "emotionAfter"] as const) {
+      expect(saved[field], field).toBe((long as any)[field]);
+    }
+  });
+
+  it("edits an existing trade to hold long text and keeps it after a reload", async () => {
+    // 1. A normal trade exists.
+    const created = await caller().trades.create(validTrade({ mistake: "FOMO entry", notes: "Short note." }) as any);
+
+    // 2-5. Open Edit, add a very long Mistake plus long text in several fields, save.
+    const longMistake = `Mistake A | Mistake B | ${sentinel("THIRD-MISTAKE")}`;
+    const update = validTrade({
+      tradeId: created.id,
+      mistake: longMistake,
+      level: sentinel("EDITED-LEVEL"),
+      executionType: sentinel("EDITED-EXECUTION"),
+      notes: sentinel("EDITED-NOTES"),
+      emotionAfter: sentinel("EDITED-EMOTION"),
+    });
+    const saved = await caller().trades.update(update as any);
+    expect(saved.success).toBe(true);
+
+    // 6-7. Reload and verify the exact text is still present.
+    const page = await caller().trades.list({ accountId: ACCOUNT_A, page: 1, pageSize: 12, search: "" } as any);
+    expect(page.trades[0]).toMatchObject({
+      id: created.id,
+      mistake: longMistake,
+      level: update.level,
+      executionType: update.executionType,
+      notes: update.notes,
+      emotionAfter: update.emotionAfter,
+    });
+    // The pipe-separated mistake format the psychology engine reads is preserved.
+    expect(longMistake).toContain(" | ");
+  });
+});
+
 describe("screenshot upload hardening", () => {
   it("rejects a payload whose bytes are not the declared image type", async () => {
     await expect(
