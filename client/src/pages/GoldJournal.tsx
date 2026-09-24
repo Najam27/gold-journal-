@@ -256,7 +256,7 @@ const defaultRules = [
   "Take screenshot for every trade. No exceptions.",
 ];
 export const MENTOR_LOCAL_KEY_NOTICE =
-  "Your Groq API key stays in this browser only, is never sent to Gold Journal servers or stored with journal data, and is read solely to call Groq directly from this device.";
+  "Your Gemini and Groq API keys stay in this browser only, are never sent to Gold Journal servers or stored with journal data, and are read solely to call the provider you configured directly from this device.";
 export function getMentorStorageKeys(_openId?: string | null) {
   return { storageKey: "", reportStorageKey: "" };
 }

@@ -12,8 +12,10 @@
 # URLs so email/magic-link callbacks return to the staging app.
 #
 # There is no AI provider secret and no AI job dispatcher on this Worker: AI
-# inference runs in the user's browser against their own Groq key, so staging and
-# production behave identically without any server-side AI credentials.
+# inference runs in the user's browser against their own Gemini or Groq key, so
+# staging and production behave identically without any server-side AI
+# credentials. Both are optional; total AI failure still renders the
+# deterministic report locally.
 
 name = "gold-journal-staging"
 main = "dist/worker/worker.js"

@@ -28,7 +28,7 @@
  * Nothing is hardcoded at a call site: every request path reads its budget from
  * `getAiRequestPolicy()`.
  */
-import { isStrictSchemaModel, normalizeGroqModelId, supportsReasoningEffort } from "./aiCore";
+import { isStrictSchemaModel, normalizeGeminiModelId, normalizeGroqModelId, supportsReasoningEffort, type AiProviderId } from "./aiCore";
 
 /**
  * Bumped whenever the *payload shape* changes. It participates in the AI cache
@@ -50,7 +50,16 @@ export const CHARS_PER_TOKEN = 3.2;
 /** Small fixed overhead per chat message envelope (role markers, separators). */
 const MESSAGE_OVERHEAD_TOKENS = 8;
 
-/** Central request policy. Every value is a budget expressed in estimated tokens. */
+/**
+ * Central request policy. Every value is a budget expressed in estimated tokens.
+ *
+ * `assumedTpmFloorTokens` is about **Groq**, which charges the prompt plus the
+ * reserved output against a per-minute token allowance and refuses an oversized
+ * request with HTTP 413. Google's Gemini API meters the free tier per request,
+ * not per token, so it is sized against its own, much larger allowance instead
+ * of inheriting Groq's conservative floor. Neither number is asserted at a call
+ * site: both flow through `getProviderRequestPolicy()`.
+ */
 export const AI_TOKEN_POLICY = {
   /**
    * Floor we size against until the provider states its own number. This is not a
@@ -92,6 +101,17 @@ export const AI_TOKEN_POLICY = {
 
   /** Upper bound on chunk requests for one analysis, so one action stays bounded. */
   maxChunkRequests: 4,
+} as const;
+
+/**
+ * Gemini's own sizing. Google meters the free tier in requests per minute (and a
+ * very large per-model token window), so a request is bounded by this app's own
+ * prompt ceiling and output reservation rather than by a per-minute token tier.
+ * The number exists so a roomier provider is not starved by Groq's 8K floor.
+ */
+export const GEMINI_TOKEN_POLICY = {
+  assumedAllowanceTokens: 250_000,
+  maxOutputTokens: 2_400,
 } as const;
 
 let workingAllowanceTokens: number = AI_TOKEN_POLICY.assumedTpmFloorTokens;
@@ -225,6 +245,32 @@ export function getAiRequestPolicy(model: string, allowanceTokens: number = getW
     reasoningEffort: supportsReasoningEffort(id) ? "low" : null,
     allowanceTokens,
   };
+}
+
+/**
+ * Gemini's request policy. Gemini accepts a native `responseSchema`, so it is
+ * always treated as a strictly structured model, and it is sized against its own
+ * allowance rather than Groq's learned (and much smaller) per-minute tier.
+ */
+export function getGeminiRequestPolicy(model: string, allowanceTokens: number = GEMINI_TOKEN_POLICY.assumedAllowanceTokens): AiRequestPolicy {
+  const id = normalizeGeminiModelId(model);
+  const maxOutputTokens = GEMINI_TOKEN_POLICY.maxOutputTokens;
+  return {
+    model: id,
+    maxInputTokens: budgetForAllowance(allowanceTokens, maxOutputTokens),
+    maxOutputTokens,
+    strictStructuredOutput: true,
+    reasoningEffort: null,
+    allowanceTokens,
+  };
+}
+
+/**
+ * The single provider-aware entry point: the request budget for whichever
+ * provider is about to be called. Call sites never branch on the provider id.
+ */
+export function getProviderRequestPolicy(provider: AiProviderId, model: string): AiRequestPolicy {
+  return provider === "gemini" ? getGeminiRequestPolicy(model) : getAiRequestPolicy(model);
 }
 
 /**

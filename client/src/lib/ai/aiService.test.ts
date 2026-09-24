@@ -1,17 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildAnalysis } from "@shared/analysisEngine";
-import { AI_SERVICE_VERSION, analysisDataFingerprint, isUsableGroqModelId, normalizeGroqModelId, pickPreferredGroqModel, rankGroqModels, stableHash16 } from "@shared/aiCore";
+import { AI_SERVICE_VERSION, aiReportSchema, analysisDataFingerprint, buildDeterministicReport, buildEvidenceManifest, isUsableGroqModelId, normalizeGroqModelId, pickPreferredGroqModel, rankGroqModels, stableHash16 } from "@shared/aiCore";
 import {
   AI_SETTINGS_STORAGE_KEY,
   clearAiSettings,
+  clearProviderSettings,
+  configuredProviderIds,
   memoryAiSettingsPersistence,
+  readAiProviderBundle,
   readAiSettings,
   readAiSettingsView,
   resetAiSettingsPersistence,
   saveAiSettings,
+  saveProviderSettings,
   setAiSettingsPersistence,
   subscribeAiSettings,
 } from "./aiStorage";
+import { GEMINI_BASE_URL } from "./geminiClient";
 import { AI_TOKEN_POLICY, getWorkingTokenAllowance, resetWorkingTokenAllowance } from "@shared/aiBudget";
 import { selectRepresentativeTrades } from "@shared/aiPayload";
 import { analyzeJournal, checkGroqConnection, clearAiCache, getAvailableGroqModels, isAiConfigured, resolveCompatibleModel, testAiConnection } from "./aiService";
@@ -177,7 +182,7 @@ describe("browser AI settings storage", () => {
     expect(isAiConfigured()).toBe(false);
   });
 
-  it("discards a legacy Gemini key so it is never mis-used against Groq, leaving AI unconfigured", () => {
+  it("migrates a legacy Gemini key into the dual-provider record instead of discarding a working credential", () => {
     const stored = new Map<string, string>([["gold-journal.ai.google:v1", JSON.stringify({ apiKey: "AIzaSyLegacyGeminiKey0123456789", model: "gemini-3.8-flash", updatedAt: 1 })]]);
     vi.stubGlobal("window", {
       localStorage: {
@@ -186,11 +191,13 @@ describe("browser AI settings storage", () => {
         removeItem: (key: string) => void stored.delete(key),
       },
     });
-    expect(readAiSettings()).toBeNull();
-    expect(isAiConfigured()).toBe(false);
+    expect(readAiSettings()).toMatchObject({ provider: "gemini", apiKey: "AIzaSyLegacyGeminiKey0123456789", model: "gemini-3.8-flash" });
+    expect(isAiConfigured()).toBe(true);
+    // The legacy namespace is cleared so the credential lives in exactly one place.
     expect(window.localStorage.getItem("gold-journal.ai.google:v1")).toBeNull();
-    // A Gemini key can never be silently reinterpreted as a Groq key.
-    expect(readAiSettings()?.apiKey ?? null).toBeNull();
+    // …and it is never reinterpreted as a Groq key.
+    expect(readAiSettings()?.provider).toBe("gemini");
+    expect(readAiProviderBundle().providers.groq ?? null).toBeNull();
   });
 
   it("discards a legacy OpenRouter key for the same reason", () => {
@@ -340,10 +347,13 @@ describe("browser analysis", () => {
     expect(JSON.parse(String(postCalls()[0][1]!.body)).model).toBe("openai/gpt-oss-120b");
   });
 
-  it("stops with a model error when the key has no usable chat model", async () => {
+  it("stops a provider with no usable chat model and still returns a complete deterministic report", async () => {
     const { postCalls } = stubGroq(() => providerResponse(signedReport()), () => modelsResponse([{ id: "whisper-large-v3" }]));
     const outcome = await analyzeJournal({ analysis });
-    expect(outcome.available).toBe(false);
+    // No provider answered, so the local report carries the result instead.
+    expect(outcome.available).toBe(true);
+    expect(outcome.deterministic).toBe(true);
+    expect(outcome.report).not.toBeNull();
     expect(outcome.errorCode).toBe("model_not_found");
     expect(outcome.message).toMatch(/AI settings/);
     expect(postCalls()).toHaveLength(0);
@@ -370,12 +380,15 @@ describe("browser analysis", () => {
     expect(postCalls()).toHaveLength(2);
   });
 
-  it("never serves a cached failure as a success", async () => {
+  it("never serves a cached failure as a success, and never caches a deterministic fallback", async () => {
     stubGroq(() => providerResponse({}, 401));
     const outcome = await analyzeJournal({ analysis });
-    expect(outcome.available).toBe(false);
+    expect(outcome.available).toBe(true);
+    expect(outcome.deterministic).toBe(true);
     expect(outcome.errorCode).toBe("invalid_key");
     expect(outcome.cached).toBe(false);
+    const again = await analyzeJournal({ analysis });
+    expect(again.cached).toBe(false);
   });
 
   it("honours an explicit model selection that the key can call", async () => {
@@ -384,25 +397,66 @@ describe("browser analysis", () => {
     expect(JSON.parse(String(postCalls()[0][1]!.body)).model).toBe("llama-3.3-70b-versatile");
   });
 
-  it("rejects malformed and ungrounded reports without breaking deterministic analysis", async () => {
+  it("never rejects the whole report for one bad optional insight", async () => {
+    // Unreadable JSON is a provider failure: the next provider (or the local
+    // report) takes over instead of the user losing everything.
     stubGroq(() => providerResponse("not json"));
     const malformed = await analyzeJournal({ analysis });
-    expect(malformed.available).toBe(false);
+    expect(malformed.available).toBe(true);
+    expect(malformed.deterministic).toBe(true);
+    expect(malformed.report).not.toBeNull();
     expect(malformed.errorCode).toBe("malformed_response");
 
+    // An ungrounded sentence is repaired, not fatal: the rest of the report is
+    // kept, the sentence is dropped, and the repair is disclosed.
     clearAiCache();
     stubGroq(() => providerResponse(signedReport({ executiveSummary: "999 trades prove this edge." })));
     const ungrounded = await analyzeJournal({ analysis });
-    expect(ungrounded.available).toBe(false);
-    expect(ungrounded.errorCode).toBe("ungrounded_response");
+    expect(ungrounded.available).toBe(true);
+    expect(ungrounded.deterministic).toBeFalsy();
+    expect(ungrounded.report).not.toBeNull();
+    expect(ungrounded.report?.executiveSummary ?? "").not.toContain("999");
+    expect((ungrounded.repairs ?? []).join(" ")).toMatch(/number the deterministic dataset does not contain/);
   });
 
-  it("reports a schema error when the structured response fails local validation", async () => {
+  it("keeps a thin AI answer as a valid report instead of reporting a validation failure", async () => {
     stubGroq(() => providerResponse({ executiveSummary: "only a summary" }));
     const outcome = await analyzeJournal({ analysis });
-    expect(outcome.available).toBe(false);
-    expect(outcome.errorCode).toBe("schema_error");
-    expect(outcome.report).toBeNull();
+    expect(outcome.available).toBe(true);
+    expect(outcome.errorCode).toBeUndefined();
+    expect(outcome.report?.executiveSummary).toBe("only a summary");
+    expect((outcome.repairs ?? []).join(" ")).toMatch(/cited no evidence row/);
+  });
+
+  it("overwrites an AI evidence claim with the verified deterministic values it references", async () => {
+    const { analysis: big, trades } = largeJournal(120);
+    saveAiSettings({ apiKey: KEY, model: MODEL });
+    const manifest = buildEvidenceManifest(big);
+    // A real context dimension — the payload's evidence list is what grounds it.
+    const cited = manifest.find(row => row.dimension === "session" && row.sample >= 5)!;
+    expect(cited).toBeDefined();
+    stubGroq(() =>
+      providerResponse(
+        signedReport({
+          strongestEdges: [
+            {
+              ...cited,
+              label: cited.context,
+              // The model tries to upgrade both the numbers and the confidence.
+              sample: cited.sample + 500,
+              expectancy: cited.expectancy + 500,
+              confidence: "HIGH",
+              claim: `${cited.context} is a proven edge.`,
+              evidence: "Journal evidence.",
+              claimType: "FACT",
+            },
+          ],
+        })
+      )
+    );
+    const outcome = await analyzeJournal({ analysis: big, trades });
+    expect(outcome.available).toBe(true);
+    expect(outcome.report?.strongestEdges[0]).toMatchObject({ evidenceId: cited.evidenceId, sample: cited.sample, expectancy: cited.expectancy, confidence: cited.confidence });
   });
 
   it("surfaces an invalid key distinctly from a provider outage", async () => {
@@ -423,7 +477,8 @@ describe("browser analysis", () => {
   it("gives up after the bounded number of transient attempts, and reports the provider error", async () => {
     const { postCalls } = stubGroq(() => providerResponse({}, 503));
     const outcome = await analyzeJournal({ analysis });
-    expect(outcome.available).toBe(false);
+    expect(outcome.available).toBe(true);
+    expect(outcome.deterministic).toBe(true);
     expect(outcome.errorCode).toBe("provider_error");
     // Explicit and small: the initial attempt plus two retries, then a failure.
     expect(postCalls()).toHaveLength(3);
@@ -534,7 +589,10 @@ describe("Groq request size control", () => {
     const { analysis, trades } = largeJournal(1_000);
     const { postCalls } = stubGroq(() => tooLarge(8_000));
     const outcome = await analyzeJournal({ analysis, trades });
-    expect(outcome.available).toBe(false);
+    // The AI request failed, but the report is still complete and local.
+    expect(outcome.available).toBe(true);
+    expect(outcome.deterministic).toBe(true);
+    expect(outcome.report).not.toBeNull();
     expect(outcome.errorCode).toBe("request_too_large");
     expect(postCalls().length).toBeLessThanOrEqual(2);
     // Groq's internal organization id never reaches the user.
@@ -621,9 +679,9 @@ describe("shared AI core", () => {
     expect(pickPreferredGroqModel([], "openai/gpt-oss-120b")).toBeNull();
   });
 
-  it("bumps a version when the request contract changes so cached Gemini reports cannot go stale", () => {
-    expect(AI_SERVICE_VERSION).toMatch(/^\d{4}-\d{2}-groq/);
-    expect(AI_SERVICE_VERSION).not.toMatch(/gemini|openrouter|openai/i);
+  it("bumps a version when the request contract changes so cached provider reports cannot go stale", () => {
+    expect(AI_SERVICE_VERSION).toMatch(/^\d{4}-\d{2}-dual-v\d+$/);
+    expect(AI_SERVICE_VERSION).not.toMatch(/openrouter|openai/i);
   });
 });
 
@@ -648,5 +706,136 @@ describe("AI failure states map onto distinct UI states", () => {
     expect(isModelError("model_unavailable")).toBe(true);
     expect(isModelError("provider_error")).toBe(false);
     expect(isModelError(null)).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Gemini + Groq dual-provider routing
+ * ------------------------------------------------------------------ */
+
+const GEMINI_KEY = "AIzaSyTestOnlyGeminiKey0123456789";
+const GEMINI_MODELS_PAGE = {
+  models: [
+    { name: "models/gemini-2.5-flash", displayName: "Gemini 2.5 Flash", supportedGenerationMethods: ["generateContent"] },
+    // Shares the same listing endpoint and must never be offered as a report model.
+    { name: "models/text-embedding-004", supportedGenerationMethods: ["embedContent"] },
+  ],
+};
+
+function geminiCompletion(content: unknown, status = 200) {
+  const body = status === 200
+    ? { candidates: [{ content: { parts: [{ text: typeof content === "string" ? content : JSON.stringify(content) }] }, finishReason: "STOP" }] }
+    : { error: { code: status, status: status === 429 ? "RESOURCE_EXHAUSTED" : status === 401 ? "UNAUTHENTICATED" : "INTERNAL", message: `gemini failure ${status}` } };
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+}
+
+/** Routes Gemini and Groq the way the real clients do, keeping both call logs. */
+function stubProviders(input: { geminiPost: () => Response; groqPost: () => Response }) {
+  const calls: Array<[string, RequestInit | undefined]> = [];
+  vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
+    const target = String(url);
+    calls.push([target, init]);
+    const method = (init?.method ?? "GET").toUpperCase();
+    if (target.startsWith(GEMINI_BASE_URL)) {
+      return Promise.resolve(method === "GET" ? new Response(JSON.stringify(GEMINI_MODELS_PAGE), { status: 200, headers: { "Content-Type": "application/json" } }) : input.geminiPost());
+    }
+    return Promise.resolve(method === "GET" ? modelsResponse() : input.groqPost());
+  }));
+  return {
+    geminiPosts: () => calls.filter(([url, init]) => url.startsWith(GEMINI_BASE_URL) && (init?.method ?? "").toUpperCase() === "POST"),
+    groqPosts: () => calls.filter(([url, init]) => url.startsWith(GROQ_CHAT_COMPLETIONS_URL) && (init?.method ?? "").toUpperCase() === "POST"),
+  };
+}
+
+describe("dual-provider routing", () => {
+  it("uses Gemini first when both keys are configured, and never contacts Groq", async () => {
+    saveProviderSettings("gemini", { apiKey: GEMINI_KEY, model: "gemini-2.5-flash" });
+    saveProviderSettings("groq", { apiKey: KEY, model: MODEL });
+    expect(configuredProviderIds()).toEqual(["gemini", "groq"]);
+    const { geminiPosts, groqPosts } = stubProviders({ geminiPost: () => geminiCompletion(signedReport()), groqPost: () => providerResponse(signedReport()) });
+    const outcome = await analyzeJournal({ analysis });
+    expect(outcome.available).toBe(true);
+    expect(outcome.provider).toBe("gemini");
+    expect(outcome.model).toBe("gemini-2.5-flash");
+    expect(geminiPosts()).toHaveLength(1);
+    expect(groqPosts()).toHaveLength(0);
+    // The Gemini key travels in a header, never in the URL or body.
+    const [url, init] = geminiPosts()[0];
+    expect(url).toContain("models/gemini-2.5-flash:generateContent");
+    expect(url).not.toContain(GEMINI_KEY);
+    expect(String(init!.body)).not.toContain(GEMINI_KEY);
+    expect((init!.headers as Record<string, string>)["x-goog-api-key"]).toBe(GEMINI_KEY);
+  });
+
+  it("falls back to Groq automatically when Gemini rejects the request", async () => {
+    saveProviderSettings("gemini", { apiKey: GEMINI_KEY, model: "gemini-2.5-flash" });
+    saveProviderSettings("groq", { apiKey: KEY, model: MODEL });
+    const { geminiPosts, groqPosts } = stubProviders({ geminiPost: () => geminiCompletion({}, 401), groqPost: () => providerResponse(signedReport()) });
+    const outcome = await analyzeJournal({ analysis });
+    expect(outcome.available).toBe(true);
+    expect(outcome.deterministic).toBeFalsy();
+    expect(outcome.provider).toBe("groq");
+    expect(outcome.report).not.toBeNull();
+    expect(outcome.providerErrors).toEqual([expect.objectContaining({ provider: "gemini", code: "invalid_key" })]);
+    // One Gemini attempt (an invalid key is never retried) and one Groq answer.
+    expect(geminiPosts()).toHaveLength(1);
+    expect(groqPosts()).toHaveLength(1);
+  });
+
+  it("falls back to Gemini automatically when Groq rejects the request", async () => {
+    saveProviderSettings("gemini", { apiKey: GEMINI_KEY, model: "gemini-2.5-flash" });
+    saveProviderSettings("groq", { apiKey: KEY, model: MODEL });
+    const { geminiPosts, groqPosts } = stubProviders({ geminiPost: () => geminiCompletion({}, 429), groqPost: () => providerResponse(signedReport()) });
+    const outcome = await analyzeJournal({ analysis });
+    expect(outcome.provider).toBe("groq");
+    expect(outcome.providerErrors?.[0]).toMatchObject({ provider: "gemini", code: "rate_limited" });
+    expect(geminiPosts()).toHaveLength(1);
+    expect(groqPosts()).toHaveLength(1);
+  });
+
+  it("returns a complete, schema-valid deterministic report when both providers fail", async () => {
+    saveProviderSettings("gemini", { apiKey: GEMINI_KEY, model: "gemini-2.5-flash" });
+    saveProviderSettings("groq", { apiKey: KEY, model: MODEL });
+    const { analysis: big, trades } = largeJournal(120);
+    stubProviders({ geminiPost: () => geminiCompletion({}, 401), groqPost: () => providerResponse({}, 401) });
+    const outcome = await analyzeJournal({ analysis: big, trades });
+    expect(outcome.available).toBe(true);
+    expect(outcome.deterministic).toBe(true);
+    expect(outcome.provider).toBeNull();
+    expect(outcome.errorCode).toBe("all_providers_failed");
+    expect(outcome.providerErrors?.map(item => item.provider)).toEqual(["gemini", "groq"]);
+    expect(aiReportSchema.safeParse(outcome.report).success).toBe(true);
+    expect(outcome.report?.strongestEdges.length).toBeGreaterThan(0);
+  });
+
+  it("uses the only configured provider without touching the other one", async () => {
+    saveProviderSettings("groq", { apiKey: KEY, model: MODEL });
+    clearProviderSettings("gemini");
+    expect(configuredProviderIds()).toEqual(["groq"]);
+    const { geminiPosts, groqPosts } = stubProviders({ geminiPost: () => geminiCompletion({}, 500), groqPost: () => providerResponse(signedReport()) });
+    const outcome = await analyzeJournal({ analysis });
+    expect(outcome.provider).toBe("groq");
+    expect(geminiPosts()).toHaveLength(0);
+    expect(groqPosts()).toHaveLength(1);
+  });
+
+  it("never rewrites one provider's saved model with another provider's model id", async () => {
+    saveProviderSettings("gemini", { apiKey: GEMINI_KEY, model: "gemini-2.5-flash" });
+    saveProviderSettings("groq", { apiKey: KEY, model: MODEL });
+    const { geminiPosts } = stubProviders({ geminiPost: () => geminiCompletion({}, 401), groqPost: () => providerResponse(signedReport()) });
+    const outcome = await analyzeJournal({ analysis, model: "gemini-2.5-flash" });
+    expect(outcome.provider).toBe("groq");
+    expect(geminiPosts()).toHaveLength(1);
+    // The Gemini model id only ever applied to Gemini.
+    expect(readAiProviderBundle().providers.groq?.model).toBe(MODEL);
+    expect(readAiProviderBundle().providers.gemini?.model).toBe("gemini-2.5-flash");
+  });
+
+  it("builds a schema-valid deterministic report from the local engine alone", () => {
+    const { analysis: big } = largeJournal(120);
+    const report = buildDeterministicReport(big, buildEvidenceManifest(big));
+    expect(aiReportSchema.safeParse(report).success).toBe(true);
+    expect(report.strongestEdges.length).toBeGreaterThan(0);
+    expect(report.executiveSummary).toContain("120");
   });
 });

@@ -8,13 +8,14 @@ describe("Options user AI provider settings", () => {
   it("keeps the raw key in a password field and never routes it through the backend", () => {
     expect(source).toContain('type="password"');
     expect(source).not.toContain("trpc");
-    expect(source).not.toContain("aiSettings.");
     expect(source).not.toContain("useMutation");
+    expect(source).not.toContain("aiSettings.");
   });
 
-  it("stores the credential in browser-local storage through the AI storage layer", () => {
-    expect(source).toContain("saveAiSettings");
-    expect(source).toContain("clearAiSettings");
+  it("stores every credential in browser-local storage through the AI storage layer", () => {
+    expect(source).toContain("saveProviderSettings");
+    expect(source).toContain("clearProviderSettings");
+    expect(source).toContain("readAiProviderBundle");
     expect(source).toContain("@/lib/ai/aiStorage");
     expect(source).not.toContain("sessionStorage");
   });
@@ -23,11 +24,18 @@ describe("Options user AI provider settings", () => {
     expect(source).toContain("Local storage is readable by JavaScript running on this site.");
   });
 
-  it("names Groq as the only provider and offers a real connection test", () => {
-    expect(source).toContain("Test Groq Connection");
-    expect(source).toContain("checkGroqConnection");
-    expect(source).toContain("AI_PROVIDER_LABEL");
-    expect(source).not.toMatch(/gemini|google ai|aistudio|openrouter|openai|anthropic/i);
+  it("offers both Gemini and Groq, each with a real connection test", () => {
+    expect(source).toContain('(["gemini", "groq"] as const)');
+    expect(source).toContain("testProviderConnection");
+    expect(source).toContain("ProviderConnectionStatus");
+    expect(source).toContain("AI_PROVIDER_META");
+    expect(source).toContain("ai-provider-card");
+    expect(source).not.toMatch(/openrouter|anthropic/i);
+  });
+
+  it("states the automatic fallback and the deterministic safety net", () => {
+    expect(source).toMatch(/falls back automatically/);
+    expect(source).toMatch(/deterministic\s+report is still shown/);
   });
 
   it("offers only the models the key can actually call, and never renders or URL-carries the raw key", () => {

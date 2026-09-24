@@ -4,14 +4,17 @@
  * The Groq credential lives exclusively in this browser. Nothing in this module
  * is ever sent to the Gold Journal backend.
  */
+import type { AiProviderId } from "@shared/aiCore";
 
 /**
- * Stable internal error codes. Every Groq HTTP status, network failure, and
+ * Stable internal error codes. Every provider HTTP status, network failure, and
  * local validation failure is normalized onto exactly one of these so the UI can
  * explain the real cause instead of a generic "provider error".
  */
 export type AiErrorCode =
   | "not_configured"
+  /** Every configured provider failed. A deterministic report is still shown. */
+  | "all_providers_failed"
   | "invalid_key"
   | "unauthorized"
   | "model_not_found"
@@ -52,15 +55,32 @@ export function aiErrorMessage(error: unknown): string {
 /** Stored locally: the key never leaves this browser. */
 export type AiSettings = { apiKey: string; model: string; updatedAt: number };
 
-/** What the UI is allowed to know about the stored credential. */
+/** What the UI is allowed to know about one provider's stored credential. */
+export type AiProviderSettingsView = {
+  id: AiProviderId;
+  configured: boolean;
+  model: string | null;
+  /** Masked identifier such as `gsk_••••••••abcd`. Never the full key. */
+  maskedKey: string | null;
+  updatedAt: number | null;
+};
+
+/** What the UI is allowed to know about the stored credentials. */
 export type AiSettingsView = {
   configured: boolean;
+  /** Active provider's model, or `null` when nothing is configured. */
   model: string | null;
   /** Masked identifier such as `gsk_••••••••abcd`. Never the full key. */
   maskedKey: string | null;
   updatedAt: number | null;
   /** True when this browser cannot persist settings (private mode etc.). */
   persistenceAvailable: boolean;
+  /** Per-provider status for the settings panel. Masked only. */
+  providers: AiProviderSettingsView[];
+  /** Fallback order; the first configured provider is tried first. */
+  priority: AiProviderId[];
+  /** The provider whose key analysis currently uses, or `null`. */
+  activeProvider: AiProviderId | null;
 };
 
 /** UI state machine for every AI surface. */
@@ -107,6 +127,7 @@ export function uiStateForErrorCode(code: AiErrorCode | null | undefined): AiUiS
     // retrying or changing model is the fix.
     case "malformed_response":
     case "ungrounded_response": return "schema_error";
+    case "all_providers_failed":
     case "provider_error":
     case null:
     case undefined:

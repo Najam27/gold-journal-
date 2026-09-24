@@ -17,7 +17,9 @@
 # (not a credential) and is safe in this file.
 #
 # There is no AI provider secret here on purpose: AI inference runs in the
-# user's browser against their own Groq key and never touches this Worker.
+# user's browser against their own Gemini or Groq key and never touches this
+# Worker. If both providers fail, the report falls back to deterministic local
+# analysis, so this Worker still needs no AI credential.
 
 name = "gold-journal"
 main = "dist/worker/worker.js"

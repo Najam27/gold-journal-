@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { formatMoney } from "@/lib/gold";
 import { openJournalView } from "@/lib/journalViewNavigation";
 import { trpc } from "@/lib/trpc";
+import { AI_PROVIDER_META } from "@shared/aiCore";
 import { AI_UI_COPY, analyzeJournal, type AiAnalysisOutcome } from "@/lib/ai/aiService";
 import { isModelError, isRequestSizeError, uiStateForErrorCode, type AiUiState } from "@/lib/ai/aiTypes";
 import { useAiSettings } from "@/lib/ai/useAiSettings";
@@ -152,7 +153,11 @@ function AiReport({ result }: { result: any }) {
   return (
     <div className="analysis-ai-report">
       <div className="analysis-ai-summary">
-        <span className="section-label">EVIDENCE-BOUND SUMMARY</span>
+        <span className="section-label">
+          {result.ai.deterministic
+            ? "DETERMINISTIC SUMMARY · NO AI PROVIDER USED"
+            : `EVIDENCE-BOUND SUMMARY · ${result.ai.model ?? "AI"}`}
+        </span>
         <p>{report.executiveSummary}</p>
       </div>
       <div className="analysis-ai-columns">
@@ -357,7 +362,9 @@ export function AnalysisDashboard({ accountId }: Props) {
         await saveAiReport.mutateAsync({
           accountId,
           filters,
-          model: outcome.model ?? "unknown",
+          // A deterministic report is labelled as such so history can tell the
+          // two apart without pretending a provider produced it.
+          model: outcome.deterministic ? "deterministic-local" : outcome.model ?? "unknown",
           report: outcome.report,
         });
       } catch {
@@ -875,10 +882,10 @@ export function AnalysisDashboard({ accountId }: Props) {
           <div className="analysis-ai-empty">
             <Bot size={20} />
             <div>
-              <strong>Groq is not configured in this browser.</strong>
+              <strong>No AI provider is configured in this browser.</strong>
               <p>
-                Add your own Groq API key in Options. The key stays in this
-                browser and requests go straight to Groq.
+                Add your own Google Gemini or Groq API key in Options. The key stays
+                in this browser and requests go straight to the provider.
               </p>
               <Button
                 variant="outline"
@@ -913,9 +920,9 @@ export function AnalysisDashboard({ accountId }: Props) {
           <div className="analysis-ai-empty ai-loading" role="status">
             <Bot size={20} />
             <p>
-              {aiStage ?? "Analyzing in your browser…"} This browser is calling
-              Groq directly, nothing is sent to Gold Journal servers, and you can
-              cancel at any time.
+              {aiStage ?? "Analyzing in your browser…"} This browser is calling your
+              configured AI provider directly, nothing is sent to Gold Journal
+              servers, and you can cancel at any time.
             </p>
           </div>
         )}
@@ -933,12 +940,12 @@ export function AnalysisDashboard({ accountId }: Props) {
               )}
               {isModelError(aiOutcome?.errorCode) && (
                 <Button variant="outline" size="sm" onClick={() => openJournalView("options")}>
-                  Pick an available Groq model
+                  Pick an available model
                 </Button>
               )}
               {aiOutcome?.errorCode === "invalid_key" && (
                 <Button variant="outline" size="sm" onClick={() => openJournalView("options")}>
-                  Fix Groq key
+                  Fix AI key
                 </Button>
               )}
               {isRequestSizeError(aiOutcome?.errorCode) && (
@@ -952,6 +959,33 @@ export function AnalysisDashboard({ accountId }: Props) {
         )}
         {aiOutcome && !aiRunning && aiOutcome.available && (
           <>
+            {aiOutcome.deterministic && (
+              <p className="analysis-warning" role="status">
+                No AI provider could produce a report, so this is the complete
+                deterministic report built from your own journal calculations.
+                {aiOutcome.providerErrors?.length
+                  ? ` Tried: ${aiOutcome.providerErrors
+                      .map(item => `${AI_PROVIDER_META[item.provider].label} (${item.code.replace(/_/g, " ")})`)
+                      .join(", ")}.`
+                  : ""}
+              </p>
+            )}
+            {!aiOutcome.deterministic && aiOutcome.providerErrors?.length ? (
+              <p className="analysis-warning" role="status">
+                Automatic fallback used:{" "}
+                {aiOutcome.provider
+                  ? AI_PROVIDER_META[aiOutcome.provider].label
+                  : "another provider"}{" "}
+                answered after{" "}
+                {aiOutcome.providerErrors.map(item => AI_PROVIDER_META[item.provider].label).join(", ")}{" "}
+                failed for this request.
+              </p>
+            ) : null}
+            {aiOutcome.repairs?.length ? (
+              <p className="muted" role="status">
+                {aiOutcome.repairs.join(" ")}
+              </p>
+            ) : null}
             {aiOutcome.modelRepairedFrom && (
               <p className="analysis-warning" role="status">
                 {aiOutcome.modelRepairedFrom} is no longer offered by Groq. This

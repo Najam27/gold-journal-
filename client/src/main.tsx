@@ -22,6 +22,7 @@ import "./risk-calculator.css";
 // The canonical trade presentation card (View Trade) — structure only, so it
 // renders identically to the share image and the PDF report.
 import "./trade-presentation.css";
+import "./ai-providers.css";
 
 const redirectToLoginIfUnauthorized = (error: unknown) => {
   if (!(error instanceof TRPCClientError)) return;
