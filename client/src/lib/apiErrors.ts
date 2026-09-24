@@ -35,7 +35,7 @@ export const API_ERROR_COPY: Record<ApiErrorCategory, ApiErrorCopy> = {
   },
   NETWORK_ERROR: {
     title: "The network connection failed",
-    guidance: "Check your connection and retry. Your locally queued changes are safe and will sync when the connection returns.",
+    guidance: "Check your connection and retry. Nothing is written to this browser before the server confirms it, so a trade that failed to save has to be saved again once you are back online.",
     retryable: true,
   },
   AUTH_ERROR: {

@@ -610,8 +610,38 @@ export const goldRouter = router({
         return { key: stored.key, name: input.fileName, url: stored.url };
       });
     }),
+    /**
+     * Discards a draft screenshot whose trade write never landed.
+     *
+     * Trade persistence is direct: the browser uploads the image first, receives
+     * the stable key, and then sends that key inside `trades.create`. If that
+     * write fails, the object would stay in private storage forever and the user
+     * would have "saved" an image for a trade that does not exist. The dialog now
+     * reports the save failure AND asks for this cleanup.
+     *
+     * It is deliberately narrow:
+     *   - the key must be inside the caller's own account folder (ownership is the
+     *     authorization, and the account is proven first);
+     *   - it must be an UNCLAIMED draft folder (`draft-<attempt id>/`), so this
+     *     procedure can never strip the evidence off a stored trade row;
+     *   - removal is best effort, exactly like every other storage cleanup.
+     */
+    discardScreenshotDraft: protectedProcedure.input(z.object({
+      accountId: z.number().int().positive(),
+      key: z.string().trim().min(1).max(500),
+    })).mutation(async ({ ctx, input }) => {
+      await getOwnedAccount(ctx.user.id, input.accountId);
+      assertOwnedScreenshotPath(input.key, ctx.user.openId, input.accountId);
+      if (!input.key.startsWith(`${screenshotPathPrefix(ctx.user.openId, input.accountId)}draft-`)) {
+        throw new Error("Only an unclaimed draft screenshot can be discarded.");
+      }
+      return { removed: await storageRemove(input.key) };
+    }),
   }),
   cash: router({
+    // Direct persistence, like trades: the browser sends the movement and the
+    // backend INSERTs it. `clientMutationId` stays supported for server-side
+    // idempotency, and the browser no longer queues anything locally.
     create: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), movementDate: timestampInput, type: z.enum(["DEPOSIT", "WITHDRAW"]), amount: money(0.01), note: optionalText(1000), clientMutationId: clientMutationIdInput })).mutation(async ({ ctx, input }) => {
       await getOwnedAccount(ctx.user.id, input.accountId);
       const db = await dbOrThrow();

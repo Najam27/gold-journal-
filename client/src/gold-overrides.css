@@ -101,10 +101,3 @@
 .trade-dialog .upload-box.evidence-existing img { width: 96px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid var(--gj-line); }
 .trade-dialog .upload-box.evidence-removed { border-color: color-mix(in srgb, #e0554f 55%, var(--gj-line)); }
 .trade-dialog .upload-box .evidence-actions { display: flex; gap: 8px; margin-left: auto; align-items: center; }
-
-/* Real backend reason for a failed journal write, shown instead of a generic
-   failure. The retry control re-drains the durable queue. */
-.save-failed-banner { background: #8c5a1f; }
-.save-failed-banner span { max-width: 780px; text-align: center; line-height: 1.45; }
-.save-failed-banner button { margin-left: 6px; padding: 3px 10px; border: 1px solid rgba(255,255,255,.45); border-radius: 6px; background: rgba(255,255,255,.14); color: white; font-size: 10px; cursor: pointer; }
-.save-failed-banner button:disabled { opacity: .55; cursor: default; }
