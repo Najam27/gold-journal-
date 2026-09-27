@@ -62,3 +62,42 @@ describe("deterministic mentor brief", () => {
     }
   });
 });
+
+describe("mentor brief · pre-trade circuit breaker", () => {
+  it("puts a STAND_DOWN tilt check first when recent trading demands a stop", () => {
+    const rows = [...Array(12)].map((_, i) => dated(i + 1, { pnl: 20 }));
+    const brief = buildMentorBrief(buildAnalysis(rows), {
+      tilt: { level: "STAND_DOWN", reasons: ["5 consecutive losses."], cooldownMinutes: 60, summary: "Stand down." },
+    });
+    expect(brief.insights[0]?.level).toBe("fix");
+    expect(brief.insights[0]?.title).toMatch(/Stand down/);
+    expect(brief.nextAction).toBe(brief.insights[0]?.action);
+  });
+
+  it("adds no pre-trade insight when the guard is clear", () => {
+    const rows = [...Array(12)].map((_, i) => dated(i + 1, { pnl: 20 }));
+    const brief = buildMentorBrief(buildAnalysis(rows), {
+      tilt: { level: "CLEAR", reasons: [], cooldownMinutes: null, summary: "Clear." },
+    });
+    expect(brief.insights.some(item => item.title.includes("Pre-trade"))).toBe(false);
+  });
+});
+
+describe("mentor brief · cost of indiscipline", () => {
+  it("flags unplanned trading when it underperforms the plan", () => {
+    const rows = [
+      ...[...Array(6)].map((_, i) => dated(i + 1, { pnl: 30, planStatus: "PLANNED" })),
+      ...[...Array(6)].map((_, i) => dated(7 + i, { result: "LOSS", pnl: -20, planStatus: "UNPLANNED" })),
+    ];
+    const brief = buildMentorBrief(buildAnalysis(rows));
+    const insight = brief.insights.find(item => item.title === "Trading outside the plan is taxed");
+    expect(insight?.level).toBe("fix");
+    expect(insight?.evidence).toMatch(/6 planned/);
+  });
+
+  it("stays quiet when too few trades are evaluated", () => {
+    const rows = [...Array(12)].map((_, i) => dated(i + 1, { pnl: 20 }));
+    const brief = buildMentorBrief(buildAnalysis(rows));
+    expect(brief.insights.some(item => item.title.includes("outside the plan"))).toBe(false);
+  });
+});

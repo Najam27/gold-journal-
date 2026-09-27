@@ -1659,6 +1659,7 @@ export default function GoldJournal() {
                   stats={stats}
                   account={account}
                   user={user}
+                  behaviorConfig={behaviorConfig}
                 />
               </div>
             )}

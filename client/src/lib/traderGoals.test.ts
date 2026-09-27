@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assessTraderGoal } from "./traderGoals";
+import { assessTraderGoal, goalPortfolioBalance } from "./traderGoals";
 import { encodeGoalControl } from "@shared/goalStrategy";
 
 const now = new Date("2026-08-12T12:00:00Z");
@@ -66,5 +66,38 @@ describe("professional trader goal assessment", () => {
     ];
     const pf = assessTraderGoal({ id: 40, name: "PF", period: "DAILY", metric: "profit_factor", comparison: "GTE", target: "1.5", active: true }, winners, [], now);
     expect(pf).toMatchObject({ value: Infinity, current: "∞", status: "MET", percentage: 100 });
+  });
+});
+
+const goal = (id: number, metric: string, active = true) => ({
+  id, name: metric, period: "WEEKLY" as const, metric, comparison: "GTE" as const,
+  target: "1", active,
+});
+
+describe("goal portfolio balance", () => {
+  it("warns when the list is dominated by outcome goals", () => {
+    const goals = [goal(1, "net_pnl"), goal(2, "win_rate"), goal(3, "profit_factor"), goal(4, "screenshot_rate")];
+    const balance = goalPortfolioBalance(goals);
+    expect(balance.verdict).toBe("OUTCOME_HEAVY");
+    expect(balance.outcomeShare).toBe(0.75);
+    expect(balance.message).toMatch(/overtrading/);
+  });
+
+  it("calls a healthy mix balanced", () => {
+    const goals = [goal(1, "net_pnl"), goal(2, "strategy_compliance"), goal(3, "daily_loss"), goal(4, "screenshot_rate")];
+    const balance = goalPortfolioBalance(goals);
+    expect(balance.verdict).toBe("BALANCED");
+    expect(balance.process).toBe(3);
+    expect(balance.outcome).toBe(1);
+  });
+
+  it("nudges a process-only list to add one outcome goal", () => {
+    const balance = goalPortfolioBalance([goal(1, "strategy_compliance"), goal(2, "daily_loss")]);
+    expect(balance.verdict).toBe("PROCESS_ONLY");
+  });
+
+  it("ignores inactive goals and handles an empty list", () => {
+    expect(goalPortfolioBalance([goal(1, "net_pnl", false)]).verdict).toBe("NO_GOALS");
+    expect(goalPortfolioBalance([]).total).toBe(0);
   });
 });

@@ -164,3 +164,31 @@ describe("deterministic analysis engine", () => {
     expect(row.evidenceTier).toBe("REPEATABLE EDGE");
   });
 });
+
+describe("trade-option attribution", () => {
+  it("ranks market conditions, execution types, and bias alignment like other dimensions", () => {
+    const rows = [
+      ...[...Array(8)].map((_, i) => trade({ tradeDate: new Date(Date.UTC(2026, 0, i + 1)), marketCondition: "Trending", executionType: "Limit Order", biasAlignment: "Aligned", pnl: 20 })),
+      ...[...Array(8)].map((_, i) => trade({ tradeDate: new Date(Date.UTC(2026, 0, 9 + i)), marketCondition: "Ranging", executionType: "Manual Direct", biasAlignment: "Counter-trend", result: "LOSS", pnl: -10 })),
+    ];
+    const analysis = buildAnalysis(rows);
+    const trending = analysis.marketConditions.find(row => row.label === "Trending");
+    expect(trending?.sample).toBe(8);
+    expect(trending?.expectancy).toBe(20);
+    const limit = analysis.executionTypes.find(row => row.label === "Limit Order");
+    expect(limit?.expectancy).toBe(20);
+    const counter = analysis.biasAlignments.find(row => row.label === "Counter-trend");
+    expect(counter?.expectancy).toBe(-10);
+    expect(analysis.confirmations).toEqual([]);
+  });
+
+  it("lets option dimensions surface in edge candidates and the weak card", () => {
+    const rows = [
+      ...[...Array(10)].map((_, i) => trade({ tradeDate: new Date(Date.UTC(2026, 0, i + 1)), marketCondition: "News-driven", result: "LOSS", pnl: -12 })),
+      ...[...Array(10)].map((_, i) => trade({ tradeDate: new Date(Date.UTC(2026, 0, 11 + i)), marketCondition: "Trending", pnl: 18 })),
+    ];
+    const analysis = buildAnalysis(rows);
+    // The weakest context should be identifiable as the news-driven leak.
+    expect(analysis.edgeCards.weak?.label).toBe("News-driven");
+  });
+});

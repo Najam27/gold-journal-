@@ -429,3 +429,59 @@ export function calculateRisk(
   result.valid = errors.length === 0 && result.lots >= spec.volumeMin;
   return result;
 }
+
+/**
+ * Kelly criterion: the mathematically optimal fraction of capital to risk
+ * per bet given a known edge. f* = p - q / b, where p = win rate,
+ * q = 1 - p, b = avg win / avg loss (as a multiple).
+ *
+ * Professionals almost never trade full Kelly — the swings are brutal.
+ * Half Kelly keeps ~75% of the growth with roughly half the volatility,
+ * which is what this helper recommends.
+ *
+ * Inputs are in R multiples (avgWinR, avgLossR as positive numbers), the
+ * same units the journal already speaks. Returns null when the inputs
+ * describe no edge — in which case the only professional answer is
+ * minimum size.
+ */
+export interface KellySizing {
+  /** Full Kelly fraction of capital (0-1). */
+  fullKelly: number;
+  /** Half Kelly fraction of capital (0-1) — the recommended ceiling. */
+  halfKelly: number;
+  /** Suggested risk percent, i.e. half Kelly expressed as a percent. */
+  suggestedRiskPercent: number;
+}
+
+export function kellySizing(winRate: number, avgWinR: number, avgLossR: number): KellySizing | null {
+  if (!Number.isFinite(winRate) || winRate <= 0 || winRate >= 1) return null;
+  if (!Number.isFinite(avgWinR) || avgWinR <= 0) return null;
+  if (!Number.isFinite(avgLossR) || avgLossR <= 0) return null;
+  const p = winRate;
+  const q = 1 - p;
+  const b = avgWinR / avgLossR;
+  const fullKelly = p - q / b;
+  // No edge (or a negative one): Kelly says bet nothing.
+  if (!(fullKelly > 0)) return null;
+  // Cap the recommendation: even a huge edge doesn't justify risking the
+  // farm on one idea. 25% of capital per trade is already professional
+  // recklessness; the cap keeps the math honest without endorsing ruin.
+  const capped = Math.min(fullKelly, 0.25);
+  const halfKelly = capped / 2;
+  return { fullKelly: round4(fullKelly), halfKelly: round4(halfKelly), suggestedRiskPercent: round4(halfKelly * 100) };
+}
+
+function round4(value: number): number {
+  return Math.round(value * 10000) / 10000;
+}
+
+/**
+ * Consecutive-loss budget: how many full-stop losses fit inside a loss
+ * limit (daily or weekly). A pro knows this number before the session —
+ * it turns "I'll stop when it feels bad" into "I stop after N".
+ */
+export function consecutiveLossBudget(lossLimit: number, riskPerTrade: number): number | null {
+  if (!Number.isFinite(lossLimit) || lossLimit <= 0) return null;
+  if (!Number.isFinite(riskPerTrade) || riskPerTrade <= 0) return null;
+  return Math.max(1, Math.floor(lossLimit / riskPerTrade));
+}

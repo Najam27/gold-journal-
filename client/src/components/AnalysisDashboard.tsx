@@ -23,6 +23,7 @@ import type {
   AnalysisResult,
   MetricRow,
 } from "@shared/analysisEngine";
+import { buildPlaybook, type PlaybookCard } from "@shared/playbook";
 
 type Props = { accountId?: number; trades?: unknown[] };
 const money = (value: number | null) =>
@@ -115,6 +116,69 @@ function MetricTable({
     </section>
   );
 }
+
+function PlaybookCardView({ card, tone }: { card: PlaybookCard; tone: "trade" | "avoid" }) {
+  return (
+    <article className={`edge-callout ${tone === "trade" ? "strong" : "weak"}`}>
+      <div>
+        <span>
+          {card.dimension.toUpperCase()} &middot; {card.evidenceTier}
+        </span>
+        <strong>{card.label}</strong>
+        <p>{card.headline}</p>
+        <p>
+          <b>Playbook rule:</b> {card.action}
+        </p>
+        <small>
+          {card.sample} trades &middot; {card.winRate.toFixed(0)}% win rate
+          {card.profitFactor != null && Number.isFinite(card.profitFactor)
+            ? ` \u00b7 PF ${card.profitFactor.toFixed(2)}`
+            : ""}
+        </small>
+      </div>
+    </article>
+  );
+}
+
+/**
+ * The trader's playbook: contexts to size up on, contexts to starve.
+ * Deterministic - the same journal always yields the same two lists.
+ */
+function PlaybookSection({ analysis }: { analysis: AnalysisResult }) {
+  const playbook = useMemo(() => buildPlaybook(analysis), [analysis]);
+  if (!playbook.trade.length && !playbook.avoid.length) {
+    return (
+      <section aria-label="Playbook">
+        <span className="section-label">YOUR PLAYBOOK</span>
+        <p className="edge-empty">{playbook.note}</p>
+      </section>
+    );
+  }
+  return (
+    <section aria-label="Playbook">
+      <span className="section-label">YOUR PLAYBOOK - TRADE THE LIST, NOT YOUR MOOD</span>
+      <div className="analysis-ai-columns">
+        <section aria-label="Trade more of this">
+          <span className="section-label">TRADE MORE OF THIS</span>
+          {playbook.trade.map(card => (
+            <PlaybookCardView key={`${card.dimension}-${card.label}`} card={card} tone="trade" />
+          ))}
+        </section>
+        <section aria-label="Stop bleeding here">
+          <span className="section-label">STOP BLEEDING HERE</span>
+          {playbook.avoid.length ? (
+            playbook.avoid.map(card => (
+              <PlaybookCardView key={`${card.dimension}-${card.label}`} card={card} tone="avoid" />
+            ))
+          ) : (
+            <p className="edge-empty">No context is bleeding badly enough to ban - yet.</p>
+          )}
+        </section>
+      </div>
+    </section>
+  );
+}
+
 
 function EdgeCard({ label, row }: { label: string; row: MetricRow | null }) {
   return (
@@ -672,6 +736,7 @@ export function AnalysisDashboard({ accountId }: Props) {
         />
         <EdgeCard label="BEST R-MULTIPLE" row={analysis.edgeCards.bestR} />
       </section>
+      <PlaybookSection analysis={analysis} />
       <MetricTable title="SESSION ANALYSIS" rows={analysis.sessions} />
       <MetricTable title="TIMEFRAME ANALYSIS" rows={analysis.timeframes} />
       <MetricTable title="LEVEL ANALYSIS" rows={analysis.levels} />

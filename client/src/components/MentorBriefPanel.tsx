@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { AlertTriangle, CheckCircle2, Compass, Eye } from "lucide-react";
 import { buildMentorBrief, type MentorInsight, type MentorInsightLevel } from "@shared/mentorEngine";
+import type { TiltAssessment } from "@shared/tiltGuard";
 import type { AnalysisResult } from "@shared/analysisEngine";
 
 const LEVEL_META: Record<MentorInsightLevel, { icon: typeof Eye; label: string }> = {
@@ -33,8 +34,8 @@ function InsightCard({ insight }: { insight: MentorInsight }) {
  * journal's own aggregates. It needs no AI key, never invents a number, and is
  * the same brief the AI Mentor receives as grounding when it is available.
  */
-export function MentorBriefPanel({ analysis }: { analysis: AnalysisResult | null | undefined }) {
-  const brief = useMemo(() => (analysis ? buildMentorBrief(analysis) : null), [analysis]);
+export function MentorBriefPanel({ analysis, tilt }: { analysis: AnalysisResult | null | undefined; tilt?: TiltAssessment | null }) {
+  const brief = useMemo(() => (analysis ? buildMentorBrief(analysis, tilt ? { tilt } : {}) : null), [analysis, tilt]);
   if (!brief) return null;
   return (
     <section className="analysis-ai-report" aria-label="Mentor brief">

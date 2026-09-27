@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Bot, ShieldAlert } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { formatMoney } from "@/lib/gold";
@@ -9,19 +9,42 @@ import { isModelError, isRequestSizeError, uiStateForErrorCode, type AiUiState }
 import { Button } from "@/components/ui/button";
 import { RiskMetric } from "@/components/journalPrimitives";
 import { MentorBriefPanel } from "@/components/MentorBriefPanel";
+import { assessTiltRisk } from "@shared/tiltGuard";
 import type { AnalysisResult } from "@shared/analysisEngine";
+import type { BehaviorConfig } from "@/lib/psychology";
 
 /**
  * The AI Mentor view: deterministic mentor brief (no key needed) plus the
  * optional evidence-bound AI edge analyst. Extracted from the journal page so
  * the page stays a router, not a 3,300-line god component.
  */
-export function MentorView({ account }: any) {
+export function MentorView({ account, behaviorConfig }: { account?: any; behaviorConfig?: Partial<BehaviorConfig> }) {
   const aiSettings = useAiSettings();
   const behaviorEvidence = trpc.analysis.get.useQuery(
     { accountId: account?.id ?? 0, filters: {} },
     { enabled: Boolean(account?.id), staleTime: 30_000, refetchOnWindowFocus: false }
   );
+  // Pre-trade circuit breaker: the 30 most recent trades, newest first from the
+  // server, re-sorted chronologically inside the guard.
+  const recentTrades = trpc.trades.list.useQuery(
+    { accountId: account?.id ?? 0, page: 1, pageSize: 30 },
+    { enabled: Boolean(account?.id), staleTime: 30_000, refetchOnWindowFocus: false }
+  );
+  const tilt = useMemo(() => {
+    const list = (recentTrades.data as any)?.trades as any[] | undefined;
+    if (!list?.length) return null;
+    return assessTiltRisk(
+      list.map(trade => ({
+        tradeDate: trade.tradeDate,
+        closeTime: trade.closeTime,
+        result: trade.result,
+        pnl: trade.pnl,
+        risk: trade.risk,
+        behaviors: trade.mistake,
+      })),
+      { dailyLossLimit: behaviorConfig?.maxDailyLoss ?? null }
+    );
+  }, [recentTrades.data, behaviorConfig?.maxDailyLoss]);
   const saveAiReport = trpc.analysis.saveAiReport.useMutation();
   const [ai, setAi] = useState<AiAnalysisOutcome | null>(null);
   const [mentorUiState, setMentorUiState] = useState<AiUiState>("ready");
@@ -95,7 +118,7 @@ export function MentorView({ account }: any) {
         </div>
       </section>
       {behaviorEvidence.data ? (
-        <MentorBriefPanel analysis={behaviorEvidence.data as unknown as AnalysisResult} />
+        <MentorBriefPanel analysis={behaviorEvidence.data as unknown as AnalysisResult} tilt={tilt} />
       ) : null}
       <section className="panel mentor-run">
         <div className="mentor-icon">

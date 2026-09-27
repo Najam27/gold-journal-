@@ -68,3 +68,61 @@ export function assessTraderGoal(goal: TraderGoal, trades: GoalTrade[], plans: G
   const remaining = isLossFloor ? Math.max(0, value - target) : goal.comparison === "GTE" ? Math.max(0, target - value) : Math.max(0, target - value); const periodLabel = goal.period === "DAILY" ? "today (PKT)" : goal.period === "WEEKLY" ? "this week (PKT)" : "this month (PKT)";
   return { goal, config, value, target, rows: rows.length, periodRows: periodRows.length, hasActivity, status, percentage: usage, remaining, periodLabel, category: goalCategory(goal.metric), metricLabel: goalMetricLabel(goal.metric), action: goalAction(goal.metric), scopeLabel: scopeLabel(config.strategy), current: formatGoalValue(goal.metric, value), targetLabel: formatGoalValue(goal.metric, target), remainingLabel: formatGoalValue(goal.metric, remaining) };
 }
+
+/**
+ * Goal portfolio balance: are you steering outcomes or process?
+ *
+ * A mentor's rule of thumb — you cannot directly control P&L, win rate, or
+ * profit factor; you can only control the behaviours that produce them. A
+ * goal list dominated by outcome metrics ("make $500/day") breeds
+ * overtrading and oversized bets. A list weighted toward process and safety
+ * ("follow the plan on 90% of trades", "stop at -$200") produces the
+ * outcomes as a side effect.
+ *
+ * Classification: PERFORMANCE metrics are outcomes; CAPITAL SAFETY and
+ * EXECUTION DISCIPLINE are process (guardrails and behaviours you control).
+ */
+export type GoalBalanceVerdict = "NO_GOALS" | "BALANCED" | "OUTCOME_HEAVY" | "PROCESS_ONLY";
+
+export interface GoalPortfolioBalance {
+  total: number;
+  outcome: number;
+  process: number;
+  outcomeShare: number;
+  processShare: number;
+  verdict: GoalBalanceVerdict;
+  message: string;
+}
+
+export function goalPortfolioBalance(goals: TraderGoal[]): GoalPortfolioBalance {
+  const active = goals.filter(goal => goal.active);
+  const outcome = active.filter(goal => goalCategory(goal.metric) === "PERFORMANCE").length;
+  const process = active.length - outcome;
+  const outcomeShare = active.length ? outcome / active.length : 0;
+
+  let verdict: GoalBalanceVerdict;
+  let message: string;
+  if (!active.length) {
+    verdict = "NO_GOALS";
+    message = "No active goals. Start with one process goal (e.g. plan compliance) before adding any outcome target.";
+  } else if (outcomeShare > 0.6) {
+    verdict = "OUTCOME_HEAVY";
+    message = `${Math.round(outcomeShare * 100)}% of your goals are outcomes you can't directly control (P&L, win rate). Outcome-heavy lists breed overtrading — add process goals (plan compliance, risk-defined rate, max trades) and let the outcomes follow.`;
+  } else if (outcome === 0) {
+    verdict = "PROCESS_ONLY";
+    message = `All ${process} goals are process and safety — excellent discipline hygiene. Consider adding one outcome goal so you can verify the process actually pays.`;
+  } else {
+    verdict = "BALANCED";
+    message = `${process} process/safety goals against ${outcome} outcome goal${outcome === 1 ? "" : "s"} — a healthy mix. You steer what you control and measure what it produces.`;
+  }
+
+  return {
+    total: active.length,
+    outcome,
+    process,
+    outcomeShare,
+    processShare: active.length ? process / active.length : 0,
+    verdict,
+    message,
+  };
+}

@@ -12,6 +12,7 @@
  * - Every claim carries its evidence string so the trader can verify it.
  */
 import type { AnalysisResult, MetricRow } from "./analysisEngine";
+import type { TiltAssessment } from "./tiltGuard";
 
 export type MentorInsightLevel = "strength" | "watch" | "fix";
 
@@ -47,12 +48,29 @@ function readinessFor(sample: number): MentorBrief["readiness"] {
 /**
  * Builds the brief. Pure and deterministic: the same analysis always yields the
  * same brief, which is what makes it safe to show before any AI is involved.
+ *
+ * Pass a tilt assessment (from `assessTiltRisk` over recent trades) to add the
+ * pre-trade circuit-breaker check at the top of the brief.
  */
-export function buildMentorBrief(analysis: AnalysisResult): MentorBrief {
+export function buildMentorBrief(analysis: AnalysisResult, opts: { tilt?: TiltAssessment } = {}): MentorBrief {
   const overview = analysis.overview;
   const sample = overview.sample;
   const readiness = readinessFor(sample);
   const insights: MentorInsight[] = [];
+
+  // 0. Pre-trade circuit breaker — the most time-sensitive insight goes first.
+  const tilt = opts.tilt;
+  if (tilt && tilt.level !== "CLEAR") {
+    insights.push({
+      level: tilt.level === "STAND_DOWN" ? "fix" : "watch",
+      title: tilt.level === "STAND_DOWN" ? "Stand down — do not trade" : "Pre-trade check: caution",
+      message: tilt.summary,
+      action: tilt.level === "STAND_DOWN"
+        ? `Close the platform for at least ${tilt.cooldownMinutes ?? 60} minutes. ${tilt.reasons[0] ?? ""}`
+        : `Take ${tilt.cooldownMinutes ?? 15} minutes away from the charts, then re-read today's plan before any entry. ${tilt.reasons[0] ?? ""}`,
+      evidence: tilt.reasons.join(" "),
+    });
+  }
 
   // 1. Sample honesty — the first lesson every newbie needs.
   if (readiness === "COLLECTING") {
@@ -208,7 +226,31 @@ export function buildMentorBrief(analysis: AnalysisResult): MentorBrief {
     });
   }
 
-  // 11. Journal quality — the analysis is only as good as the data.
+  // 11. The price of indiscipline — planned vs unplanned P&L.
+  const deviation = analysis.planDeviation;
+  if (deviation && deviation.unplannedTrades >= 5 && deviation.plannedTrades >= 5) {
+    const planned = deviation.plannedExpectancy ?? 0;
+    const unplanned = deviation.unplannedExpectancy ?? 0;
+    if (unplanned < planned) {
+      insights.push({
+        level: "fix",
+        title: "Trading outside the plan is taxed",
+        message: deviation.verdict,
+        action: "Before every entry, ask one question: 'Is this in today's plan?' If the answer is no, the trade doesn't happen. Log the skipped impulse in your notes — skipped bad trades are wins.",
+        evidence: `${deviation.plannedTrades} planned (${money(planned)} avg) · ${deviation.unplannedTrades} unplanned (${money(unplanned)} avg)`,
+      });
+    } else if (unplanned > 0 && planned > 0) {
+      insights.push({
+        level: "watch",
+        title: "Your unplanned trades are winning — be suspicious",
+        message: deviation.verdict,
+        action: "Lucky unplanned winners fund bad habits. Keep taking them only if you can write the setup rules down — otherwise they're lottery tickets.",
+        evidence: `${deviation.plannedTrades} planned (${money(planned)} avg) · ${deviation.unplannedTrades} unplanned (${money(unplanned)} avg)`,
+      });
+    }
+  }
+
+  // 12. Journal quality — the analysis is only as good as the data.
   const quality = analysis.journalQuality.completeness;
   if (quality < 70 && sample >= 10) {
     insights.push({

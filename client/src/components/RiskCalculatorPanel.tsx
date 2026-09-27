@@ -9,6 +9,8 @@ import {
   MAX_CUSTOM_RISK_PERCENT,
   MIN_CUSTOM_RISK_PERCENT,
   RISK_PROFILES,
+  consecutiveLossBudget,
+  kellySizing,
   type RiskBasis,
   type RiskProfileId,
   type TradeDirection,
@@ -81,6 +83,25 @@ export function RiskCalculatorPanel() {
   const [entryPrice, setEntryPrice] = useState("");
   const [stopLoss, setStopLoss] = useState("");
   const [takeProfit, setTakeProfit] = useState("");
+  // Journal-based sizing (Kelly): copy these three numbers from the Analysis view.
+  const [kellyWinRate, setKellyWinRate] = useState("");
+  const [kellyAvgWin, setKellyAvgWin] = useState("");
+  const [kellyAvgLoss, setKellyAvgLoss] = useState("");
+  const [budgetLimit, setBudgetLimit] = useState("");
+  const [budgetRisk, setBudgetRisk] = useState("");
+
+  const kelly = (() => {
+    const winRate = Number(kellyWinRate);
+    const avgWin = Number(kellyAvgWin);
+    const avgLoss = Number(kellyAvgLoss);
+    if (!kellyWinRate.trim() || !kellyAvgWin.trim() || !kellyAvgLoss.trim()) return undefined;
+    if (![winRate, avgWin, avgLoss].every(Number.isFinite)) return null;
+    return kellySizing(winRate / 100, avgWin, avgLoss);
+  })();
+  const lossBudget = (() => {
+    if (!budgetLimit.trim() || !budgetRisk.trim()) return undefined;
+    return consecutiveLossBudget(Number(budgetLimit), Number(budgetRisk));
+  })();
 
   const activeProfile = RISK_PROFILES.find(profile => profile.id === riskProfile) ?? RISK_PROFILES[2];
   const customValue = Number(customRiskPercent);
@@ -532,10 +553,126 @@ export function RiskCalculatorPanel() {
               different broker or instrument.
             </p>
           </details>
+
         </>
       ) : (
         <p className="muted">Enter your levels to calculate a position size.</p>
       )}
+          <details className="risk-explanation" open>
+            <summary>Journal-based sizing — Kelly criterion</summary>
+            <p className="risk-detail-note">
+              Fixed risk profiles protect you; Kelly sizing grows you. Copy
+              your win rate, average win, and average loss (in R) from the
+              Analysis view — the math then tells you the largest risk your
+              proven edge justifies. Professionals trade half Kelly or less:
+              full Kelly maximizes growth on paper and maximizes pain in
+              practice.
+            </p>
+            <div className="risk-calculator-grid">
+              <Field label="Win rate % (journal)">
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  placeholder="e.g. 42"
+                  value={kellyWinRate}
+                  onChange={event => setKellyWinRate(event.target.value)}
+                />
+              </Field>
+              <Field label="Avg win (R)">
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.1"
+                  placeholder="e.g. 2.4"
+                  value={kellyAvgWin}
+                  onChange={event => setKellyAvgWin(event.target.value)}
+                />
+              </Field>
+              <Field label="Avg loss (R)">
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.1"
+                  placeholder="e.g. 1.0"
+                  value={kellyAvgLoss}
+                  onChange={event => setKellyAvgLoss(event.target.value)}
+                />
+              </Field>
+            </div>
+            {kelly === undefined ? (
+              <p className="muted">Enter your three journal numbers to see what your edge justifies.</p>
+            ) : kelly === null ? (
+              <div className="risk-warning-panel" role="status">
+                <ShieldAlert size={18} />
+                <div>
+                  <strong>No edge at these numbers</strong>
+                  <p className="risk-warning-detail">
+                    Kelly says bet nothing — either the win rate or the
+                    win/loss ratio needs to improve before sizing up. Stay at
+                    your minimum risk profile and fix the strategy first.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="risk-result-grid">
+                <RiskMetric
+                  label="Suggested risk (½ Kelly)"
+                  value={percentText(kelly.suggestedRiskPercent)}
+                  detail="Recommended ceiling per trade"
+                  tone="gold"
+                />
+                <RiskMetric
+                  label="Full Kelly"
+                  value={percentText(kelly.fullKelly * 100)}
+                  detail="Theoretical optimum — do not trade this"
+                />
+              </div>
+            )}
+            <p className="risk-detail-note">
+              <strong>Consecutive-loss budget.</strong> Know before the session
+              how many full stops end your day — it turns &ldquo;I&rsquo;ll stop
+              when it feels bad&rdquo; into a rule.
+            </p>
+            <div className="risk-calculator-grid">
+              <Field label="Daily loss limit ($)">
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="10"
+                  placeholder="e.g. 300"
+                  value={budgetLimit}
+                  onChange={event => setBudgetLimit(event.target.value)}
+                />
+              </Field>
+              <Field label="Risk per trade ($)">
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="10"
+                  placeholder="e.g. 100"
+                  value={budgetRisk}
+                  onChange={event => setBudgetRisk(event.target.value)}
+                />
+              </Field>
+            </div>
+            {lossBudget === undefined ? null : lossBudget === null ? (
+              <p className="muted">Enter a positive limit and risk to compute the budget.</p>
+            ) : (
+              <p className="risk-detail-note" role="status">
+                <strong>
+                  {lossBudget} full stop{lossBudget === 1 ? "" : "s"}
+                </strong>{" "}
+                and the day is over — write that number on a sticky note.
+              </p>
+            )}
+          </details>
     </section>
   );
 }

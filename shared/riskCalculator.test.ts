@@ -7,7 +7,9 @@ import {
   RISK_PROFILE_IDS,
   RISK_PROFILES,
   calculateRisk,
+  consecutiveLossBudget,
   floorLotsToStep,
+  kellySizing,
   type RiskInput,
 } from "./riskCalculator";
 
@@ -323,5 +325,51 @@ describe("breakeven win rate", () => {
     const result = calculateRisk(input({ takeProfit: null }), account, spec);
     expect(result.riskRewardRatio).toBeNull();
     expect(result.breakevenWinRate).toBeNull();
+  });
+});
+
+describe("kelly criterion · journal-based sizing", () => {
+  it("computes half-Kelly from win rate and R multiples", () => {
+    // 40% wins, 2R average win, 1R average loss: f* = 0.4 - 0.6/2 = 0.10.
+    const kelly = kellySizing(0.4, 2, 1);
+    expect(kelly?.fullKelly).toBeCloseTo(0.1, 4);
+    expect(kelly?.halfKelly).toBeCloseTo(0.05, 4);
+    expect(kelly?.suggestedRiskPercent).toBeCloseTo(5, 4);
+  });
+
+  it("says bet nothing when there is no edge", () => {
+    // 30% wins at 1:1: f* = 0.3 - 0.7 = -0.4 → null (minimum size).
+    expect(kellySizing(0.3, 1, 1)).toBeNull();
+    expect(kellySizing(0.5, 1, 1)).toBeNull();
+  });
+
+  it("rejects invalid inputs instead of sizing from them", () => {
+    expect(kellySizing(0, 2, 1)).toBeNull();
+    expect(kellySizing(1, 2, 1)).toBeNull();
+    expect(kellySizing(0.4, 0, 1)).toBeNull();
+    expect(kellySizing(0.4, 2, -1)).toBeNull();
+    expect(kellySizing(NaN, 2, 1)).toBeNull();
+  });
+
+  it("caps the recommendation so a huge edge cannot justify ruin", () => {
+    // 90% wins at 5R: raw f* = 0.9 - 0.1/5 = 0.88 → the reported full Kelly is
+    // honest, but the tradable recommendation is capped at half of 25%.
+    const kelly = kellySizing(0.9, 5, 1);
+    expect(kelly?.fullKelly).toBeCloseTo(0.88, 4);
+    expect(kelly?.halfKelly).toBeLessThanOrEqual(0.125);
+    expect(kelly?.suggestedRiskPercent).toBeLessThanOrEqual(12.5);
+  });
+});
+
+describe("consecutive-loss budget", () => {
+  it("counts how many full stops fit in the loss limit", () => {
+    expect(consecutiveLossBudget(500, 150)).toBe(3);
+    expect(consecutiveLossBudget(300, 100)).toBe(3);
+  });
+
+  it("always allows at least one trade and rejects bad inputs", () => {
+    expect(consecutiveLossBudget(50, 100)).toBe(1);
+    expect(consecutiveLossBudget(0, 100)).toBeNull();
+    expect(consecutiveLossBudget(500, 0)).toBeNull();
   });
 });
