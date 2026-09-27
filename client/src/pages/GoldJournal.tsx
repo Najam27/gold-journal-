@@ -102,8 +102,6 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { TradeLogWithViewer } from "@/components/TradeLogWithViewer";
 import { TradeDialogWithCustomOptions } from "@/components/TradeDialogWithCustomOptions";
 import { QuickTradeDialog } from "@/components/QuickTradeDialog";
-import { GuardBanner } from "@/components/GuardBanner";
-import { GuardModePanel } from "@/components/GuardModePanel";
 import { StreakPanel } from "@/components/StreakPanel";
 import { PnlCalendarWithWeeks } from "@/components/PnlCalendarWithWeeks";
 import { FlexibleGoalsView } from "@/components/FlexibleGoalsView";
@@ -1459,9 +1457,6 @@ export default function GoldJournal() {
         }}
       />
       <UserAiProviderSettings />
-      {account?.id ? (
-        <GuardModePanel accountId={account.id} guardConfig={(account as any)?.guardConfig ?? null} />
-      ) : null}
     </>
   );
   return (
@@ -1585,11 +1580,6 @@ export default function GoldJournal() {
             )}
             {view === "trades" && (
               <>
-                <GuardBanner
-                  guardConfig={(account as any)?.guardConfig ?? null}
-                  trades={trades as any[]}
-                  startingBalance={toNumber(account?.startingBalance)}
-                />
                 <TradeLog
                 stats={stats}
                 trades={pagedTrades}
