@@ -21,7 +21,8 @@ export function summarizeBulkPdfTrades(trades: PdfTrade[]): BulkPdfSummary {
   const losses = count("LOSS");
   const breakEven = count("BREAK_EVEN");
   const open = count("OPEN");
-  return { total: trades.length, pnl, wins, losses, breakEven, open, winRate: trades.length ? wins / trades.length * 100 : 0 };
+  const closed = wins + losses + breakEven;
+  return { total: trades.length, pnl, wins, losses, breakEven, open, winRate: closed ? wins / closed * 100 : 0 };
 }
 
 /**

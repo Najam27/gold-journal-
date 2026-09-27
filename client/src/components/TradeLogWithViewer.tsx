@@ -30,6 +30,7 @@ import { AnimatedNumber } from "@/components/motion/AnimatedNumber";
 import { TradeDetailDialog } from "@/components/TradeDetailDialog";
 import { formatActualR, formatDate, formatMoney, formatRr, results, toNumber } from "@/lib/gold";
 import { buildRunningBalances } from "@/lib/tradeLedger";
+import { PNL_RESULT_EPSILON } from "@shared/tradeOutcome";
 import { copyTradeCardPng, createTradeCardPng, downloadTradeCardPng, shareTradeCardPng } from "@/lib/tradeCardPng";
 import { toast } from "sonner";
 
@@ -86,8 +87,8 @@ function TradeTableSkeleton() {
     <div className="skeleton-table" aria-busy="true" aria-live="polite">
       <span className="sr-only">Loading your secure trade log…</span>
       {[0, 1, 2, 3, 4, 5].map(row => (
-        <div className="gj-skeleton-row" key={row} style={{ "--cols": 8 } as React.CSSProperties}>
-          {[0, 1, 2, 3, 4, 5, 6, 7].map(cell => (
+        <div className="gj-skeleton-row" key={row} style={{ "--cols": 14 } as React.CSSProperties}>
+          {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map(cell => (
             <span className="gj-skeleton" key={cell} />
           ))}
         </div>
@@ -221,7 +222,12 @@ function BaseTradeLogWithViewer({ stats, trades, allTrades, pagination, listLoad
               </thead>
               <tbody>                  {trades.map((trade: any, index: number) => {
                   const result = String(trade.result || "OPEN");
-                  const positive = toNumber(trade.pnl) >= 0;
+                  // The P&L tone follows the canonical break-even band (±$0.005):
+                  // a flat trade is neutral, never an up arrow.
+                  const pnlValue = toNumber(trade.pnl);
+                  const pnlUp = pnlValue > PNL_RESULT_EPSILON;
+                  const pnlDown = pnlValue < -PNL_RESULT_EPSILON;
+                  const pnlTone = pnlUp ? "positive" : pnlDown ? "negative" : "neutral";
                   // A row the backend has not acknowledged yet. It is rendered
                   // from LOCAL state and is labelled as such, never presented as
                   // a stored trade.
@@ -246,11 +252,11 @@ function BaseTradeLogWithViewer({ stats, trades, allTrades, pagination, listLoad
                       <td className="data-text">{formatMoney(trade.risk)}</td>
                       <td className="data-text">{formatRr(trade.risk, trade.reward)}</td>
                       <td><span className={`result-badge ${result.toLowerCase()}`}>{result.replace("_", " ")}</span></td>
-                      <td className={`data-text pnl ${positive ? "positive" : "negative"}`}>
-                        {positive ? <TrendingUp size={12} aria-hidden="true" /> : <TrendingDown size={12} aria-hidden="true" />}
+                      <td className={`data-text pnl ${pnlTone}`}>
+                        {pnlUp ? <TrendingUp size={12} aria-hidden="true" /> : pnlDown ? <TrendingDown size={12} aria-hidden="true" /> : null}
                         <AnimatedNumber value={toNumber(trade.pnl)} format={formatMoney} />
                       </td>
-                      <td className={`data-text ${positive ? "positive" : "negative"}`}>{formatActualR(trade.risk, trade.pnl)}</td>
+                      <td className={`data-text ${pnlTone}`}>{formatActualR(trade.risk, trade.pnl)}</td>
                       <td>
                         <div className="row-actions">
                           <button title="View trade" aria-label={`View trade from ${formatDate(trade.tradeDate)}`} onClick={() => setViewedTrade(trade)}><Eye size={16} /></button>

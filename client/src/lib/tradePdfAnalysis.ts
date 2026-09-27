@@ -549,8 +549,10 @@ export function buildPeriodAnalysis(trades: Record<string, unknown>[], options: 
   /* ---- review points: what the recorded values put in front of the trader ---- */
   const reviewPoints: string[] = [];
   if (closed) {
-    if (topSession) reviewPoints.push(`Most traded session: ${topSession.label} with ${topSession.sample} trade${topSession.sample === 1 ? "" : "s"} and ${money(topSession.netPnl)} net P&L.`);
-    if (topSetup) reviewPoints.push(`Most traded setup: ${topSetup.label} with ${topSetup.sample} trade${topSetup.sample === 1 ? "" : "s"} and ${money(topSetup.netPnl)} net P&L.`);
+    // topByAbsolutePnl ranks by |net P&L|, not by trade count: the line names
+    // the session/setup that moved the period's P&L the most, and says so.
+    if (topSession) reviewPoints.push(`Largest session P&L swing: ${topSession.label} with ${topSession.sample} trade${topSession.sample === 1 ? "" : "s"} and ${money(topSession.netPnl)} net P&L.`);
+    if (topSetup) reviewPoints.push(`Largest setup P&L swing: ${topSetup.label} with ${topSetup.sample} trade${topSetup.sample === 1 ? "" : "s"} and ${money(topSetup.netPnl)} net P&L.`);
     if (averageAdherence != null) reviewPoints.push(`Rule adherence ${Math.round(averageAdherence)}% across ${adherence.length} evaluated trade${adherence.length === 1 ? "" : "s"}; ${ruleBreaks} recorded a rule break.`);
     if (unplanned || overview.breakEven) reviewPoints.push(`${unplanned} trade${unplanned === 1 ? "" : "s"} logged as unplanned and ${overview.breakEven} finished break-even.`);
     if (closed < 20) reviewPoints.push(`${closed} closed trade${closed === 1 ? "" : "s"} were exported, so every rate in this report is a small sample.`);

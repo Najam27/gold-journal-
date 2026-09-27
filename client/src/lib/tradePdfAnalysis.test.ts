@@ -219,7 +219,7 @@ describe("PDF period analysis", () => {
 
   it("derives the review points from recorded values, with a truthful empty state", () => {
     const points = model.review.find(section => section.title === "Review points")!.lines.join(" ");
-    expect(points).toContain("Most traded session");
+    expect(points).toContain("Largest session P&L swing");
     expect(points).toContain("small sample");
     // Never an instruction, never an interpretation.
     expect(points).not.toMatch(/repeat|you should|make sure|avoid/i);

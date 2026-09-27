@@ -31,6 +31,16 @@ describe("bulk PDF report selection", () => {
     expect(summary).toMatchObject({ total: 3, pnl: 55, wins: 1, losses: 0, breakEven: 1, open: 1 });
   });
 
+  it("computes the win rate against closed trades only, so open trades never deflate it", () => {
+    const summary = summarizeBulkPdfTrades([
+      { id: 1, accountId: 3, tradeDate: new Date("2026-08-01T12:00:00Z"), pnl: "15", result: "WIN" },
+      { id: 2, accountId: 3, tradeDate: new Date("2026-08-02T12:00:00Z"), pnl: "15", result: "WIN" },
+      { id: 3, accountId: 3, tradeDate: new Date("2026-08-03T12:00:00Z"), pnl: "40", result: "OPEN" },
+    ]);
+    expect(summary.winRate).toBe(100);
+    expect(summarizeBulkPdfTrades([]).winRate).toBe(0);
+  });
+
   it("keeps safe browser rows selected by the server’s active-account scope and filters dates in PKT", () => {
     expect(selectBulkPdfTrades([{ id: 4, tradeDate: new Date("2026-08-31T20:30:00Z"), pnl: "5", result: "WIN" }], 3, "2026-09-01", "2026-09-01")).toHaveLength(1);
   });
