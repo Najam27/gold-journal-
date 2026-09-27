@@ -1,5 +1,5 @@
 import React, { useEffect, useState, type ReactNode } from "react";
-import { CircleDollarSign, Info, ShieldAlert } from "lucide-react";
+import { CircleDollarSign, Info, Shield, ShieldAlert, TrendingUp } from "lucide-react";
 import { Field, RiskMetric } from "@/components/journalPrimitives";
 import { Input } from "@/components/ui/input";
 import { FundedGuardPanel } from "@/components/FundedGuardPanel";
@@ -77,6 +77,7 @@ export function RiskCalculatorPanel() {
   // the shared selection instead of reading it once at render time.
   const [accountId, setAccountId] = useState<number | undefined>(() => getSelectedAccountId());
   useEffect(() => subscribeSelectedAccount(setAccountId), []);
+  const [tab, setTab] = useState<"sizing" | "journal" | "funded">("sizing");
   const [basis, setBasis] = useState<RiskBasis>("EQUITY");
   const [riskProfile, setRiskProfile] = useState<RiskProfileId>("STANDARD");
   const [customRiskPercent, setCustomRiskPercent] = useState("1.25");
@@ -160,6 +161,38 @@ export function RiskCalculatorPanel() {
         </span>
       </div>
 
+      <div className="risk-tabs" role="tablist" aria-label="Risk calculator sections">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "sizing"}
+          className={`risk-tab${tab === "sizing" ? " active" : ""}`}
+          onClick={() => setTab("sizing")}
+        >
+          <CircleDollarSign size={14} /> Position sizing
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "journal"}
+          className={`risk-tab${tab === "journal" ? " active" : ""}`}
+          onClick={() => setTab("journal")}
+        >
+          <TrendingUp size={14} /> Journal sizing
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "funded"}
+          className={`risk-tab${tab === "funded" ? " active" : ""}`}
+          onClick={() => setTab("funded")}
+        >
+          <Shield size={14} /> Funded guard
+        </button>
+      </div>
+
+      {tab === "sizing" && (
+        <>
       <div className="risk-calculator-grid">
         <ControlBlock label="Instrument">
           <div className="risk-static-value" title="Symbol reported by the active MT5 connection">
@@ -559,6 +592,10 @@ export function RiskCalculatorPanel() {
       ) : (
         <p className="muted">Enter your levels to calculate a position size.</p>
       )}
+        </>
+      )}
+
+      {tab === "journal" && (
           <details className="risk-explanation" open>
             <summary>Journal-based sizing — Kelly criterion</summary>
             <p className="risk-detail-note">
@@ -674,7 +711,11 @@ export function RiskCalculatorPanel() {
               </p>
             )}
           </details>
+      )}
+
+      {tab === "funded" && (
           <FundedGuardPanel accountId={accountId} />
+      )}
     </section>
   );
 }

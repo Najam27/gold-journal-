@@ -27,12 +27,16 @@ function pct(value: number | null): string {
  * stats (PKT Monday–Sunday — the week ending today on Sundays, otherwise the
  * last completed week), biggest win/loss, top mistakes, the lesson, and one
  * rule for next week — then saves the review durably via weeklyReviews.save.
- * Fetches its own journal data, so it drops straight into the Analysis view.
+ * Previous/next arrows page through week history; the newest viewable week is
+ * always the current one. Fetches its own journal data, so it drops straight
+ * into its own sidebar view.
  */
 export function WeeklyReviewWizard({ accountId }: { accountId: number }) {
   const [step, setStep] = useState(0);
   const [lesson, setLesson] = useState("");
   const [ruleForNextWeek, setRuleForNextWeek] = useState("");
+  // Week navigation: 0 = the default reviewable week, negative = older weeks.
+  const [weekShift, setWeekShift] = useState(0);
   const utils = trpc.useUtils();
   const saveReview = trpc.weeklyReviews.save.useMutation();
 
@@ -40,10 +44,11 @@ export function WeeklyReviewWizard({ accountId }: { accountId: number }) {
   const trades: ReviewTradeLike[] = (journal.data as { trades?: ReviewTradeLike[] } | undefined)?.trades ?? [];
   const plans: Array<{ planDate: string | number | Date }> = (journal.data as { dailyPlans?: Array<{ planDate: string | number | Date }> } | undefined)?.dailyPlans ?? [];
 
+  const baseOffset = reviewableWeekOffset();
   const week = useMemo(() => {
     // On Sunday the week ending today is reviewable; otherwise show the last
-    // completed week.
-    const { start, end } = pktWeekRange(new Date(), reviewableWeekOffset());
+    // completed week. weekShift lets the trader page back through history.
+    const { start, end } = pktWeekRange(new Date(), baseOffset + weekShift);
     const summary = summarizeWeek(
       trades.map(trade => ({ ...trade, pnl: trade.pnl ?? null })),
       plans,
@@ -51,10 +56,12 @@ export function WeeklyReviewWizard({ accountId }: { accountId: number }) {
       end
     );
     return { start, end, summary };
-  }, [trades, plans]);
+  }, [trades, plans, baseOffset, weekShift]);
 
   const { summary } = week;
   const saved = trpc.weeklyReviews.list.useQuery({ accountId, limit: 12 });
+  // Never page into the future: the current week (offset 0) is the newest viewable.
+  const canGoNewer = baseOffset + weekShift < 0;
 
   const submit = async () => {
     try {
@@ -82,7 +89,26 @@ export function WeeklyReviewWizard({ accountId }: { accountId: number }) {
     <section className="panel weekly-review-panel">
       <header>
         <span><CalendarCheck size={15} /> Weekly review</span>
-        <small>{summary.weekLabel}</small>
+        <div className="review-week-nav">
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Previous week"
+            onClick={() => { setWeekShift(s => s - 1); setStep(0); }}
+          >
+            <ArrowLeft size={15} />
+          </button>
+          <small>{summary.weekLabel}</small>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Next week"
+            disabled={!canGoNewer}
+            onClick={() => { setWeekShift(s => s + 1); setStep(0); }}
+          >
+            <ArrowRight size={15} />
+          </button>
+        </div>
       </header>
 
       <div className="review-steps">

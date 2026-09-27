@@ -133,6 +133,7 @@ import {
   BookOpen,
   Bot,
   Brain,
+  CalendarCheck2,
   CalendarDays,
   Check,
   ChevronDown,
@@ -165,10 +166,14 @@ const logoUrl = "/gold-journal-3d.svg";
 const AnalysisDashboardLazy = React.lazy(async () => ({
   default: (await import("@/components/AnalysisDashboard")).AnalysisDashboard,
 }));
+const WeeklyReviewWizardLazy = React.lazy(async () => ({
+  default: (await import("@/components/WeeklyReviewWizard")).WeeklyReviewWizard,
+}));
 type View =
   | "trades"
   | "missed"
   | "analysis"
+  | "review"
   | "goals"
   | "psychology"
   | "calendar"
@@ -230,6 +235,7 @@ const navItems: { id: View; label: string; icon: typeof BookOpen }[] = [
   { id: "trades", label: "Trade Log", icon: BookOpen },
   { id: "missed", label: "Missed Trades", icon: Target },
   { id: "analysis", label: "Analysis", icon: BarChart3 },
+  { id: "review", label: "Weekly Review", icon: CalendarCheck2 },
   { id: "goals", label: "Goals", icon: Goal },
   { id: "psychology", label: "Psychology", icon: Brain },
   { id: "calendar", label: "PnL Calendar", icon: CalendarDays },
@@ -243,7 +249,7 @@ const navItems: { id: View; label: string; icon: typeof BookOpen }[] = [
 // Every other view stays reachable from the sidebar drawer.
 const mobileNavIds: View[] = ["trades", "analysis", "goals", "psychology", "calendar", "mt5"];
 export const JOURNAL_RETRY_EVENT = "gold-journal:retry";
-const NAV_GROUP_LABELS: Record<string, string> = { trades: "Journal", missed: "Journal", analysis: "Journal", calendar: "Journal", goals: "Discipline", psychology: "Discipline", plan: "Discipline", mentor: "Intelligence", mt5: "Intelligence", risk: "Intelligence", options: "Workspace" };
+const NAV_GROUP_LABELS: Record<string, string> = { trades: "Journal", missed: "Journal", analysis: "Journal", review: "Journal", calendar: "Journal", goals: "Discipline", psychology: "Discipline", plan: "Discipline", mentor: "Intelligence", mt5: "Intelligence", risk: "Intelligence", options: "Workspace" };
 const isJournalView = (value: unknown): value is View =>
   navItems.some(item => item.id === value);
 const defaultRules = [
@@ -1675,6 +1681,11 @@ export default function GoldJournal() {
                 </React.Suspense>
               </div>
             )}
+            {view === "review" && (
+              <React.Suspense fallback={<Loading />}>
+                <WeeklyReviewWizardLazy accountId={account?.id ?? 0} />
+              </React.Suspense>
+            )}
             {view === "goals" && (
               <GoalsView
                 account={account}
@@ -1801,6 +1812,7 @@ export default function GoldJournal() {
                 onSwitchAccount={selectAccount}
               />
             )}
+            {view === "risk" && <RiskCalculatorPanel />}
           </div>
         )}
       </main>
@@ -2059,26 +2071,25 @@ function PageHeader({ view, online, onNew, account, accounts, onAccount }: any) 
   const title =
     navItems.find(item => item.id === view)?.label || "Gold Journal";
   return (
-    <>
-      {view === "risk" && <RiskCalculatorPanel />}
-      <header className="desktop-pagebar">
-        <div>
-          <p>{view === "trades" ? "TRADING PERFORMANCE" : "GOLD JOURNAL"}</p>
-          <h1>{title}</h1>
-        </div>
-        <div className="pagebar-actions">
-          <AccountSwitcher account={account} accounts={accounts} onAccount={onAccount} />
-          <span className="sync-chip">
-            <Cloud size={14} /> {online ? "Live cloud sync" : "Offline"}
-          </span>
-          <ThemeToggle />
-          <NotificationCenter triggerClassName="icon-button" />
+    <header className="desktop-pagebar">
+      <div>
+        <p>{view === "trades" ? "TRADING PERFORMANCE" : "GOLD JOURNAL"}</p>
+        <h1>{title}</h1>
+      </div>
+      <div className="pagebar-actions">
+        <AccountSwitcher account={account} accounts={accounts} onAccount={onAccount} />
+        <span className="sync-chip">
+          <Cloud size={14} /> {online ? "Live cloud sync" : "Offline"}
+        </span>
+        <ThemeToggle />
+        <NotificationCenter triggerClassName="icon-button" />
+        {view !== "risk" && (
           <Button onClick={onNew}>
             <Plus size={16} /> New Trade
           </Button>
-        </div>
-      </header>
-    </>
+        )}
+      </div>
+    </header>
   );
 }
 function MobileNav({

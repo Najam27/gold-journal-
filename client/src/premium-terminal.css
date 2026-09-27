@@ -1188,6 +1188,18 @@ select option:disabled { color: var(--text-disabled); }
 }
 .risk-calculator-grid, .risk-result-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem; margin-top: 1rem; }
 .risk-calculator-grid .field, .risk-result-grid .mt5-account-metric { min-width: 0; }
+.risk-tabs { display: flex; gap: .5rem; margin: 1rem 0; padding: .35rem; border-radius: 12px; background: color-mix(in srgb, var(--surface-panel) 60%, transparent); border: 1px solid var(--border); }
+.risk-tab { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: .45rem; padding: .6rem .5rem; border-radius: 9px; border: 1px solid transparent; background: transparent; color: var(--text-muted); font-weight: 600; font-size: .82rem; cursor: pointer; transition: all .15s ease; }
+.risk-tab:hover { color: var(--text); background: color-mix(in srgb, var(--accent-amber) 8%, transparent); }
+.risk-tab.active { color: var(--accent-amber); background: color-mix(in srgb, var(--accent-amber) 14%, var(--surface-panel)); border-color: color-mix(in srgb, var(--accent-amber) 42%, var(--border)); }
+.funded-size-row { display: flex; flex-direction: column; gap: .4rem; }
+.funded-size-toggle { display: inline-flex; gap: .25rem; padding: .2rem; border-radius: 8px; background: color-mix(in srgb, var(--surface-panel) 70%, transparent); border: 1px solid var(--border); align-self: flex-start; }
+.funded-size-toggle button { padding: .3rem .7rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-size: .75rem; font-weight: 600; cursor: pointer; }
+.funded-size-toggle button.active { background: color-mix(in srgb, var(--accent-amber) 18%, transparent); color: var(--accent-amber); }
+.funded-size-auto { padding: .55rem .75rem; border-radius: 8px; border: 1px dashed color-mix(in srgb, var(--accent-amber) 40%, var(--border)); color: var(--accent-amber); font-weight: 700; font-size: .95rem; }
+.review-week-nav { display: inline-flex; align-items: center; gap: .4rem; }
+.review-week-nav .icon-button:disabled { opacity: .35; cursor: not-allowed; }
+@media (max-width: 640px) { .risk-tabs { flex-direction: column; } }
 .risk-verification { margin-top: 1rem; padding: .85rem 1rem; border: 1px solid color-mix(in srgb, var(--accent-amber) 26%, var(--border)); border-radius: .8rem; background: color-mix(in srgb, var(--accent-amber) 7%, var(--surface-panel)); color: var(--text-muted); }
 .risk-verification strong { color: var(--text-primary); }
 .risk-verification p { margin: .35rem 0 0; }

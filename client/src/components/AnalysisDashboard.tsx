@@ -25,7 +25,6 @@ import type {
   MetricRow,
 } from "@shared/analysisEngine";
 import { buildPlaybook, type PlaybookCard } from "@shared/playbook";
-import { WeeklyReviewWizard } from "@/components/WeeklyReviewWizard";
 
 type Props = { accountId?: number; trades?: unknown[] };
 const money = (value: number | null) =>
@@ -1165,7 +1164,6 @@ export function AnalysisDashboard({ accountId }: Props) {
           <p className="analysis-note">{analysis.exitEfficiency.message}</p>
         )}
       </section>
-      <WeeklyReviewWizard accountId={accountId ?? 0} />
       <section className="panel">
         <div className="panel-title">
           <div>

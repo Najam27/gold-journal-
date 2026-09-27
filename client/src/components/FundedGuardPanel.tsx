@@ -33,10 +33,30 @@ interface FundedTradeLike {
  */
 export function FundedGuardPanel({ accountId }: { accountId?: number }) {
   const [accountSize, setAccountSize] = useState("");
+  // "auto" reads the account size from the live account (MT5 equity, or the
+  // journal account's starting balance when MT5 is not connected). Manual
+  // entry stays available for firms whose challenge size differs from the
+  // live balance.
+  const [sizeMode, setSizeMode] = useState<"auto" | "manual">("auto");
   const [dailyPct, setDailyPct] = useState(String(DEFAULT_DAILY_DRAWDOWN_PCT));
   const [maxPct, setMaxPct] = useState(String(DEFAULT_MAX_DRAWDOWN_PCT));
   const [drawdownType, setDrawdownType] = useState<DrawdownType>("static");
   const [peakEquity, setPeakEquity] = useState("");
+
+  // Live account for auto-detect: MT5 workspace carries equity when a
+  // connection is active.
+  const mt5 = trpc.mt5.workspace.useQuery(
+    { accountId: accountId ?? 0 },
+    { enabled: Boolean(accountId), staleTime: 10_000, refetchOnWindowFocus: false },
+  );
+  const detectedSize = useMemo(() => {
+    const ws = mt5.data as { account?: { equity?: number | null; balance?: number | null } } | undefined;
+    const equity = Number(ws?.account?.equity);
+    if (Number.isFinite(equity) && equity > 0) return equity;
+    const balance = Number(ws?.account?.balance);
+    if (Number.isFinite(balance) && balance > 0) return balance;
+    return null;
+  }, [mt5.data]);
 
   // Today's realized P&L from the journal (PKT calendar day, closed trades).
   const journal = trpc.journal.get.useQuery(
@@ -54,7 +74,7 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
     }, 0);
   }, [journal.data, todayKey]);
 
-  const size = Number(accountSize);
+  const size = sizeMode === "auto" ? (detectedSize ?? NaN) : Number(accountSize);
   const daily = Number(dailyPct);
   const max = Number(maxPct);
   const peak = Number(peakEquity);
@@ -97,16 +117,40 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
       </p>
 
       <div className="risk-calculator-grid">
-        <Field label="Account size ($)">
-          <Input
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="100"
-            placeholder="e.g. 100000"
-            value={accountSize}
-            onChange={event => setAccountSize(event.target.value)}
-          />
+        <Field label="Account size">
+          <div className="funded-size-row">
+            <div className="funded-size-toggle" role="group" aria-label="Account size source">
+              <button
+                type="button"
+                className={sizeMode === "auto" ? "active" : ""}
+                onClick={() => setSizeMode("auto")}
+              >
+                Auto
+              </button>
+              <button
+                type="button"
+                className={sizeMode === "manual" ? "active" : ""}
+                onClick={() => setSizeMode("manual")}
+              >
+                Manual
+              </button>
+            </div>
+            {sizeMode === "auto" ? (
+              <div className="funded-size-auto" title="Read from the live account (MT5 equity when connected)">
+                {detectedSize != null ? `$${detectedSize.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "Detecting…"}
+              </div>
+            ) : (
+              <Input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="100"
+                placeholder="e.g. 100000"
+                value={accountSize}
+                onChange={event => setAccountSize(event.target.value)}
+              />
+            )}
+          </div>
         </Field>
         <Field label="Daily drawdown %">
           <Input
@@ -156,8 +200,9 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
 
       {!valid ? (
         <p className="muted">
-          Enter your account size and your firm&rsquo;s drawdown percentages to
-          see the guard.
+          {sizeMode === "auto" && detectedSize == null
+            ? "Waiting for the live account — connect MT5 or switch to Manual to type the size."
+            : "Enter your firm\u2019s drawdown percentages to see the guard."}
         </p>
       ) : (
         evaluation && (
