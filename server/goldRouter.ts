@@ -748,29 +748,32 @@ export const goldRouter = router({
     })).mutation(async ({ ctx, input }) => {
       await getOwnedAccount(ctx.user.id, input.accountId);
       const db = await dbOrThrow();
+      // weekStartDate is the PKT calendar date of the Monday bound, used as
+      // the upsert key. A plain date column keeps the uniqueness index free
+      // of casts (timestamptz→date is not IMMUTABLE and can't be indexed).
+      const weekStartDate = getPktDateKey(input.weekStart);
       const values = {
         userId: ctx.user.id,
         accountId: input.accountId,
         weekStart: new Date(input.weekStart),
         weekEnd: new Date(input.weekEnd),
+        weekStartDate,
         statsSnapshot: input.statsSnapshot as Record<string, unknown> | null,
         lesson: input.lesson || null,
         ruleForNextWeek: input.ruleForNextWeek || null,
         updatedAt: new Date(),
       };
       // One review per account per calendar week: a repeat review for the same
-      // week replaces the stored row. The client always sends weekStart as the
-      // same deterministic instant (PKT Monday 00:00) for a given week, so an
-      // exact-equality lookup is a reliable upsert key. Single-user,
-      // single-action — no lost-update race to worry about here.
+      // week replaces the stored row. Single-user, single-action — no
+      // lost-update race to worry about here.
       const existing = await db.select({ id: weeklyReviews.id }).from(weeklyReviews).where(and(
         eq(weeklyReviews.userId, ctx.user.id),
         eq(weeklyReviews.accountId, input.accountId),
-        eq(weeklyReviews.weekStart, values.weekStart),
+        eq(weeklyReviews.weekStartDate, values.weekStartDate),
       )).limit(1);
       if (existing[0]) {
         await db.update(weeklyReviews).set({
-          weekEnd: values.weekEnd, statsSnapshot: values.statsSnapshot, lesson: values.lesson,
+          weekStart: values.weekStart, weekEnd: values.weekEnd, statsSnapshot: values.statsSnapshot, lesson: values.lesson,
           ruleForNextWeek: values.ruleForNextWeek, updatedAt: values.updatedAt,
         }).where(and(eq(weeklyReviews.id, existing[0].id), eq(weeklyReviews.userId, ctx.user.id)));
       } else {
