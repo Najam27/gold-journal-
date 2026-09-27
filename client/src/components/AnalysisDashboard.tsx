@@ -71,41 +71,46 @@ function MetricTable({
             <tbody>
               {rows.slice(0, 30).map(row => (
                 <tr key={`${title}-${row.key}`}>
-                  <td>
+                  <td data-label="Context">
                     <strong>{row.label}</strong>
                     <small className="analysis-subtext">
                       {row.confidence} confidence ·{" "}
                       {row.dataCompleteness.toFixed(0)}% data complete
                     </small>
                   </td>
-                  <td className="data-text">{row.sample}</td>
-                  <td>
-                    <span
-                      className={`evidence-pill evidence-${row.evidenceTier.toLowerCase().replaceAll(" ", "-")}`}
-                    >
-                      {row.evidenceTier}
+                  <td className="data-text" data-label="Sample"><span className="analysis-cell-value">{row.sample}</span></td>
+                  <td data-label="Evidence">
+                    <span className="analysis-cell-value">
+                      <span
+                        className={`evidence-pill evidence-${row.evidenceTier.toLowerCase().replaceAll(" ", "-")}`}
+                      >
+                        {row.evidenceTier}
+                      </span>
+                      <small className="analysis-subtext">
+                        {row.winRateInterval[0].toFixed(0)}–
+                        {row.winRateInterval[1].toFixed(0)}% Wilson CI
+                      </small>
                     </span>
-                    <small className="analysis-subtext">
-                      {row.winRateInterval[0].toFixed(0)}–
-                      {row.winRateInterval[1].toFixed(0)}% Wilson CI
-                    </small>
                   </td>
-                  <td className="data-text">{row.winRate.toFixed(1)}%</td>
+                  <td className="data-text" data-label="Win rate"><span className="analysis-cell-value">{row.winRate.toFixed(1)}%</span></td>
                   <td
+                    data-label="Expectancy"
                     className={`data-text ${row.expectancy >= 0 ? "positive" : "negative"}`}
                   >
-                    {money(row.expectancy)}
+                    <span className="analysis-cell-value">{money(row.expectancy)}</span>
                   </td>
-                  <td className="data-text">
-                    {row.profitFactor == null
-                      ? "No losses"
-                      : row.profitFactor.toFixed(2)}
+                  <td className="data-text" data-label="PF">
+                    <span className="analysis-cell-value">
+                      {row.profitFactor == null
+                        ? "No losses"
+                        : row.profitFactor.toFixed(2)}
+                    </span>
                   </td>
-                  <td className="data-text">{number(row.averageR, 2)}</td>
-                  <td className="data-text negative">
-                    {money(-row.maxDrawdown)}
+                  <td className="data-text" data-label="Avg R"><span className="analysis-cell-value">{number(row.averageR, 2)}</span></td>
+                  <td className="data-text negative" data-label="Drawdown">
+                    <span className="analysis-cell-value">{money(-row.maxDrawdown)}</span>
                   </td>
-                  <td className="data-text">{row.edgeScore}/100</td>
+                  <td className="data-text" data-label="Score"><span className="analysis-cell-value">{row.edgeScore}/100</span></td>
                 </tr>
               ))}
             </tbody>

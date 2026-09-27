@@ -1446,6 +1446,39 @@ select option:disabled { color: var(--text-disabled); }
 .analysis-table-panel { margin-top: 14px; overflow: hidden; }
 .analysis-table { min-width: 920px; }
 .analysis-table td, .analysis-table th { vertical-align: top; }
+/* Analysis tables: readable without horizontal scrolling. On desktop the
+   nine columns share the panel width (no 920px min-width, no x-scroll);
+   the Context column gets room to wrap while numeric columns stay compact.
+   On narrow screens each row becomes a labeled card. */
+.analysis-table-panel .trade-table-wrap { overflow-x: visible; }
+table.analysis-table { min-width: 0; width: 100%; table-layout: fixed; }
+.analysis-table th, .analysis-table td { white-space: normal; overflow-wrap: break-word; }
+.analysis-table thead th { font-size: 10px; }
+.analysis-table tbody td { font-size: 12.5px; }
+.analysis-table th:nth-child(1), .analysis-table td:nth-child(1) { width: 24%; }
+.analysis-table th:nth-child(3), .analysis-table td:nth-child(3) { width: 15%; }
+.analysis-table th:nth-child(5), .analysis-table td:nth-child(5) { width: 11%; }
+.analysis-table th:nth-child(2), .analysis-table td:nth-child(2),
+.analysis-table th:nth-child(4), .analysis-table td:nth-child(4),
+.analysis-table th:nth-child(6), .analysis-table td:nth-child(6),
+.analysis-table th:nth-child(7), .analysis-table td:nth-child(7),
+.analysis-table th:nth-child(8), .analysis-table td:nth-child(8),
+.analysis-table th:nth-child(9), .analysis-table td:nth-child(9) { width: 8.33%; }
+@media (max-width: 760px) {
+  .analysis-table-panel .trade-table-wrap { overflow-x: visible; }
+  table.analysis-table { table-layout: auto; }
+  table.analysis-table, table.analysis-table tbody, table.analysis-table tr, table.analysis-table td { display: block; width: 100%; }
+  /* Override the desktop nth-child column widths (higher specificity). */
+  table.analysis-table th:nth-child(n), table.analysis-table td:nth-child(n) { width: 100%; }
+  table.analysis-table thead { display: none; }
+  table.analysis-table tr { border: 1px solid var(--border); border-radius: .7rem; margin-bottom: .7rem; padding: .4rem .2rem; }
+  table.analysis-table td { border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent); padding: .55rem .8rem; font-size: 13px; }
+  table.analysis-table td:last-child { border-bottom: 0; }
+  table.analysis-table td::before { content: attr(data-label); display: block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); margin-bottom: .2rem; }
+  table.analysis-table td[data-label="Context"]::before { display: none; }
+  table.analysis-table td[data-label="Context"] strong { font-size: 14px; }
+  .analysis-cell-value { display: block; }
+}
 .analysis-subtext { display: block; margin-top: 4px; color: var(--text-dim); font-size: 8.5px; line-height: 1.4; }
 .evidence-pill { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; padding: 4px 7px; color: var(--text-muted); font-size: 8px; font-weight: 800; line-height: 1; white-space: nowrap; }
 .evidence-stronger-evidence { border-color: color-mix(in srgb, var(--accent-emerald) 48%, var(--border)); color: var(--accent-emerald); background: color-mix(in srgb, var(--accent-emerald) 12%, transparent); }
