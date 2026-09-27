@@ -942,6 +942,15 @@ export function AnalysisDashboard({ accountId }: Props) {
           <LineChart size={17} />
         </div>
         <p>{analysis.mfeMae.message}</p>
+        {!analysis.mfeMae.available && (
+          <p className="analysis-filter-note">
+            To unlock this, open any trade and fill{" "}
+            <b>Max favorable excursion $</b> (best it looked) and{" "}
+            <b>Max adverse excursion $</b> (worst heat taken) in the Execution
+            section. Once logged, you'll see your average MFE/MAE and how much
+            of each move you kept.
+          </p>
+        )}
       </section>
       <section className="panel ai-surface">
         <div className="panel-title">
@@ -1170,7 +1179,14 @@ export function AnalysisDashboard({ accountId }: Props) {
             <p className="analysis-note">{analysis.exitEfficiency.message}</p>
           </>
         ) : (
-          <p className="analysis-note">{analysis.exitEfficiency.message}</p>
+          <>
+            <p className="analysis-note">{analysis.exitEfficiency.message}</p>
+            <p className="analysis-filter-note">
+              Log <b>Max favorable excursion $</b> and <b>Max adverse excursion $</b> in
+              the Execution section of your trades to see how much of each move
+              you kept and how much heat you endured.
+            </p>
+          </>
         )}
       </section>
       <section className="panel">
