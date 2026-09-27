@@ -75,7 +75,7 @@ export function DayTradesDialog({ day, summary, plans, behaviorConfig, onOpenCha
         <section className="day-dialog-metrics">
           {riskTrades > 0 && <span>Total risk <b className="data-text">{formatMoney(totalRisk)}</b></span>}
           {rewardTrades > 0 && <span>Total reward <b className="data-text">{formatMoney(totalReward)}</b></span>}
-          {averageR !== null && <span>Average R <b className="data-text">{averageR >= 0 ? "+" : ""}{averageR.toFixed(2)}R</b></span>}
+          {averageR !== null && <span>Average R <b className="data-text">1 : {averageR.toFixed(2)}</b></span>}
           <span>Average trade <b className={`data-text ${averagePnl >= 0 ? "positive" : "negative"}`}>{formatMoney(averagePnl)}</b></span>
           {openCount > 0 && <span>Unrealized <b className={`data-text ${openPnl >= 0 ? "positive" : "negative"}`}>{formatMoney(openPnl)}</b></span>}
         </section>

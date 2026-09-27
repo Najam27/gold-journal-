@@ -131,7 +131,7 @@ export function WeeklyReviewWizard({ accountId }: { accountId: number }) {
             <div><span>Trades</span><strong>{summary.closedCount}</strong></div>
             <div><span>Net P&L</span><strong>{formatMoney(summary.netPnl)}</strong></div>
             <div><span>Win rate</span><strong>{pct(summary.winRate)}</strong></div>
-            <div><span>Avg R</span><strong>{summary.avgR == null ? "—" : `${summary.avgR.toFixed(2)}R`}</strong></div>
+            <div><span>Avg R</span><strong>{summary.avgR == null ? "—" : `1 : ${summary.avgR.toFixed(2)}`}</strong></div>
             <div><span>Profit factor</span><strong>{summary.profitFactor == null ? "—" : summary.profitFactor.toFixed(2)}</strong></div>
             <div><span>Planned trades</span><strong>{pct(summary.plannedPct)}</strong></div>
           </div>

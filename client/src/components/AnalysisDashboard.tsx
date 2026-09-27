@@ -716,7 +716,7 @@ export function AnalysisDashboard({ accountId }: Props) {
         <div className="stat-card stat-neutral">
           <p>AVERAGE ACTUAL R</p>
           <strong className="data-text">
-            {number(analysis.execution.averageActualR, 3)}R
+            {analysis.execution.averageActualR == null ? "—" : `1 : ${number(analysis.execution.averageActualR, 3)}`}
           </strong>
           <span>{analysis.execution.actualRAvailable} risk-defined closed trades</span>
         </div>
@@ -884,7 +884,7 @@ export function AnalysisDashboard({ accountId }: Props) {
             </span>
             <span>
               Actual R average{" "}
-              <b>{analysis.execution.averageActualR == null ? "—" : `${number(analysis.execution.averageActualR, 3)}R`}</b>
+              <b>{analysis.execution.averageActualR == null ? "—" : `1 : ${number(analysis.execution.averageActualR, 3)}`}</b>
             </span>
             <span>
               Reached / exceeded target{" "}
