@@ -457,6 +457,21 @@ export function TradeDialogWithCustomOptions({ open, setOpen, form, setForm, edi
   useEffect(() => {
     if (!open) setRemoveStoredScreenshot(false);
   }, [editing?.id, open]);
+  // Overtrading guard: when opening a NEW trade on a day that already has
+  // 3+ trades, pre-tag the Overtrading mistake. The trader can remove it,
+  // but the default keeps overtrading visible in the journal.
+  useEffect(() => {
+    if (!open || editing) return;
+    const count = (dayTrades ?? []).length;
+    if (count < 3) return;
+    const current = splitTradeOptionValue(form.mistake || "");
+    const hasTag = current.some(tag => tag.toLowerCase() === "overtrading");
+    if (!hasTag) {
+      setForm({ ...form, mistake: toggleTradeOptionValue(form.mistake || "", "Overtrading") });
+    }
+    // Only run when the dialog opens or the day's trade count changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editing?.id, (dayTrades ?? []).length]);
   const patch = (field: string, value: string) => setForm({ ...form, [field]: value });
   // Mentor-grade honesty: for a closed trade the outcome IS the sign of the
   // P&L, not a separate opinion. Typing the P&L re-derives the result live

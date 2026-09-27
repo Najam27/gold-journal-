@@ -906,6 +906,9 @@ select option:disabled { color: var(--text-disabled); }
 .pnl-day-main { display: grid; gap: 3px; }
 .pnl-day-main strong { font-size: 13.5px; font-weight: 700; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 .pnl-day-main small { color: var(--text-dim); font-size: 9px; }
+/* Overtrading day: more than 3 trades. */
+.pnl-day-card.overtrading { border-color: color-mix(in srgb, var(--accent-amber) 55%, var(--border)); }
+.pnl-overtrade-badge { display: inline-block; justify-self: start; padding: 2px 7px; border-radius: 999px; background: color-mix(in srgb, var(--accent-amber) 18%, transparent); border: 1px solid color-mix(in srgb, var(--accent-amber) 45%, transparent); color: var(--accent-amber); font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
 /* Intensity ramp: the tint follows the size of the day's result. */
 .pnl-day-card.populated.gain {
   border-color: color-mix(in srgb, var(--accent-emerald) 40%, var(--border));
