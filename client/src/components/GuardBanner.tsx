@@ -53,12 +53,24 @@ export function GuardBanner({
       if (getPktDateKey(trade.tradeDate) === todayKey) todayPnl += pnl;
     }
 
-    const base = Number.isFinite(startingBalance) && startingBalance > 0 ? startingBalance : 0;
-    const currentEquity = base + allTimePnl;
+    // Prefer the MT5 snapshot saved by the Risk Calculator (same PKT day);
+    // fall back to the journal-side derivation when MT5 is not connected.
+    const snapshotToday =
+      funded.snapshotAt != null && getPktDateKey(funded.snapshotAt) === todayKey;
+    const snapshotEquity = snapshotToday ? funded.mt5Equity : null;
+    const snapshotBalance = snapshotToday ? funded.mt5Balance : null;
+
+    const base =
+      (snapshotBalance != null && snapshotBalance > 0 ? snapshotBalance : null) ??
+      (Number.isFinite(startingBalance) && startingBalance > 0 ? startingBalance : 0);
+    const journalEquity = base + allTimePnl;
+    const currentEquity =
+      snapshotEquity != null && snapshotEquity > 0 ? snapshotEquity : journalEquity;
+
     const accountSize =
       funded.sizeMode === "manual" && funded.accountSize != null && funded.accountSize > 0
         ? funded.accountSize
-        : currentEquity;
+        : base;
     if (!(accountSize > 0)) return null;
 
     const override = Number(funded.dayStartOverride);

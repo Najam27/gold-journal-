@@ -6,6 +6,7 @@ import { FundedGuardPanel } from "./FundedGuardPanel";
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
+    useUtils: () => ({ accounts: { list: { invalidate: () => Promise.resolve() } } }),
     journal: {
       get: {
         useQuery: () => ({
@@ -26,7 +27,11 @@ vi.mock("@/lib/trpc", () => ({
     mt5: {
       workspace: {
         useQuery: () => ({
-          data: { account: { equity: 100000, balance: 100000 } },
+          data: {
+            connections: [
+              { active: true, retiredAt: null, balance: 100000, equity: 100000, floatingPnl: 0, brokerServer: "Test-Server" },
+            ],
+          },
           isLoading: false,
         }),
       },
@@ -42,6 +47,10 @@ vi.mock("@/lib/trpc", () => ({
   },
 }));
 
+vi.mock("sonner", () => ({
+  toast: { error: () => {}, success: () => {} },
+}));
+
 vi.mock("@/components/ui/input", () => ({
   Input: (props: any) => <input {...props} />,
 }));
@@ -55,8 +64,9 @@ describe("FundedGuardPanel", () => {
   it("auto-detects account size from live equity", () => {
     render(<FundedGuardPanel accountId={1} />);
     expect(screen.getByText(/Funded account guard/i)).toBeTruthy();
-    // Mocked MT5 workspace returns $100,000 equity
-    expect(screen.getByText("$100,000")).toBeTruthy();
+    // Mocked MT5 workspace returns $100,000 balance/equity — shown in the
+    // snapshot column (starting balance + current equity).
+    expect(screen.getAllByText("$100,000").length).toBeGreaterThanOrEqual(2);
   });
 
   it("computes FTMO-style limits from percentages", () => {
@@ -101,6 +111,8 @@ describe("FundedGuardPanel", () => {
     render(<FundedGuardPanel accountId={1} />);
     const select = screen.getByLabelText(/Max drawdown type/i);
     fireEvent.change(select, { target: { value: "trailing" } });
-    expect(screen.getByPlaceholderText(/108000/i)).toBeTruthy();
+    // With live MT5 equity ($100k), the peak placeholder shows the auto value.
+    const peakInput = screen.getByLabelText(/Peak equity so far/i);
+    expect(peakInput.getAttribute("placeholder")).toMatch(/Auto:/i);
   });
 });

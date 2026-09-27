@@ -22,6 +22,9 @@ const fundedConfig = (overrides = {}): GuardConfig => ({
     drawdownType: "static",
     dayStartOverride: "",
     peakEquity: "",
+    mt5Balance: null,
+    mt5Equity: null,
+    snapshotAt: null,
     ...overrides,
   },
 });

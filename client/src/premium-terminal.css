@@ -1197,6 +1197,27 @@ select option:disabled { color: var(--text-disabled); }
 .funded-size-toggle button { padding: .3rem .7rem; border-radius: 6px; border: none; background: transparent; color: var(--text-muted); font-size: .75rem; font-weight: 600; cursor: pointer; }
 .funded-size-toggle button.active { background: color-mix(in srgb, var(--accent-amber) 18%, transparent); color: var(--accent-amber); }
 .funded-size-auto { padding: .55rem .75rem; border-radius: 8px; border: 1px dashed color-mix(in srgb, var(--accent-amber) 40%, var(--border)); color: var(--accent-amber); font-weight: 700; font-size: .95rem; }
+/* Funded guard: distinct two-column layout — MT5 snapshot vs drawdown rules. */
+.funded-guard summary { display: flex; align-items: center; gap: .6rem; }
+.funded-save-state { margin-left: auto; font-size: .72rem; font-weight: 600; color: var(--text-muted); }
+.funded-save-state.saving { color: var(--accent-amber); }
+.funded-save-state.saved { color: var(--accent-green, #4ade80); }
+.funded-save-state.error { color: var(--accent-red, #f87171); }
+.funded-guard-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 1rem; margin-top: 1rem; }
+.funded-guard-col { border: 1px solid var(--border); border-radius: .9rem; padding: 1rem 1.1rem; background: color-mix(in srgb, var(--surface-panel) 55%, transparent); min-width: 0; }
+.funded-guard-col h4 { display: flex; align-items: center; gap: .45rem; margin: 0 0 .8rem; font-size: .85rem; letter-spacing: .02em; text-transform: uppercase; color: var(--text-muted); }
+.funded-guard-snapshot { border-color: color-mix(in srgb, var(--accent-amber) 35%, var(--border)); background: color-mix(in srgb, var(--accent-amber) 5%, var(--surface-panel)); }
+.funded-live-badge { font-size: .65rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-green, #4ade80); border: 1px solid color-mix(in srgb, var(--accent-green, #4ade80) 50%, transparent); border-radius: 999px; padding: .1rem .5rem; }
+.funded-guard-snapshot dl { margin: 0 0 .6rem; display: grid; gap: .45rem; }
+.funded-guard-snapshot dl > div { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; }
+.funded-guard-snapshot dt { font-size: .78rem; color: var(--text-muted); }
+.funded-guard-snapshot dd { margin: 0; font-size: 1.05rem; font-weight: 700; color: var(--text); }
+.funded-guard-snapshot dd.neg { color: var(--accent-red, #f87171); }
+.funded-guard-snapshot dd.pos { color: var(--accent-green, #4ade80); }
+.funded-snapshot-note { font-size: .75rem; color: var(--text-muted); margin: 0 0 .8rem; }
+.funded-rules-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.funded-rules-fields .field { min-width: 0; }
+@media (max-width: 760px) { .funded-guard-grid { grid-template-columns: 1fr; } }
 .review-week-nav { display: inline-flex; align-items: center; gap: .4rem; }
 .review-week-nav .icon-button:disabled { opacity: .35; cursor: not-allowed; }
 @media (max-width: 640px) { .risk-tabs { flex-direction: column; } }

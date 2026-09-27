@@ -53,6 +53,12 @@ export interface FundedGuardSettings {
   dayStartOverride: string;
   /** Manual peak equity for trailing; "" means auto. */
   peakEquity: string;
+  /** MT5 snapshot balance at save time (starting-balance reference). */
+  mt5Balance: number | null;
+  /** MT5 snapshot equity at save time (daily-reference input). */
+  mt5Equity: number | null;
+  /** ISO timestamp of the MT5 snapshot. */
+  snapshotAt: string | null;
 }
 
 export interface GuardModeTradeInput {
