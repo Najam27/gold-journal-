@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { pktWeekRange, summarizeWeek } from "@/lib/weeklyReview";
+import { pktWeekRange, reviewableWeekOffset, summarizeWeek } from "@/lib/weeklyReview";
 import { formatMoney } from "@/lib/gold";
 
 interface ReviewTradeLike {
@@ -23,8 +23,9 @@ function pct(value: number | null): string {
 }
 
 /**
- * Guided weekly review ritual. Walks the trader through last week's stats
- * (PKT Monday–Sunday), biggest win/loss, top mistakes, the lesson, and one
+ * Guided weekly review ritual. Walks the trader through the reviewable week's
+ * stats (PKT Monday–Sunday — the week ending today on Sundays, otherwise the
+ * last completed week), biggest win/loss, top mistakes, the lesson, and one
  * rule for next week — then saves the review durably via weeklyReviews.save.
  * Fetches its own journal data, so it drops straight into the Analysis view.
  */
@@ -40,7 +41,9 @@ export function WeeklyReviewWizard({ accountId }: { accountId: number }) {
   const plans: Array<{ planDate: string | number | Date }> = (journal.data as { dailyPlans?: Array<{ planDate: string | number | Date }> } | undefined)?.dailyPlans ?? [];
 
   const week = useMemo(() => {
-    const { start, end } = pktWeekRange(new Date(), -1);
+    // On Sunday the week ending today is reviewable; otherwise show the last
+    // completed week.
+    const { start, end } = pktWeekRange(new Date(), reviewableWeekOffset());
     const summary = summarizeWeek(
       trades.map(trade => ({ ...trade, pnl: trade.pnl ?? null })),
       plans,

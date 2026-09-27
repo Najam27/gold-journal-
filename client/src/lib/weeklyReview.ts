@@ -89,6 +89,24 @@ function pktParts(ref: Date | string | number): { year: number; month: number; d
 }
 
 /**
+ * PKT weekday for an instant (1 = Monday … 7 = Sunday).
+ */
+export function pktWeekday(ref: Date | string | number = new Date()): number {
+  return pktParts(ref).weekday;
+}
+
+/**
+ * Which week offset the review wizard should show.
+ *
+ * Weeks run Monday–Sunday (PKT). From Monday to Saturday the current week is
+ * still in progress, so the wizard reviews the last completed week (-1). On
+ * Sunday the week ending today is reviewable, so it shows the current week (0).
+ */
+export function reviewableWeekOffset(ref: Date | string | number = new Date()): number {
+  return pktWeekday(ref) === 7 ? 0 : -1;
+}
+
+/**
  * Return the PKT week [start, end] as real Date instants.
  *
  * Approach: read the ref's PKT calendar date via Intl, walk back to Monday,

@@ -21,6 +21,11 @@ vi.mock("@/lib/trpc", () => ({
         },
       },
     },
+    journal: {
+      get: {
+        useQuery: () => ({ data: { trades: [] }, isLoading: false }),
+      },
+    },
   },
 }));
 vi.mock("@/lib/accountSelection", () => ({

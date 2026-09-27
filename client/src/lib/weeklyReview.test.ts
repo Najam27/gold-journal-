@@ -1,8 +1,42 @@
 import { describe, expect, it } from "vitest";
-import { pktWeekRange, summarizeWeek } from "./weeklyReview";
+import { pktWeekRange, pktWeekday, reviewableWeekOffset, summarizeWeek } from "./weeklyReview";
 
 // 27 Sep 2026 is a Sunday in PKT.
 const SUNDAY = new Date("2026-09-27T12:00:00+05:00");
+
+describe("pktWeekday", () => {
+  it("returns 7 for a Sunday in PKT", () => {
+    expect(pktWeekday(SUNDAY)).toBe(7);
+  });
+
+  it("returns 1 for a Monday in PKT", () => {
+    expect(pktWeekday(new Date("2026-09-21T09:00:00+05:00"))).toBe(1);
+  });
+
+  it("returns 6 for a Saturday in PKT", () => {
+    expect(pktWeekday(new Date("2026-09-26T18:00:00+05:00"))).toBe(6);
+  });
+});
+
+describe("reviewableWeekOffset", () => {
+  it("returns 0 on Sunday — the week ending today is reviewable", () => {
+    expect(reviewableWeekOffset(SUNDAY)).toBe(0);
+  });
+
+  it("returns -1 on Saturday — the current week is still in progress", () => {
+    expect(reviewableWeekOffset(new Date("2026-09-26T18:00:00+05:00"))).toBe(-1);
+  });
+
+  it("returns -1 on Monday", () => {
+    expect(reviewableWeekOffset(new Date("2026-09-21T09:00:00+05:00"))).toBe(-1);
+  });
+
+  it("pairs with pktWeekRange to yield 21–27 Sep on Sunday 27 Sep", () => {
+    const { start, end } = pktWeekRange(SUNDAY, reviewableWeekOffset(SUNDAY));
+    expect(start.toISOString()).toBe("2026-09-20T19:00:00.000Z"); // Mon 21 Sep 00:00 PKT
+    expect(end.toISOString()).toBe("2026-09-27T18:59:59.999Z"); // Sun 27 Sep 23:59:59.999 PKT
+  });
+});
 
 describe("pktWeekRange", () => {
   it("returns Monday 00:00 PKT -> Sunday 23:59:59.999 PKT for the week containing a Sunday ref", () => {

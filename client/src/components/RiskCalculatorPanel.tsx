@@ -2,6 +2,7 @@ import React, { useEffect, useState, type ReactNode } from "react";
 import { CircleDollarSign, Info, ShieldAlert } from "lucide-react";
 import { Field, RiskMetric } from "@/components/journalPrimitives";
 import { Input } from "@/components/ui/input";
+import { FundedGuardPanel } from "@/components/FundedGuardPanel";
 import { getSelectedAccountId, subscribeSelectedAccount } from "@/lib/accountSelection";
 import { formatMoney } from "@/lib/gold";
 import { trpc } from "@/lib/trpc";
@@ -673,6 +674,7 @@ export function RiskCalculatorPanel() {
               </p>
             )}
           </details>
+          <FundedGuardPanel accountId={accountId} />
     </section>
   );
 }

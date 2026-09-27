@@ -1,0 +1,225 @@
+import React, { useMemo, useState } from "react";
+import { ShieldAlert, ShieldCheck, TriangleAlert } from "lucide-react";
+import { Field, RiskMetric } from "@/components/journalPrimitives";
+import { Input } from "@/components/ui/input";
+import { getPktDateKey } from "@shared/pktDate";
+import {
+  DEFAULT_DAILY_DRAWDOWN_PCT,
+  DEFAULT_MAX_DRAWDOWN_PCT,
+  evaluateFundedGuard,
+  type DrawdownType,
+} from "@/lib/fundedGuard";
+import { trpc } from "@/lib/trpc";
+
+interface FundedTradeLike {
+  tradeDate: string | number | Date;
+  pnl: number | string | null;
+  result?: string | null;
+}
+
+/**
+ * Funded account guard for the Risk Calculator.
+ *
+ * Prop-firm drawdown rules expressed in percentages — the way firms actually
+ * write them — with the dollar equivalents derived live. Daily drawdown is
+ * the account killer: 5% of the day's starting balance at most firms (FTMO's
+ * number), resetting at server midnight, counting floating P&L. Maximum
+ * drawdown is typically 10%, static (from starting balance) or trailing
+ * (locked from peak equity).
+ *
+ * The live section reads today's realized journal P&L (PKT day) and shows how
+ * much of the daily allowance is already gone. This is a journal-side
+ * guardrail — it cannot stop a broker from filling the next trade.
+ */
+export function FundedGuardPanel({ accountId }: { accountId?: number }) {
+  const [accountSize, setAccountSize] = useState("");
+  const [dailyPct, setDailyPct] = useState(String(DEFAULT_DAILY_DRAWDOWN_PCT));
+  const [maxPct, setMaxPct] = useState(String(DEFAULT_MAX_DRAWDOWN_PCT));
+  const [drawdownType, setDrawdownType] = useState<DrawdownType>("static");
+  const [peakEquity, setPeakEquity] = useState("");
+
+  // Today's realized P&L from the journal (PKT calendar day, closed trades).
+  const journal = trpc.journal.get.useQuery(
+    { accountId: accountId ?? 0 },
+    { enabled: Boolean(accountId), staleTime: 30_000, refetchOnWindowFocus: false },
+  );
+  const todayKey = getPktDateKey(new Date());
+  const todayPnl = useMemo(() => {
+    const trades = ((journal.data as { trades?: FundedTradeLike[] } | undefined)?.trades ?? []);
+    return trades.reduce((sum, trade) => {
+      if (String(trade.result ?? "").toUpperCase() === "OPEN") return sum;
+      if (getPktDateKey(trade.tradeDate) !== todayKey) return sum;
+      const pnl = Number(trade.pnl);
+      return sum + (Number.isFinite(pnl) ? pnl : 0);
+    }, 0);
+  }, [journal.data, todayKey]);
+
+  const size = Number(accountSize);
+  const daily = Number(dailyPct);
+  const max = Number(maxPct);
+  const peak = Number(peakEquity);
+  const valid =
+    Number.isFinite(size) && size > 0 &&
+    Number.isFinite(daily) && daily > 0 && daily <= 20 &&
+    Number.isFinite(max) && max > 0 && max <= 50 &&
+    (drawdownType === "static" || (Number.isFinite(peak) && peak > 0) || peakEquity.trim() === "");
+
+  const evaluation = useMemo(
+    () =>
+      valid
+        ? evaluateFundedGuard(
+            {
+              accountSize: size,
+              dailyDrawdownPct: daily,
+              maxDrawdownPct: max,
+              drawdownType,
+              peakEquity: drawdownType === "trailing" && Number.isFinite(peak) && peak > 0 ? peak : null,
+            },
+            todayPnl,
+          )
+        : null,
+    [valid, size, daily, max, drawdownType, peak, todayPnl],
+  );
+
+  const LevelIcon =
+    evaluation?.level === "breached" ? ShieldAlert
+    : evaluation?.level === "danger" || evaluation?.level === "caution" ? TriangleAlert
+    : ShieldCheck;
+
+  return (
+    <details className="risk-explanation" open>
+      <summary>Funded account guard — prop-firm drawdown in %</summary>
+      <p className="risk-detail-note">
+        Prop firms write drawdown rules in <strong>percentages, not dollars</strong>.
+        The industry benchmark (FTMO): 5% daily drawdown, 10% maximum drawdown.
+        Breach either and the account is terminated — no warnings. Set your
+        firm&rsquo;s numbers once; the dollar equivalents update live.
+      </p>
+
+      <div className="risk-calculator-grid">
+        <Field label="Account size ($)">
+          <Input
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="100"
+            placeholder="e.g. 100000"
+            value={accountSize}
+            onChange={event => setAccountSize(event.target.value)}
+          />
+        </Field>
+        <Field label="Daily drawdown %">
+          <Input
+            type="number"
+            inputMode="decimal"
+            min="0.5"
+            max="20"
+            step="0.5"
+            value={dailyPct}
+            onChange={event => setDailyPct(event.target.value)}
+          />
+        </Field>
+        <Field label="Max drawdown %">
+          <Input
+            type="number"
+            inputMode="decimal"
+            min="1"
+            max="50"
+            step="0.5"
+            value={maxPct}
+            onChange={event => setMaxPct(event.target.value)}
+          />
+        </Field>
+        <Field label="Max drawdown type">
+          <select
+            value={drawdownType}
+            onChange={event => setDrawdownType(event.target.value as DrawdownType)}
+          >
+            <option value="static">Static — from starting balance</option>
+            <option value="trailing">Trailing — locks from peak equity</option>
+          </select>
+        </Field>
+        {drawdownType === "trailing" && (
+          <Field label="Peak equity so far ($)">
+            <Input
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="100"
+              placeholder="e.g. 108000"
+              value={peakEquity}
+              onChange={event => setPeakEquity(event.target.value)}
+            />
+          </Field>
+        )}
+      </div>
+
+      {!valid ? (
+        <p className="muted">
+          Enter your account size and your firm&rsquo;s drawdown percentages to
+          see the guard.
+        </p>
+      ) : (
+        evaluation && (
+          <>
+            <div className="risk-result-grid">
+              <RiskMetric
+                label="Daily loss limit"
+                value={`$${evaluation.dailyLossLimit.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
+                detail={`${daily}% of $${size.toLocaleString("en-US")} — resets daily`}
+                tone={evaluation.level === "clear" ? "profit" : "loss"}
+              />
+              <RiskMetric
+                label="Max loss limit"
+                value={`$${evaluation.maxLossLimit.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
+                detail={`${max}% ${drawdownType} — floor $${evaluation.maxDrawdownFloor.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
+              />
+              <RiskMetric
+                label="Max risk per trade"
+                value={`$${evaluation.maxRiskPerTrade.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
+                detail="30% of daily allowance — one trade must never end the day"
+                tone="gold"
+              />
+              <RiskMetric
+                label="Today's usage"
+                value={`${evaluation.dailyUsedPct.toFixed(0)}%`}
+                detail={
+                  journal.isLoading
+                    ? "Reading today's journal P&L…"
+                    : `Realized P&L today: $${todayPnl.toLocaleString("en-US", { maximumFractionDigits: 2 })} · $${evaluation.dailyRemaining.toLocaleString("en-US", { maximumFractionDigits: 2 })} left`
+                }
+                tone={evaluation.level === "clear" ? "profit" : "loss"}
+              />
+            </div>
+
+            <div
+              className={`risk-warning-panel ${evaluation.level === "clear" ? "caution" : ""}`}
+              role={evaluation.level === "clear" ? "status" : "alert"}
+            >
+              <LevelIcon size={18} />
+              <div>
+                <strong>
+                  {evaluation.level === "breached"
+                    ? "Daily drawdown breached"
+                    : evaluation.level === "danger"
+                      ? "Danger — almost at the daily limit"
+                      : evaluation.level === "caution"
+                        ? "Caution — daily limit in sight"
+                        : "Guard status"}
+                </strong>
+                <p>{evaluation.message}</p>
+                <p className="risk-warning-detail">
+                  {evaluation.stopsBeforeDailyBreach} full stop
+                  {evaluation.stopsBeforeDailyBreach === 1 ? "" : "s"} at the
+                  per-trade ceiling ends the day. Counts open floating P&L at
+                  most firms — the journal only sees closed trades, so leave a
+                  buffer.
+                </p>
+              </div>
+            </div>
+          </>
+        )
+      )}
+    </details>
+  );
+}
