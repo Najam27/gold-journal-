@@ -105,7 +105,6 @@ import { QuickTradeDialog } from "@/components/QuickTradeDialog";
 import { GuardBanner } from "@/components/GuardBanner";
 import { GuardModePanel } from "@/components/GuardModePanel";
 import { StreakPanel } from "@/components/StreakPanel";
-import { OnboardingPath } from "@/components/OnboardingPath";
 import { PnlCalendarWithWeeks } from "@/components/PnlCalendarWithWeeks";
 import { FlexibleGoalsView } from "@/components/FlexibleGoalsView";
 import { MentorView } from "@/components/MentorView";
@@ -595,12 +594,6 @@ export default function GoldJournal() {
     placeholderData: keepPreviousData,
   });
   // Weekly review count feeds the "First 30 trades" onboarding path. Lightweight:
-  // only the count matters, so limit 1 is enough to know whether any exist… but
-  // the onboarding phase needs the true count, so fetch up to 52.
-  const weeklyReviewCount = trpc.weeklyReviews.list.useQuery(
-    { accountId: accountId ?? 0, limit: 52 },
-    { enabled: Boolean(accountId), staleTime: 60_000, refetchOnWindowFocus: false },
-  ).data?.length ?? 0;
   const mt5WorkspaceInput = useMemo(
     () => (accountId ? { accountId } : undefined),
     [accountId]
@@ -1590,11 +1583,6 @@ export default function GoldJournal() {
                   guardConfig={(account as any)?.guardConfig ?? null}
                   trades={trades as any[]}
                   startingBalance={toNumber(account?.startingBalance)}
-                />
-                <OnboardingPath
-                  trades={trades as any[]}
-                  weeklyReviewCount={weeklyReviewCount}
-                  planCount={(data?.dailyPlans ?? []).length}
                 />
                 <TradeLog
                 stats={stats}
