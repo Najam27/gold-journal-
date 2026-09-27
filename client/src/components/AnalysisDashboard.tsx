@@ -945,10 +945,10 @@ export function AnalysisDashboard({ accountId }: Props) {
         {!analysis.mfeMae.available && (
           <p className="analysis-filter-note">
             To unlock this, open any trade and fill{" "}
-            <b>Max favorable excursion $</b> (best it looked) and{" "}
-            <b>Max adverse excursion $</b> (worst heat taken) in the Execution
-            section. Once logged, you'll see your average MFE/MAE and how much
-            of each move you kept.
+            <b>Highest unrealized gain $ (MFE)</b> and{" "}
+            <b>Highest unrealized loss $ (MAE)</b> in the Execution section.
+            Once logged, you'll see your average MFE/MAE and how much of each
+            move you kept.
           </p>
         )}
       </section>
@@ -1182,9 +1182,10 @@ export function AnalysisDashboard({ accountId }: Props) {
           <>
             <p className="analysis-note">{analysis.exitEfficiency.message}</p>
             <p className="analysis-filter-note">
-              Log <b>Max favorable excursion $</b> and <b>Max adverse excursion $</b> in
-              the Execution section of your trades to see how much of each move
-              you kept and how much heat you endured.
+              Log <b>Highest unrealized gain $ (MFE)</b> and{" "}
+              <b>Highest unrealized loss $ (MAE)</b> in the Execution section
+              of your trades to see how much of each move you kept and how
+              much heat you endured.
             </p>
           </>
         )}
