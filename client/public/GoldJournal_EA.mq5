@@ -1,5 +1,4 @@
-#property strict
-#property version   "2.18"
+#property version   "2.19"
 #property description "Gold Journal read-only journal bridge: never places or manages trades; sends account, position, and history facts to Gold Journal."
 
 input string Endpoint = "__GOLD_JOURNAL_MT5_ENDPOINT__";
@@ -18,7 +17,7 @@ input int MaxRetrySeconds = 60;
 // batches), so this must never exceed its 200-position cap.
 input int MaxOpenPositionsPerBatch = 200;
 
-const string EA_VERSION = "2.18.0";
+const string EA_VERSION = "2.19.0";
 const string PAYLOAD_VERSION = "2";
 const int REQUEST_TIMEOUT_MS = 15000;
 const int HISTORY_BATCH_SIZE = 50;
