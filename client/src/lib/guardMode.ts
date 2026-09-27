@@ -32,6 +32,27 @@ export interface GuardConfig {
   dailyLossLimit: number | null;
   maxDrawdownLimit: number | null;
   maxTradesPerDay: number | null;
+  /**
+   * Percentage-based funded guard, configured in the Risk Calculator.
+   * When present and enabled, the Trade Log banner is driven by these
+   * settings (via evaluateFundedGuard) instead of the legacy dollar limits.
+   */
+  funded?: FundedGuardSettings | null;
+}
+
+/** Funded guard settings, as configured in the Risk Calculator. */
+export interface FundedGuardSettings {
+  enabled: boolean;
+  /** Manual account size; null when sizeMode is "auto". */
+  accountSize: number | null;
+  sizeMode: "auto" | "manual";
+  dailyDrawdownPct: number;
+  maxDrawdownPct: number;
+  drawdownType: "static" | "trailing";
+  /** Manual day-start equity override; "" means auto-derive. */
+  dayStartOverride: string;
+  /** Manual peak equity for trailing; "" means auto. */
+  peakEquity: string;
 }
 
 export interface GuardModeTradeInput {

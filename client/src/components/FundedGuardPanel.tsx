@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { ShieldAlert, ShieldCheck, TriangleAlert } from "lucide-react";
 import { Field, RiskMetric } from "@/components/journalPrimitives";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,7 @@ import {
   evaluateFundedGuard,
   type DrawdownType,
 } from "@/lib/fundedGuard";
+import type { FundedGuardSettings, GuardConfig } from "@/lib/guardMode";
 import { trpc } from "@/lib/trpc";
 
 interface FundedTradeLike {
@@ -45,6 +46,62 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
   // Day-start equity override: blank means "auto" (live equity minus today's
   // realized P&L — the journal-side estimate of where the day opened).
   const [dayStartOverride, setDayStartOverride] = useState("");
+  // Tracks whether saved settings have been applied, so remote state never
+  // clobbers the trader's in-progress edits.
+  const [hydrated, setHydrated] = useState(false);
+
+  // Persisted funded-guard settings (per account). The Trade Log banner reads
+  // these, so the guard configured here protects the whole journal.
+  const accountList = trpc.accounts.list.useQuery(undefined, {
+    enabled: Boolean(accountId),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const savedGuardConfig = useMemo(() => {
+    const list = (accountList.data ?? []) as Array<{ id: number; guardConfig?: unknown }>;
+    const found = list.find(a => a.id === accountId);
+    return (found?.guardConfig ?? null) as GuardConfig | null;
+  }, [accountList.data, accountId]);
+  const setGuardConfig = trpc.accounts.setGuardConfig.useMutation();
+
+  // Hydrate once from saved settings.
+  useEffect(() => {
+    if (hydrated || !accountList.isSuccess) return;
+    const funded = savedGuardConfig?.funded;
+    if (funded) {
+      setSizeMode(funded.sizeMode);
+      setAccountSize(funded.accountSize != null ? String(funded.accountSize) : "");
+      setDailyPct(String(funded.dailyDrawdownPct));
+      setMaxPct(String(funded.maxDrawdownPct));
+      setDrawdownType(funded.drawdownType);
+      setDayStartOverride(funded.dayStartOverride);
+      setPeakEquity(funded.peakEquity);
+    }
+    setHydrated(true);
+  }, [hydrated, accountList.isSuccess, savedGuardConfig]);
+
+  // Persist on change (debounced) so the Trade Log banner follows the guard.
+  useEffect(() => {
+    if (!hydrated || !accountId) return;
+    const timer = setTimeout(() => {
+      const manualSize = Number(accountSize);
+      const funded: FundedGuardSettings = {
+        enabled: true,
+        accountSize: sizeMode === "manual" && Number.isFinite(manualSize) && manualSize > 0 ? manualSize : null,
+        sizeMode,
+        dailyDrawdownPct: Number(dailyPct) || DEFAULT_DAILY_DRAWDOWN_PCT,
+        maxDrawdownPct: Number(maxPct) || DEFAULT_MAX_DRAWDOWN_PCT,
+        drawdownType,
+        dayStartOverride,
+        peakEquity,
+      };
+      setGuardConfig.mutate({
+        accountId,
+        guardConfig: { ...(savedGuardConfig ?? { enabled: false, accountSize: null, dailyLossLimit: null, maxDrawdownLimit: null, maxTradesPerDay: null }), funded },
+      });
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [hydrated, accountId, sizeMode, accountSize, dailyPct, maxPct, drawdownType, dayStartOverride, peakEquity]);
 
   // Live account for auto-detect: MT5 workspace carries equity when a
   // connection is active.

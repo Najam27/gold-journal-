@@ -103,6 +103,7 @@ import { TradeLogWithViewer } from "@/components/TradeLogWithViewer";
 import { TradeDialogWithCustomOptions } from "@/components/TradeDialogWithCustomOptions";
 import { QuickTradeDialog } from "@/components/QuickTradeDialog";
 import { StreakPanel } from "@/components/StreakPanel";
+import { GuardBanner } from "@/components/GuardBanner";
 import { PnlCalendarWithWeeks } from "@/components/PnlCalendarWithWeeks";
 import { FlexibleGoalsView } from "@/components/FlexibleGoalsView";
 import { MentorView } from "@/components/MentorView";
@@ -1580,6 +1581,11 @@ export default function GoldJournal() {
             )}
             {view === "trades" && (
               <>
+                <GuardBanner
+                  guardConfig={(account as any)?.guardConfig ?? null}
+                  trades={trades as any[]}
+                  startingBalance={toNumber(account?.startingBalance)}
+                />
                 <TradeLog
                 stats={stats}
                 trades={pagedTrades}

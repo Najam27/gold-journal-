@@ -31,6 +31,14 @@ vi.mock("@/lib/trpc", () => ({
         }),
       },
     },
+    accounts: {
+      list: {
+        useQuery: () => ({ data: [], isSuccess: true }),
+      },
+      setGuardConfig: {
+        useMutation: () => ({ mutate: () => {} }),
+      },
+    },
   },
 }));
 

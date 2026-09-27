@@ -389,6 +389,16 @@ export const goldRouter = router({
         dailyLossLimit: z.number().finite().min(0).max(MAX_MONEY).nullable(),
         maxDrawdownLimit: z.number().finite().min(0).max(MAX_MONEY).nullable(),
         maxTradesPerDay: z.number().int().min(1).max(99).nullable(),
+        funded: z.object({
+          enabled: z.boolean(),
+          accountSize: z.number().finite().min(0).max(MAX_MONEY).nullable(),
+          sizeMode: z.enum(["auto", "manual"]),
+          dailyDrawdownPct: z.number().finite().min(0.5).max(20),
+          maxDrawdownPct: z.number().finite().min(1).max(50),
+          drawdownType: z.enum(["static", "trailing"]),
+          dayStartOverride: z.string().max(32),
+          peakEquity: z.string().max(32),
+        }).nullable().optional(),
       }).nullable(),
     })).mutation(async ({ ctx, input }) => {
       await getOwnedAccount(ctx.user.id, input.accountId);
