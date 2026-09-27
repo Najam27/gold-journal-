@@ -25,6 +25,7 @@ import type {
   MetricRow,
 } from "@shared/analysisEngine";
 import { buildPlaybook, type PlaybookCard } from "@shared/playbook";
+import { WeeklyReviewWizard } from "@/components/WeeklyReviewWizard";
 
 type Props = { accountId?: number; trades?: unknown[] };
 const money = (value: number | null) =>
@@ -1104,6 +1105,67 @@ export function AnalysisDashboard({ accountId }: Props) {
           </>
         )}
       </section>
+      <section className="panel">
+        <div className="panel-title">
+          <div>
+            <span>EXIT EFFICIENCY</span>
+            <h3>How much of the move you kept</h3>
+          </div>
+          <Sparkles size={18} />
+        </div>
+        {analysis.exitEfficiency.available ? (
+          <>
+            <div className="metric-list">
+              <span>
+                Captured <b>{analysis.exitEfficiency.averageCapturedPct != null ? `${analysis.exitEfficiency.averageCapturedPct.toFixed(0)}%` : "—"}</b>
+                {" "}of the available move on average (median {analysis.exitEfficiency.medianCapturedPct != null ? `${analysis.exitEfficiency.medianCapturedPct.toFixed(0)}%` : "—"})
+              </span>
+              <span>
+                Left on the table <b>{analysis.exitEfficiency.totalLeftOnTable != null ? money(analysis.exitEfficiency.totalLeftOnTable) : "—"}</b>
+                {" "}across {analysis.exitEfficiency.sample} trade{analysis.exitEfficiency.sample === 1 ? "" : "s"} with excursion data
+              </span>
+              {analysis.exitEfficiency.averageHeatPct != null && (
+                <span>
+                  Heat endured <b>{analysis.exitEfficiency.averageHeatPct.toFixed(0)}%</b> of planned risk on average
+                </span>
+              )}
+              {analysis.exitEfficiency.earlyExitCount > 0 && (
+                <span>
+                  <b>{analysis.exitEfficiency.earlyExitCount}</b> winner{analysis.exitEfficiency.earlyExitCount === 1 ? "" : "s"} exited with less than half the move captured
+                </span>
+              )}
+              {analysis.exitEfficiency.averageLeftOnTableR != null && (
+                <span>
+                  Left on the table <b>{analysis.exitEfficiency.averageLeftOnTableR.toFixed(1)}R</b> per winner on average
+                  (median {analysis.exitEfficiency.medianLeftOnTableR != null ? `${analysis.exitEfficiency.medianLeftOnTableR.toFixed(1)}R` : "—"})
+                </span>
+              )}
+              {analysis.exitEfficiency.averageMfeR != null && (
+                <span>
+                  Average MFE <b>{analysis.exitEfficiency.averageMfeR.toFixed(1)}R</b>
+                  {analysis.exitEfficiency.averageActualR != null && (
+                    <> vs <b>{analysis.exitEfficiency.averageActualR.toFixed(1)}R</b> actually captured</>
+                  )}
+                </span>
+              )}
+              {analysis.exitEfficiency.averageMaeR != null && (
+                <span>
+                  Average heat <b>{analysis.exitEfficiency.averageMaeR.toFixed(1)}R</b> of adverse excursion per trade
+                </span>
+              )}
+              {analysis.exitEfficiency.reached2RThenLostCount > 0 && (
+                <span>
+                  <b>{analysis.exitEfficiency.reached2RThenLostCount}</b> losing trade{analysis.exitEfficiency.reached2RThenLostCount === 1 ? "" : "s"} reached 2R+ in your favor at some point — the move existed, the exit didn't hold it
+                </span>
+              )}
+            </div>
+            <p className="analysis-note">{analysis.exitEfficiency.message}</p>
+          </>
+        ) : (
+          <p className="analysis-note">{analysis.exitEfficiency.message}</p>
+        )}
+      </section>
+      <WeeklyReviewWizard accountId={accountId ?? 0} />
       <section className="panel">
         <div className="panel-title">
           <div>

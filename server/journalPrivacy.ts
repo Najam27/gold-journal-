@@ -29,5 +29,5 @@ export function toSafeAccount<T extends RecordWithInternalScope>(account: T): T 
 }
 
 export function toSafeAccountListItem<T extends RecordWithInternalScope>(account: T) {
-  return { id: account.id, name: account.name, startingBalance: account.startingBalance, createdAt: account.createdAt, updatedAt: account.updatedAt };
+  return { id: account.id, name: account.name, startingBalance: account.startingBalance, guardConfig: (account as Record<string, unknown>).guardConfig ?? null, createdAt: account.createdAt, updatedAt: account.updatedAt };
 }

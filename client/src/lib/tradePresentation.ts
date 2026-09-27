@@ -161,6 +161,12 @@ function money(value: unknown): string {
   return isBlank(value) ? PRESENTATION_MISSING : formatMoney(toNumber(value));
 }
 
+function price(value: unknown): string {
+  if (isBlank(value)) return PRESENTATION_MISSING;
+  const numeric = toNumber(value);
+  return Number.isFinite(numeric) ? numeric.toLocaleString("en-US", { maximumFractionDigits: 5 }) : PRESENTATION_MISSING;
+}
+
 function rr(risk: unknown, reward: unknown): string {
   const formatted = formatRr(toNumber(risk), toNumber(reward));
   return formatted === PRESENTATION_MISSING && (isBlank(risk) || isBlank(reward)) ? PRESENTATION_MISSING : formatted;
@@ -324,6 +330,8 @@ type FieldSpec = {
   tone?: TradeTone;
   kpi?: boolean;
   inHeader?: boolean;
+  /** When true, surfaces (PDF, cards) skip this field if its value is missing. */
+  hideWhenMissing?: boolean;
 };
 
 type PresentationContext = { runningBalance?: number | null; process: TradeProcessAssessment; classification: TradePresentationClassification };
@@ -344,6 +352,7 @@ export const TRADE_PRESENTATION_FIELD_SPECS: FieldSpec[] = [
   { key: "openTime", label: "Open time", section: "overview", keys: ["openTime"], value: trade => formatPktDateTime(trade.openTime) },
   { key: "closeTime", label: "Close time", section: "overview", keys: ["closeTime"], value: trade => formatPktDateTime(trade.closeTime) },
   { key: "duration", label: "Trade duration", section: "overview", keys: [], value: trade => duration(trade) },
+  { key: "quickLogged", label: "Quick log", section: "overview", keys: ["quickLogged"], value: trade => (trade.quickLogged ? "Logged in 2 minutes — details pending" : PRESENTATION_MISSING), hideWhenMissing: true },
 
   /* 2 — Strategy */
   { key: "level", label: "Level / confluence", section: "strategy", keys: ["level"], value: trade => presentationText(trade.level), wide: true },
@@ -359,6 +368,7 @@ export const TRADE_PRESENTATION_FIELD_SPECS: FieldSpec[] = [
   { key: "tpPlacement", label: "TP placement", section: "execution", keys: ["tpPlacement"], value: trade => presentationText(trade.tpPlacement) },
   { key: "holdQuality", label: "Hold quality", section: "execution", keys: ["holdQuality"], value: trade => presentationText(trade.holdQuality) },
   { key: "patienceScore", label: "Patience score", section: "execution", keys: ["patienceScore"], value: trade => (isBlank(trade.patienceScore) ? PRESENTATION_MISSING : `${presentationSafeText(trade.patienceScore)}/5`), kpi: true },
+  { key: "planFollowScore", label: "Plan-following score", section: "execution", keys: ["planFollowScore"], value: trade => (isBlank(trade.planFollowScore) ? PRESENTATION_MISSING : `${presentationSafeText(trade.planFollowScore)}/5 — self-rated`), kpi: true, hideWhenMissing: true },
 
   /* 4 — Risk & performance */
   { key: "risk", label: "Planned risk", section: "risk", keys: ["risk"], value: trade => money(trade.risk), tone: "signed" },
@@ -369,6 +379,9 @@ export const TRADE_PRESENTATION_FIELD_SPECS: FieldSpec[] = [
   { key: "runningBalance", label: "Running balance", section: "risk", keys: ["runningBalance"], value: (_trade, context) => (context.runningBalance == null ? PRESENTATION_MISSING : formatMoney(context.runningBalance)), tone: "signed" },
   { key: "mfe", label: "MFE", section: "risk", keys: ["mfe"], value: trade => money(trade.mfe), tone: "signed" },
   { key: "mae", label: "MAE", section: "risk", keys: ["mae"], value: trade => money(trade.mae), tone: "signed" },
+  { key: "entryPrice", label: "Entry price", section: "risk", keys: ["entryPrice"], value: trade => price(trade.entryPrice), hideWhenMissing: true },
+  { key: "slPrice", label: "Stop-loss price", section: "risk", keys: ["slPrice"], value: trade => price(trade.slPrice), hideWhenMissing: true },
+  { key: "tpPrice", label: "Take-profit price", section: "risk", keys: ["tpPrice"], value: trade => price(trade.tpPrice), hideWhenMissing: true },
 
   /* 5 — Plan & discipline */
   { key: "planStatus", label: "Plan status", section: "discipline", keys: ["planStatus"], value: trade => presentationText(trade.planStatus) },
@@ -520,7 +533,10 @@ export function buildTradePresentation(trade: PresentationTrade, options: TradeP
       tone: spec.tone,
       kpi: spec.kpi,
       inHeader: spec.inHeader,
-    })),
+    })).filter(field => {
+      const spec = TRADE_PRESENTATION_FIELD_SPECS.find(s => s.key === field.key);
+      return !(spec?.hideWhenMissing && field.value === PRESENTATION_MISSING);
+    }),
   }));
   const byKey = new Map(sections.flatMap(section => section.fields).map(field => [field.key, field]));
   const kpis: TradePresentationKpi[] = TRADE_PRESENTATION_KPI_KEYS

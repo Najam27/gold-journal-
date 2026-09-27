@@ -19,6 +19,7 @@ import {
   ShieldAlert,
   Sparkles,
   Target,
+  Timer,
   Trash2,
   TrendingDown,
   TrendingUp,
@@ -97,7 +98,7 @@ function TradeTableSkeleton() {
   );
 }
 
-function BaseTradeLogWithViewer({ stats, trades, allTrades, pagination, listLoading, listError, onRetry, account, dangerGoals, mt5LivePositions = [], mt5Summary, mt5Syncing = false, hasMt5Connection = false, search, resultFilter, setSearch, setResultFilter, onPage, onNew, onDuplicate, onEdit, onDelete, onCash, onCsv, onExcel, onPdf, onClear }: any) {
+function BaseTradeLogWithViewer({ stats, trades, allTrades, pagination, listLoading, listError, onRetry, account, dangerGoals, mt5LivePositions = [], mt5Summary, mt5Syncing = false, hasMt5Connection = false, search, resultFilter, setSearch, setResultFilter, onPage, onNew, onQuickLog, onDuplicate, onEdit, onDelete, onCash, onCsv, onExcel, onPdf, onClear }: any) {
   const [viewedTrade, setViewedTrade] = useState<any>();
   const [exportingTradeId, setExportingTradeId] = useState<number | string | null>(null);
   const openingBalance = stats.balance - allTrades.reduce((sum: number, trade: any) => sum + toNumber(trade.pnl), 0);
@@ -140,6 +141,7 @@ function BaseTradeLogWithViewer({ stats, trades, allTrades, pagination, listLoad
         </>}
         <Button variant="outline" onClick={onDuplicate} disabled={!allTrades[0]}><RefreshCcw size={15} /> Duplicate last</Button>
         <Button variant="outline" onClick={onPdf}><FileText size={15} /> PDF</Button>
+        {onQuickLog && <Button variant="outline" onClick={onQuickLog}><Timer size={15} /> Quick log</Button>}
         <Button onClick={onNew}><Plus size={16} /> New Trade</Button>
       </div>
     </section>

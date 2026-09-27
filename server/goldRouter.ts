@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { accounts, cashMovements, dailyPlans, goals, mt5Connections, mt5LivePositions, notificationHistory, notificationSettings, optionLists, skippedTrades, traderProfiles, trades } from "../drizzle/schema";
+import { accounts, cashMovements, dailyPlans, goals, mt5Connections, mt5LivePositions, notificationHistory, notificationSettings, optionLists, skippedTrades, traderProfiles, trades, weeklyReviews } from "../drizzle/schema";
 import { ensureAccount, getJournal, getOwnedAccount, ownsTrade } from "./goldDb";
 import { getDb } from "./db";
 import { normalizeAccountName } from "./accountIdentity";
@@ -123,6 +123,20 @@ const tradeInput = z.object({
   mistake: freeText,
   holdQuality: freeText,
   patienceScore: z.number().int().min(1).max(5).nullable(),
+  // Self-rated plan-following (1-5, Steve Burns' minimum-journal checklist).
+  // Null = not rated (old trades, MT5 imports, quick-logs awaiting detail).
+  planFollowScore: z.number().int().min(1).max(5).nullable().optional().default(null),
+  // True when captured through the 2-minute quick-log mode; the trade still
+  // needs its details completed.
+  quickLogged: z.boolean().optional().default(false),
+  // Optional price levels (quick-log and full dialog). Non-negative; null =
+  // not recorded.
+  entryPrice: money(0).nullable().optional().default(null),
+  slPrice: money(0).nullable().optional().default(null),
+  tpPrice: money(0).nullable().optional().default(null),
+  // Excursion fields ($) for the exit-efficiency analysis. Null = not recorded.
+  mfe: money(0).nullable().optional().default(null),
+  mae: money(0).nullable().optional().default(null),
   risk: money(0).nullable(),
   reward: money(0).nullable(),
   pnl: money(),
@@ -365,6 +379,23 @@ export const goldRouter = router({
       await purgeAccountScreenshots(ctx.user.id, input.accountId);
       return removeAccountAtomic(ctx.user.id, input.accountId);
     }),
+    // Funded-account guard mode: per-account challenge rules stored as a jsonb
+    // config. The client evaluates today's P&L, drawdown, and trade count
+    // against these limits live.
+    setGuardConfig: protectedProcedure.input(accountIdInput.extend({
+      guardConfig: z.object({
+        enabled: z.boolean(),
+        accountSize: z.number().finite().min(0).max(MAX_MONEY).nullable(),
+        dailyLossLimit: z.number().finite().min(0).max(MAX_MONEY).nullable(),
+        maxDrawdownLimit: z.number().finite().min(0).max(MAX_MONEY).nullable(),
+        maxTradesPerDay: z.number().int().min(1).max(99).nullable(),
+      }).nullable(),
+    })).mutation(async ({ ctx, input }) => {
+      await getOwnedAccount(ctx.user.id, input.accountId);
+      const db = await dbOrThrow();
+      await db.update(accounts).set({ guardConfig: input.guardConfig, updatedAt: new Date() }).where(and(eq(accounts.id, input.accountId), eq(accounts.userId, ctx.user.id)));
+      return { success: true };
+    }),
   }),
   mt5: router({
     workspace: protectedProcedure.input(accountIdInput).query(({ ctx, input }) => getMt5Workspace(ctx.user.id, input.accountId)),
@@ -473,6 +504,9 @@ export const goldRouter = router({
           setupQuality: input.setupQuality, executionType: input.executionType, marketCondition: input.marketCondition,
           biasAlignment: input.biasAlignment, confirmationType: input.confirmationType, slPlacement: input.slPlacement,
           tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality, patienceScore: input.patienceScore,
+          planFollowScore: input.planFollowScore, quickLogged: input.quickLogged ?? false,
+          entryPrice: input.entryPrice?.toFixed(6) ?? null, slPrice: input.slPrice?.toFixed(6) ?? null, tpPrice: input.tpPrice?.toFixed(6) ?? null,
+          mfe: input.mfe?.toFixed(2) ?? null, mae: input.mae?.toFixed(2) ?? null,
           risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null, pnl: input.pnl.toFixed(2),
           notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
           planStatus: input.planStatus, planChecklist: input.planChecklist,
@@ -514,7 +548,10 @@ export const goldRouter = router({
           level: input.level, timeframe: input.timeframe, setupQuality: input.setupQuality, executionType: input.executionType,
           marketCondition: input.marketCondition, biasAlignment: input.biasAlignment, confirmationType: input.confirmationType,
           slPlacement: input.slPlacement, tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality,
-          patienceScore: input.patienceScore, risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null,
+          patienceScore: input.patienceScore, planFollowScore: input.planFollowScore, quickLogged: input.quickLogged ?? false,
+          entryPrice: input.entryPrice?.toFixed(6) ?? null, slPrice: input.slPrice?.toFixed(6) ?? null, tpPrice: input.tpPrice?.toFixed(6) ?? null,
+          mfe: input.mfe?.toFixed(2) ?? null, mae: input.mae?.toFixed(2) ?? null,
+          risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null,
           pnl: input.pnl.toFixed(2), notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
           planStatus: input.planStatus, planChecklist: input.planChecklist,
           mt5Ticket: nextTicket,
@@ -686,6 +723,59 @@ export const goldRouter = router({
       await getOwnedAccount(ctx.user.id, input.accountId);
       const db = await dbOrThrow();
       await db.delete(goals).where(and(eq(goals.userId, ctx.user.id), eq(goals.accountId, input.accountId)));
+      return { success: true };
+    }),
+  }),
+  // Guided weekly review ritual: completed reviews are stored per account per
+  // week (upsert), so re-doing a week replaces the row instead of duplicating
+  // it, and the "First 30 trades" onboarding path can verify completion.
+  weeklyReviews: router({
+    list: protectedProcedure.input(accountIdInput.extend({ limit: z.number().int().min(1).max(52).default(12) })).query(async ({ ctx, input }) => {
+      await getOwnedAccount(ctx.user.id, input.accountId);
+      const db = await dbOrThrow();
+      const rows = await db.select().from(weeklyReviews).where(and(eq(weeklyReviews.userId, ctx.user.id), eq(weeklyReviews.accountId, input.accountId))).orderBy(desc(weeklyReviews.weekStart)).limit(input.limit);
+      return rows.map(row => ({ ...toSafeJournalRecord(row) }));
+    }),
+    save: protectedProcedure.input(z.object({
+      accountId: z.number().int().positive(),
+      weekStart: timestampInput,
+      weekEnd: timestampInput,
+      statsSnapshot: z.record(z.string(), z.unknown()).nullable().optional().default(null),
+      lesson: optionalText(5_000).nullable(),
+      ruleForNextWeek: optionalText(1_000).nullable(),
+    }).superRefine((value, ctx) => {
+      if (value.weekEnd <= value.weekStart) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "The review week must end after it starts." });
+    })).mutation(async ({ ctx, input }) => {
+      await getOwnedAccount(ctx.user.id, input.accountId);
+      const db = await dbOrThrow();
+      const values = {
+        userId: ctx.user.id,
+        accountId: input.accountId,
+        weekStart: new Date(input.weekStart),
+        weekEnd: new Date(input.weekEnd),
+        statsSnapshot: input.statsSnapshot as Record<string, unknown> | null,
+        lesson: input.lesson || null,
+        ruleForNextWeek: input.ruleForNextWeek || null,
+        updatedAt: new Date(),
+      };
+      // One review per account per calendar week: a repeat review for the same
+      // week replaces the stored row. The client always sends weekStart as the
+      // same deterministic instant (PKT Monday 00:00) for a given week, so an
+      // exact-equality lookup is a reliable upsert key. Single-user,
+      // single-action — no lost-update race to worry about here.
+      const existing = await db.select({ id: weeklyReviews.id }).from(weeklyReviews).where(and(
+        eq(weeklyReviews.userId, ctx.user.id),
+        eq(weeklyReviews.accountId, input.accountId),
+        eq(weeklyReviews.weekStart, values.weekStart),
+      )).limit(1);
+      if (existing[0]) {
+        await db.update(weeklyReviews).set({
+          weekEnd: values.weekEnd, statsSnapshot: values.statsSnapshot, lesson: values.lesson,
+          ruleForNextWeek: values.ruleForNextWeek, updatedAt: values.updatedAt,
+        }).where(and(eq(weeklyReviews.id, existing[0].id), eq(weeklyReviews.userId, ctx.user.id)));
+      } else {
+        await db.insert(weeklyReviews).values(values);
+      }
       return { success: true };
     }),
   }),

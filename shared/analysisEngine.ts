@@ -128,7 +128,35 @@ export type AnalysisResult = {
   behavior: { tags: MetricRow[]; emotions: MetricRow[]; activity: { activeDays: number; averageTradesPerActiveDay: number; maxTradesInDay: number; concentratedDays: number }; coverage: { taggedTrades: number; emotionTaggedTrades: number; patienceRatedTrades: number; closedTrades: number }; limitations: string[] };
   journalQuality: { complete: number; incomplete: number; completeness: number; warnings: QualityWarning[] };
   mfeMae: { available: number; unavailable: number; message: string; mfe: MetricRow | null; mae: MetricRow | null };
-  exitEfficiency: { available: false; message: string };
+  exitEfficiency: {
+    available: boolean;
+    /** Closed trades carrying excursion data. */
+    sample: number;
+    /** Mean share of the available move actually captured (pnl / mfe) on
+     * winning trades, as a 0-100 percentage. */
+    averageCapturedPct: number | null;
+    medianCapturedPct: number | null;
+    /** Sum of (mfe - pnl) left on the table across winning trades, in dollars. */
+    totalLeftOnTable: number | null;
+    /** Mean adverse excursion as a share of planned risk (mae / risk), 0-100+. */
+    averageHeatPct: number | null;
+    /** Winners that captured less than half of what was available. */
+    earlyExitCount: number;
+    /** Losses whose MFE reached 2R+ at some point — the favorable move existed
+     * but the trade still lost. Excursion data has no timestamps, so no claim
+     * is made about whether the stop was hit before or after the move. */
+    reached2RThenLostCount: number;
+    /** Mean actual R (pnl / risk) across trades with both fields. */
+    averageActualR: number | null;
+    /** Mean MFE in R multiples (mfe / risk). */
+    averageMfeR: number | null;
+    /** Mean MAE in R multiples (mae / risk) — average heat in R. */
+    averageMaeR: number | null;
+    /** Mean max(0, mfeR - actualR) on winning trades: R left on the table. */
+    averageLeftOnTableR: number | null;
+    medianLeftOnTableR: number | null;
+    message: string;
+  };
   edgeCards: { top: MetricRow | null; weak: MetricRow | null; mostConsistent: MetricRow | null; highestExpectancy: MetricRow | null; bestR: MetricRow | null };
   warnings: string[];
 };
@@ -281,6 +309,108 @@ export function filterAnalysisTrades(trades: AnalysisTrade[], filters: AnalysisF
   return trades.filter(trade => { const date = dateValue(trade.tradeDate); return (!start || date >= start) && date <= end && (!filters.session || clean(trade.session) === clean(filters.session)) && (!filters.timeframe || clean(trade.timeframe) === clean(filters.timeframe)) && (!filters.level || clean(trade.level) === clean(filters.level)) && (!filters.setup || clean(trade.setupQuality) === clean(filters.setup)) && (!filters.direction || clean(trade.direction) === filters.direction) && (!filters.result || clean(trade.result) === filters.result); });
 }
 
+/**
+ * Exit efficiency: "how much of what was available did I actually take, and
+ * how much heat did I sit through?" Turns the vague "I exit too early" into
+ * numbers. MFE/MAE are optional journal fields, so every aggregate degrades to
+ * null (not zero) when the data is absent.
+ */
+function exitEfficiencyMetrics(closed: AnalysisTrade[]): AnalysisResult["exitEfficiency"] {
+  const num = (value: unknown): number | null => {
+    if (value == null || value === "") return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  };
+  const mean = (values: number[]) => (values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null);
+  const median = (values: number[]) => {
+    if (!values.length) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  };
+  const withMfe = closed.filter(trade => { const mfe = num(trade.mfe); return mfe != null && mfe > 0; });
+  const winners = withMfe.filter(trade => clean(trade.result) === "WIN");
+  const captured = winners
+    .map(trade => ({ pnl: num(trade.pnl) ?? 0, mfe: num(trade.mfe) ?? 0 }))
+    .filter(item => item.mfe > 0)
+    .map(item => (item.pnl / item.mfe) * 100);
+  const leftOnTable = winners.reduce((sum, trade) => {
+    const pnl = num(trade.pnl) ?? 0;
+    const mfe = num(trade.mfe) ?? 0;
+    return sum + Math.max(0, mfe - pnl);
+  }, 0);
+  // R-based exit math. actualR = pnl / risk; mfeR = mfe / risk; the R left on
+  // the table is max(0, mfeR - actualR) — how many R the exit gave back.
+  const rMultiples = (pick: (trade: AnalysisTrade) => number | null) =>
+    closed
+      .map(trade => {
+        const risk = num(trade.risk);
+        const value = pick(trade);
+        return risk != null && risk > 0 && value != null ? value / risk : null;
+      })
+      .filter((value): value is number => value != null);
+  const actualRValues = rMultiples(trade => num(trade.pnl));
+  const mfeRValues = rMultiples(trade => num(trade.mfe));
+  const maeRValues = rMultiples(trade => num(trade.mae));
+  const leftOnTableRValues = winners
+    .map(trade => {
+      const risk = num(trade.risk);
+      const pnl = num(trade.pnl);
+      const mfe = num(trade.mfe);
+      if (risk == null || risk <= 0 || pnl == null || mfe == null) return null;
+      return Math.max(0, mfe / risk - pnl / risk);
+    })
+    .filter((value): value is number => value != null);
+  const heat = closed
+    .map(trade => ({ mae: num(trade.mae), risk: num(trade.risk) }))
+    .filter((item): item is { mae: number; risk: number } => item.mae != null && item.mae > 0 && item.risk != null && item.risk > 0)
+    .map(item => (item.mae / item.risk) * 100);
+  const earlyExitCount = captured.filter(pct => pct < 50).length;
+  const reached2RThenLostCount = closed.filter(trade => {
+    if (clean(trade.result) !== "LOSS") return false;
+    const mfe = num(trade.mfe);
+    const risk = num(trade.risk);
+    return mfe != null && risk != null && risk > 0 && mfe >= 2 * risk;
+  }).length;
+  if (!withMfe.length && !heat.length) {
+    return {
+      available: false, sample: 0, averageCapturedPct: null, medianCapturedPct: null,
+      totalLeftOnTable: null, averageHeatPct: null, earlyExitCount: 0, reached2RThenLostCount: 0,
+      averageActualR: null, averageMfeR: null, averageMaeR: null,
+      averageLeftOnTableR: null, medianLeftOnTableR: null,
+      message: "Exit efficiency is unavailable until MFE/MAE are logged — add the excursion fields on a trade to unlock it.",
+    };
+  }
+  const averageCapturedPct = mean(captured);
+  const medianCapturedPct = median(captured);
+  const averageHeatPct = mean(heat);
+  const totalLeftOnTable = winners.length ? round(leftOnTable, 2) : null;
+  const averageActualR = mean(actualRValues);
+  const averageMfeR = mean(mfeRValues);
+  const averageMaeR = mean(maeRValues);
+  const averageLeftOnTableR = mean(leftOnTableRValues);
+  const medianLeftOnTableR = median(leftOnTableRValues);
+  const message = averageCapturedPct == null
+    ? `${withMfe.length} trade${withMfe.length === 1 ? "" : "s"} carry excursion data, but none are winners — capture rate needs winning trades with MFE.`
+    : `On ${winners.length} winning trade${winners.length === 1 ? "" : "s"} you captured ${averageCapturedPct.toFixed(0)}% of the available move on average ($${(totalLeftOnTable ?? 0).toFixed(0)} left on the table).`;
+  return {
+    available: true,
+    sample: withMfe.length,
+    averageCapturedPct: averageCapturedPct == null ? null : round(averageCapturedPct, 1),
+    medianCapturedPct: medianCapturedPct == null ? null : round(medianCapturedPct, 1),
+    totalLeftOnTable,
+    averageHeatPct: averageHeatPct == null ? null : round(averageHeatPct, 1),
+    earlyExitCount,
+    reached2RThenLostCount,
+    averageActualR: averageActualR == null ? null : round(averageActualR, 2),
+    averageMfeR: averageMfeR == null ? null : round(averageMfeR, 2),
+    averageMaeR: averageMaeR == null ? null : round(averageMaeR, 2),
+    averageLeftOnTableR: averageLeftOnTableR == null ? null : round(averageLeftOnTableR, 2),
+    medianLeftOnTableR: medianLeftOnTableR == null ? null : round(medianLeftOnTableR, 2),
+    message,
+  };
+}
+
 export function buildAnalysis(trades: AnalysisTrade[], filters: AnalysisFilters = {}): AnalysisResult {
   const filtered = filterAnalysisTrades(trades, filters); const closed = sortedClosed(filtered); const overview = metricRow("All closed trades", closed); const quality = qualityMetrics(filtered); const streak = streakStats(closed); const drawdown = equityStats(closed); const allRows = { sessions: rank(groupBy(filtered, ["session"])), timeframes: rank(groupBy(filtered, ["timeframe"])), levels: rank(groupBy(filtered, ["level"])), setups: rank(groupBy(filtered, ["setupQuality"])), directions: rank(groupBy(filtered, ["direction"])), days: rank(groupedDays(filtered)), hours: rank(groupedHours(filtered)), sessionTimeframes: conditionalRows(filtered, ["session", "timeframe"]), levelSessions: conditionalRows(filtered, ["level", "session"]), levelTimeframes: conditionalRows(filtered, ["level", "timeframe"]), sessionTimeframeLevels: conditionalRows(filtered, ["session", "timeframe", "level"]), setupSessions: conditionalRows(filtered, ["setupQuality", "session"]), setupTimeframes: conditionalRows(filtered, ["setupQuality", "timeframe"]), setupLevels: conditionalRows(filtered, ["setupQuality", "level"]), marketConditions: rank(groupBy(filtered, ["marketCondition"])), executionTypes: rank(groupBy(filtered, ["executionType"])), biasAlignments: rank(groupBy(filtered, ["biasAlignment"])), confirmations: rank(groupBy(filtered, ["confirmationType"])) };
   const rolling = [20, 30, 50].map(window => { const row = metricRow(`Last ${window}`, closed.slice(-window)); return { window, sample: row.sample, expectancy: row.expectancy, winRate: row.winRate, profitFactor: row.profitFactor, averageR: row.averageR }; }).filter(row => row.sample >= 5);
@@ -290,7 +420,8 @@ export function buildAnalysis(trades: AnalysisTrade[], filters: AnalysisFilters 
   const edgeCandidates = rank([...allRows.sessions, ...allRows.timeframes, ...allRows.levels, ...allRows.setups, ...allRows.marketConditions, ...allRows.executionTypes, ...allRows.biasAlignments, ...allRows.confirmations, ...allRows.sessionTimeframes, ...allRows.levelSessions, ...allRows.levelTimeframes]).filter(row => row.sample >= EDGE_MIN_SAMPLE); const positiveEdgeRows = edgeCandidates.filter(row => row.expectancy >= 0);
   const behavior = behavioralMetrics(filtered); const execution = executionMetrics(filtered); const warnings = [...quality.warnings.filter(item => item.percentage >= 20).map(item => item.message), ...(closed.length < 20 ? ["Evidence is limited: fewer than 20 closed trades are available."] : []), ...(filtered.length > 0 && closed.length !== filtered.length ? ["OPEN trades are excluded from performance metrics."] : []), ...(!mfeTrades.length ? ["MFE/MAE unavailable: no excursion series is stored for these trades."] : []), ...(edgeCandidates.length > 0 && positiveEdgeRows.length === 0 ? ["No context meets the non-negative expectancy threshold for an edge label."] : [])];
   const planDeviation = planDeviationCost(filtered);
-  return { version: "analysis-v1", filters, timezone: "Asia/Karachi", period: { start: closed.length ? new Date(dateValue(closed[0].tradeDate)).toISOString() : null, end: closed.length ? new Date(dateValue(closed.at(-1)?.tradeDate)).toISOString() : null, sample: overview.sample }, overview, ...allRows, rolling, decay, streaks: { ...streak, afterWin: afterWins.length ? metricRow("After wins", afterWins) : null, afterLoss: afterLosses.length ? metricRow("After losses", afterLosses) : null }, drawdown: { maximum: drawdown.maxDrawdown, average: drawdown.averageDrawdown, largest: drawdown.maxDrawdown, count: drawdown.drawdownCount, durationTrades: drawdown.durationTrades, recoveryTrades: drawdown.recoveryTrades },     duration: durationMetrics(filtered), risk: riskMetrics(filtered), execution, winLoss: { winners: metricRow("Winners", closed.filter(trade => trade.result === "WIN")), losers: metricRow("Losers", closed.filter(trade => trade.result === "LOSS")), dimensions: winLossDimensions }, behavior, journalQuality: quality, mfeMae: { available: mfeTrades.length, unavailable: closed.length - mfeTrades.length, message: mfeTrades.length ? "Historical excursion fields were available for this sample." : "MFE/MAE unavailable because the journal does not store price-series excursions.", mfe: mfeValues.length ? metricRow("MFE", mfeValues) : null, mae: maeValues.length ? metricRow("MAE", maeValues) : null }, exitEfficiency: { available: false, message: "Historical exit efficiency is unavailable because achievable intratrade maximums are not stored." }, edgeCards: { top: positiveEdgeRows[0] ?? null, weak: [...allRows.sessions, ...allRows.timeframes, ...allRows.levels, ...allRows.setups, ...allRows.marketConditions, ...allRows.executionTypes, ...allRows.biasAlignments, ...allRows.confirmations, ...allRows.sessionTimeframes, ...allRows.levelSessions, ...allRows.levelTimeframes].filter(row => row.sample >= EDGE_MIN_SAMPLE).sort((a, b) => a.edgeScore - b.edgeScore || a.expectancy - b.expectancy)[0] ?? null, mostConsistent: rank([...allRows.sessions, ...allRows.timeframes, ...allRows.levels].filter(row => row.sample >= 10).sort((a, b) => confidenceRank[b.confidence] - confidenceRank[a.confidence] || b.dataCompleteness - a.dataCompleteness))[0] ?? null, highestExpectancy: [...positiveEdgeRows].sort((a, b) => b.expectancy - a.expectancy || b.sample - a.sample)[0] ?? null, bestR: [...positiveEdgeRows].filter(row => row.expectancyR !== null).sort((a, b) => (b.expectancyR ?? -Infinity) - (a.expectancyR ?? -Infinity))[0] ?? null }, planDeviation, warnings };
+  const exitEfficiency = exitEfficiencyMetrics(closed);
+  return { version: "analysis-v1", filters, timezone: "Asia/Karachi", period: { start: closed.length ? new Date(dateValue(closed[0].tradeDate)).toISOString() : null, end: closed.length ? new Date(dateValue(closed.at(-1)?.tradeDate)).toISOString() : null, sample: overview.sample }, overview, ...allRows, rolling, decay, streaks: { ...streak, afterWin: afterWins.length ? metricRow("After wins", afterWins) : null, afterLoss: afterLosses.length ? metricRow("After losses", afterLosses) : null }, drawdown: { maximum: drawdown.maxDrawdown, average: drawdown.averageDrawdown, largest: drawdown.maxDrawdown, count: drawdown.drawdownCount, durationTrades: drawdown.durationTrades, recoveryTrades: drawdown.recoveryTrades },     duration: durationMetrics(filtered), risk: riskMetrics(filtered), execution, winLoss: { winners: metricRow("Winners", closed.filter(trade => trade.result === "WIN")), losers: metricRow("Losers", closed.filter(trade => trade.result === "LOSS")), dimensions: winLossDimensions }, behavior, journalQuality: quality, mfeMae: { available: mfeTrades.length, unavailable: closed.length - mfeTrades.length, message: mfeTrades.length ? "Historical excursion fields were available for this sample." : "MFE/MAE unavailable because the journal does not store price-series excursions.", mfe: mfeValues.length ? metricRow("MFE", mfeValues) : null, mae: maeValues.length ? metricRow("MAE", maeValues) : null }, exitEfficiency, edgeCards: { top: positiveEdgeRows[0] ?? null, weak: [...allRows.sessions, ...allRows.timeframes, ...allRows.levels, ...allRows.setups, ...allRows.marketConditions, ...allRows.executionTypes, ...allRows.biasAlignments, ...allRows.confirmations, ...allRows.sessionTimeframes, ...allRows.levelSessions, ...allRows.levelTimeframes].filter(row => row.sample >= EDGE_MIN_SAMPLE).sort((a, b) => a.edgeScore - b.edgeScore || a.expectancy - b.expectancy)[0] ?? null, mostConsistent: rank([...allRows.sessions, ...allRows.timeframes, ...allRows.levels].filter(row => row.sample >= 10).sort((a, b) => confidenceRank[b.confidence] - confidenceRank[a.confidence] || b.dataCompleteness - a.dataCompleteness))[0] ?? null, highestExpectancy: [...positiveEdgeRows].sort((a, b) => b.expectancy - a.expectancy || b.sample - a.sample)[0] ?? null, bestR: [...positiveEdgeRows].filter(row => row.expectancyR !== null).sort((a, b) => (b.expectancyR ?? -Infinity) - (a.expectancyR ?? -Infinity))[0] ?? null }, planDeviation, warnings };
 }
 
 export function compactAnalysisForAi(analysis: AnalysisResult) {

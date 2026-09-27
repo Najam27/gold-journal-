@@ -7,7 +7,7 @@ import { AnalysisDashboard } from "./AnalysisDashboard";
 
 const analysis = buildAnalysis([{ tradeDate: "2026-01-01", result: "WIN", pnl: 10, risk: 10, reward: 20, session: "London", timeframe: "M5", level: "Support", setupQuality: "A", direction: "BUY" }]);
 
-vi.mock("@/lib/trpc", () => ({ trpc: { analysis: { get: { useQuery: () => ({ data: analysis, isLoading: false, isError: false }) }, compare: { useQuery: () => ({ data: undefined }) }, saveAiReport: { useMutation: () => ({ mutateAsync: vi.fn() }) } } } }));
+vi.mock("@/lib/trpc", () => ({ trpc: { useUtils: () => ({ weeklyReviews: { list: { invalidate: vi.fn() } } }), analysis: { get: { useQuery: () => ({ data: analysis, isLoading: false, isError: false }) }, compare: { useQuery: () => ({ data: undefined }) }, saveAiReport: { useMutation: () => ({ mutateAsync: vi.fn() }) } }, journal: { get: { useQuery: () => ({ data: { trades: [], dailyPlans: [] } }) } }, weeklyReviews: { list: { useQuery: () => ({ data: [] }) }, save: { useMutation: () => ({ mutateAsync: vi.fn() }) } } } }));
 
 describe("AnalysisDashboard", () => {
   it("renders deterministic evidence before optional AI output", () => {

@@ -19,6 +19,7 @@ import { addPktDays, formatPktMonth, pktDateToTimestamp } from "@shared/pktDate"
 import { BEHAVIORAL_OBJECTIVES, EMOTIONAL_STATES, PSYCHOLOGY_TRIGGERS, calculateTradingReadiness } from "@/lib/psychology";
 import { trpc } from "@/lib/trpc";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { checkRuleChange, type RuleChangeCheck } from "@/lib/ruleChangeGuard";
 import {
   appliedRules,
   copiedDraftFromPlan,
@@ -170,6 +171,21 @@ export function PlanExecutionEditor({ account, plans = [], trades = [], behavior
   );
   const status = useMemo(() => planSessionStatus({ plan: selectedPlan, trades, day: planDate }), [selectedPlan, trades, planDate]);
   const previousPlan = useMemo(() => findPreviousPlan(plans as any[], planDate), [plans, planDate]);
+  // 30-trade rule-change guard: a rule only earns a change after 30 closed
+  // trades on it. Compares this plan's rules against the previous saved plan's
+  // rules; the first plan ever is creation, not a change.
+  const [ruleChangeOverride, setRuleChangeOverride] = useState(false);
+  const [ruleChangePrompt, setRuleChangePrompt] = useState<RuleChangeCheck | null>(null);
+  const ruleCheck = useMemo(() => checkRuleChange({
+    previousRules: ((previousPlan?.rulesPlanned ?? []) as any[]).map(rule => ({ id: String(rule.id ?? rule.text), label: String(rule.text ?? "") })),
+    newRules: (rulesForSave as any[]).map(rule => ({ id: String(rule.id ?? rule.text), label: String(rule.text ?? "") })),
+    previousPlanDate: previousPlan?.planDate ?? null,
+    trades: (trades as any[]).map(trade => ({ tradeDate: trade.tradeDate, result: trade.result })),
+  }), [previousPlan, rulesForSave, trades]);
+  // The override is single-use: any new rule edit re-arms the guard.
+  useEffect(() => {
+    if (!ruleCheck.shouldWarn) setRuleChangeOverride(false);
+  }, [ruleCheck.shouldWarn]);
   const copyOptions = useMemo(() => copySourceOptions(plans as any[], planDate), [plans, planDate]);
   const historyOptions = useMemo(() => copySourceOptions(plans as any[]), [plans]);
   const changedFields = useMemo(
@@ -261,6 +277,12 @@ export function PlanExecutionEditor({ account, plans = [], trades = [], behavior
 
   const save = async () => {
     if (!account) return;
+    // 30-trade rule-change guard: changing the rules before 30 closed trades
+    // on the current set needs an explicit, informed override — not a reflex.
+    if (ruleCheck.shouldWarn && !ruleChangeOverride) {
+      setRuleChangePrompt(ruleCheck);
+      return;
+    }
     setNotice(null);
     const planDateValue = planDateTimestamp(planDate);
     const existingOpening = Array.isArray(selectedPlan?.emotionStart)
@@ -758,6 +780,40 @@ export function PlanExecutionEditor({ account, plans = [], trades = [], behavior
           </div>
         </section>
       </div>
+      {ruleChangePrompt && (
+        <div className="rule-guard-scrim" role="dialog" aria-modal="true" aria-label="Rule change guard">
+          <div className="rule-guard-card">
+            <h3>Hold on — the rules haven't earned a change yet.</h3>
+            <p className="rule-guard-message">{ruleChangePrompt.message}</p>
+            {(ruleChangePrompt.added.length > 0 || ruleChangePrompt.removed.length > 0 || ruleChangePrompt.renamed.length > 0) && (
+              <ul className="rule-guard-diff">
+                {ruleChangePrompt.added.map(label => <li key={`add-${label}`}><strong>+</strong> {label}</li>)}
+                {ruleChangePrompt.removed.map(label => <li key={`del-${label}`}><strong>−</strong> {label}</li>)}
+                {ruleChangePrompt.renamed.map(item => <li key={`ren-${item.from}`}><strong>~</strong> {item.from} → {item.to}</li>)}
+              </ul>
+            )}
+            <p className="rule-guard-why">
+              Thirty trades is the minimum sample before a rule can be judged.
+              Changing early usually means the rule was never tested — it means
+              the last loss stung.
+            </p>
+            <div className="rule-guard-actions">
+              <Button variant="outline" onClick={() => setRuleChangePrompt(null)}>
+                Keep the rules
+              </Button>
+              <Button
+                onClick={() => {
+                  setRuleChangeOverride(true);
+                  setRuleChangePrompt(null);
+                  void save();
+                }}
+              >
+                I understand — change anyway
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

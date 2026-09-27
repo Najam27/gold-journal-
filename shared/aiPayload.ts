@@ -158,7 +158,7 @@ export type AiCoreContext = {
   behavior: { tags: MetricRowSummary[]; emotions: MetricRowSummary[]; activity: AnalysisResult["behavior"]["activity"]; coverage: AnalysisResult["behavior"]["coverage"]; limitations: string[] };
   journalQuality: { complete: number; incomplete: number; completeness: number; warnings: string[] };
   mfeMae: { available: number; unavailable: number; message: string };
-  exitEfficiency: { available: false; message: string };
+  exitEfficiency: { available: boolean; sample: number; averageCapturedPct: number | null; medianCapturedPct: number | null; totalLeftOnTable: number | null; averageHeatPct: number | null; earlyExitCount: number; reached2RThenLostCount: number; averageActualR: number | null; averageMfeR: number | null; averageMaeR: number | null; averageLeftOnTableR: number | null; medianLeftOnTableR: number | null; message: string };
   warnings: string[];
 };
 
@@ -477,7 +477,7 @@ export function buildCoreContext(analysis: AnalysisResult): AiCoreContext {
     behavior: { tags: analysis.behavior.tags.slice(0, 12).map(summarizeRow), emotions: analysis.behavior.emotions.slice(0, 12).map(summarizeRow), activity: analysis.behavior.activity, coverage: analysis.behavior.coverage, limitations: analysis.behavior.limitations },
     journalQuality: { complete: analysis.journalQuality.complete, incomplete: analysis.journalQuality.incomplete, completeness: analysis.journalQuality.completeness, warnings: analysis.journalQuality.warnings.map(warning => warning.message).slice(0, 10) },
     mfeMae: { available: analysis.mfeMae.available, unavailable: analysis.mfeMae.unavailable, message: analysis.mfeMae.message },
-    exitEfficiency: { available: false, message: analysis.exitEfficiency.message },
+    exitEfficiency: { available: analysis.exitEfficiency.available, sample: analysis.exitEfficiency.sample, averageCapturedPct: analysis.exitEfficiency.averageCapturedPct, medianCapturedPct: analysis.exitEfficiency.medianCapturedPct, totalLeftOnTable: analysis.exitEfficiency.totalLeftOnTable, averageHeatPct: analysis.exitEfficiency.averageHeatPct, earlyExitCount: analysis.exitEfficiency.earlyExitCount, reached2RThenLostCount: analysis.exitEfficiency.reached2RThenLostCount, averageActualR: analysis.exitEfficiency.averageActualR, averageMfeR: analysis.exitEfficiency.averageMfeR, averageMaeR: analysis.exitEfficiency.averageMaeR, averageLeftOnTableR: analysis.exitEfficiency.averageLeftOnTableR, medianLeftOnTableR: analysis.exitEfficiency.medianLeftOnTableR, message: analysis.exitEfficiency.message },
     warnings: analysis.warnings.slice(0, 10),
   };
 }

@@ -96,7 +96,9 @@ describe("canonical trade presentation model", () => {
   it("uses identical labels and values on every surface", () => {
     const presented = model();
     const fromSections = new Map(presented.sections.flatMap(section => section.fields).map(field => [field.label, field.value]));
-    TRADE_PRESENTATION_LABELS.forEach(label => expect(fromSections.has(label), `missing label ${label}`).toBe(true));
+    // hideWhenMissing fields are conditional: only present when they have values.
+    const conditionalKeys = new Set(TRADE_PRESENTATION_FIELD_SPECS.filter(spec => spec.hideWhenMissing).map(spec => spec.label));
+    TRADE_PRESENTATION_LABELS.filter(label => !conditionalKeys.has(label)).forEach(label => expect(fromSections.has(label), `missing label ${label}`).toBe(true));
     expect(presented.sections.map(section => section.id)).toEqual(["overview", "strategy", "execution", "risk", "discipline", "checklist", "mistakes", "psychology", "journal"]);
     const kpiLabels = presented.kpis.map(kpi => kpi.key);
     expect(kpiLabels).toEqual([...TRADE_PRESENTATION_KPI_KEYS]);
@@ -171,8 +173,10 @@ describe("canonical trade presentation model", () => {
     expect(fields["Checklist completion"]).toBe(PRESENTATION_MISSING);
     expect(fields["Planned / unplanned"]).toBe(PRESENTATION_MISSING);
     expect(fields["Trade notes"]).toBe(PRESENTATION_MISSING);
-    // No field is dropped just because it is empty: the full schema is present.
-    expect(Object.keys(fields)).toHaveLength(CANONICAL_TRADE_PRESENTATION_FIELDS.length);
+    // No field is dropped just because it is empty, except hideWhenMissing
+    // conditional fields (quick-log, plan score, price levels).
+    const expectedCount = CANONICAL_TRADE_PRESENTATION_FIELDS.length - TRADE_PRESENTATION_FIELD_SPECS.filter(spec => spec.hideWhenMissing).length;
+    expect(Object.keys(fields)).toHaveLength(expectedCount);
     expect(minimal.kpis.map(kpi => kpi.tone)).toEqual(["neutral", "neutral", "accent", "neutral", "neutral", "neutral"]);
   });
 

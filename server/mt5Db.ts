@@ -361,6 +361,13 @@ async function syncMt5PositionToTradeLog(userId: number, accountId: number, posi
     mistake: "",
     holdQuality: "",
     patienceScore: null,
+    planFollowScore: null,
+    quickLogged: false,
+    entryPrice: position.openPrice.toFixed(6),
+    slPrice: position.slPrice?.toFixed(6) ?? null,
+    tpPrice: position.tpPrice?.toFixed(6) ?? null,
+    mfe: null,
+    mae: null,
     risk: position.riskUsd.toFixed(2),
     reward: position.rewardUsd.toFixed(2),
     pnl: position.pnl.toFixed(2),
@@ -377,7 +384,7 @@ async function syncMt5PositionToTradeLog(userId: number, accountId: number, posi
   // On Supabase (PostgreSQL) the conflict target is (accountId, mt5Ticket); the
   // MySQL branch is retained for source-compatible unit harnesses only.
   const query = db.insert(trades).values(record) as any;
-  const set = { tradeDate: record.tradeDate, session: record.session, direction: record.direction, result: record.result, risk: record.risk, reward: record.reward, pnl: record.pnl, openTime: record.openTime, closeTime: record.closeTime };
+  const set = { tradeDate: record.tradeDate, session: record.session, direction: record.direction, result: record.result, risk: record.risk, reward: record.reward, pnl: record.pnl, openTime: record.openTime, closeTime: record.closeTime, entryPrice: record.entryPrice, slPrice: record.slPrice, tpPrice: record.tpPrice };
   if (typeof query.onConflictDoUpdate === "function") await query.onConflictDoUpdate({ target: [trades.accountId, trades.mt5Ticket], set });
   else await query.onDuplicateKeyUpdate({ set });
 }

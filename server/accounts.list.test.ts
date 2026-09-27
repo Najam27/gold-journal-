@@ -23,7 +23,7 @@ describe("accounts.list", () => {
 
     const result = await goldRouter.createCaller(createContext()).accounts.list();
 
-    expect(result).toEqual([{ id: 12, name: "Primary Account", startingBalance: "100.00", createdAt, updatedAt }]);
+    expect(result).toEqual([{ id: 12, name: "Primary Account", startingBalance: "100.00", guardConfig: null, createdAt, updatedAt }]);
     expect(result[0]).not.toHaveProperty("userId");
   });
 });

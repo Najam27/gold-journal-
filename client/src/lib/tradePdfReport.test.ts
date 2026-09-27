@@ -147,6 +147,11 @@ const completeTrade = (overrides: Record<string, unknown> = {}) => trade({
   notes: "Waited for the retest, entered on displacement, managed the position into the weekly level.", ...overrides,
 });
 
+/** A trade with all new optional fields populated (plan score, prices, quick-log). */
+const enrichedTrade = (overrides: Record<string, unknown> = {}) => completeTrade({
+  planFollowScore: 4, entryPrice: "2650.50", slPrice: "2648.00", tpPrice: "2660.00", ...overrides,
+});
+
 async function render(trades: TradeLogPdfTrade[], options: { fetchImage?: (url: string) => Promise<PdfImage>; accountName?: string; rangeLabel?: string; doc?: RecordingPdfDoc } = {}) {
   const doc = options.doc ?? new RecordingPdfDoc();
   await renderTradeLogPdf(doc, {
@@ -216,9 +221,10 @@ describe("trade data page", () => {
   });
 
   it("prints every canonical field label and value, with nothing dropped", async () => {
-    const doc = await render([{ trade: completeTrade({ hasScreenshot: false }), runningBalance: 1070.9 }]);
-    const model = buildTradePresentation(completeTrade(), { runningBalance: 1070.9 });
-    const labels = TRADE_PRESENTATION_LABELS.filter(label => !["Trade date", "Symbol", "Session", "Direction", "Result"].includes(label));
+    const doc = await render([{ trade: enrichedTrade({ hasScreenshot: false }), runningBalance: 1070.9 }]);
+    const model = buildTradePresentation(enrichedTrade(), { runningBalance: 1070.9 });
+    // "Quick log" is conditional (hideWhenMissing) — only rendered for quick-logged trades.
+    const labels = TRADE_PRESENTATION_LABELS.filter(label => !["Trade date", "Symbol", "Session", "Direction", "Result", "Quick log"].includes(label));
     labels.forEach(label => expect(doc.written(), `missing label ${label}`).toContain(label.toUpperCase()));
     for (const section of model.sections) {
       for (const field of section.fields) {

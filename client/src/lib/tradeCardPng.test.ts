@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { copyTradeCardPng, publicTradeCardFields, tradeCardPngFilename } from "./tradeCardPng";
-import { TRADE_PRESENTATION_LABELS, buildTradePresentation } from "./tradePresentation";
+import { TRADE_PRESENTATION_FIELD_SPECS, TRADE_PRESENTATION_LABELS, buildTradePresentation } from "./tradePresentation";
 
 const trade = {
   id: 8,
@@ -29,8 +29,10 @@ describe("share trade card contract", () => {
     const canon = buildTradePresentation(trade);
     const canonical = canon.sections.flatMap(section => section.fields).map(field => [field.label, field.value]);
     expect(shared).toEqual(canonical);
-    // Every label the edit form/PDF print is on the card too.
-    TRADE_PRESENTATION_LABELS.forEach(label => expect(shared.map(([entry]) => entry)).toContain(label));
+    // Every label the edit form/PDF print is on the card too (except conditional
+    // hideWhenMissing fields, which only render when they have values).
+    const conditionalLabels = new Set(TRADE_PRESENTATION_FIELD_SPECS.filter(spec => spec.hideWhenMissing).map(spec => spec.label));
+    TRADE_PRESENTATION_LABELS.filter(label => !conditionalLabels.has(label)).forEach(label => expect(shared.map(([entry]) => entry)).toContain(label));
   });
 
   it("includes the recorded trade values and excludes internal ownership, storage, and sync metadata", () => {

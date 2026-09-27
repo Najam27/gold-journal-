@@ -191,4 +191,47 @@ describe("trade-option attribution", () => {
     // The weakest context should be identifiable as the news-driven leak.
     expect(analysis.edgeCards.weak?.label).toBe("News-driven");
   });
+
+  it("computes R-based exit efficiency from MFE/MAE", () => {
+    const rows = [
+      // Winner: risked 10, made 20 (2R), MFE was 40 (4R) → left 2R on the table.
+      trade({ pnl: 20, risk: 10, mfe: 40, mae: 5 }),
+      // Winner: risked 10, made 30 (3R), MFE was 30 (3R) → left 0R.
+      trade({ tradeDate: new Date("2026-01-02T00:00:00Z"), pnl: 30, risk: 10, mfe: 30, mae: 8 }),
+      // Loser: risked 10, lost 10 (-1R), MFE reached 25 (2.5R) → counts as reached-2R-then-lost.
+      trade({ tradeDate: new Date("2026-01-03T00:00:00Z"), result: "LOSS", pnl: -10, risk: 10, mfe: 25, mae: 12 }),
+    ];
+    const efficiency = buildAnalysis(rows).exitEfficiency;
+    expect(efficiency.available).toBe(true);
+    expect(efficiency.sample).toBe(3);
+    // actualR: (2 + 3 - 1) / 3 = 1.33
+    expect(efficiency.averageActualR).toBeCloseTo(4 / 3, 2);
+    // mfeR: (4 + 3 + 2.5) / 3 = 3.17
+    expect(efficiency.averageMfeR).toBeCloseTo(9.5 / 3, 2);
+    // maeR: (0.5 + 0.8 + 1.2) / 3 = 0.83
+    expect(efficiency.averageMaeR).toBeCloseTo(2.5 / 3, 2);
+    // Left on the table R: winners only → (2 + 0) / 2 = 1
+    expect(efficiency.averageLeftOnTableR).toBeCloseTo(1, 2);
+    expect(efficiency.medianLeftOnTableR).toBeCloseTo(1, 2);
+    expect(efficiency.reached2RThenLostCount).toBe(1);
+    // Capture: (20/40 + 30/30) / 2 = 75%
+    expect(efficiency.averageCapturedPct).toBeCloseTo(75, 1);
+  });
+
+  it("reports exit efficiency as unavailable without excursion data", () => {
+    const efficiency = buildAnalysis([trade(), trade({ result: "LOSS", pnl: -5 })]).exitEfficiency;
+    expect(efficiency.available).toBe(false);
+    expect(efficiency.averageActualR).toBeNull();
+    expect(efficiency.averageLeftOnTableR).toBeNull();
+    expect(efficiency.reached2RThenLostCount).toBe(0);
+    expect(efficiency.message).toContain("unavailable");
+  });
+
+  it("ignores trades without risk in R-based exit math", () => {
+    const rows = [trade({ pnl: 20, risk: 0, mfe: 40, mae: 5 }), trade({ pnl: 20, risk: 10, mfe: 40, mae: 5 })];
+    const efficiency = buildAnalysis(rows).exitEfficiency;
+    expect(efficiency.available).toBe(true);
+    expect(efficiency.averageActualR).toBeCloseTo(2, 2);
+    expect(efficiency.averageMfeR).toBeCloseTo(4, 2);
+  });
 });

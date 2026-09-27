@@ -101,6 +101,11 @@ import { PlanExecutionEditor } from "@/components/PlanExecutionEditor";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { TradeLogWithViewer } from "@/components/TradeLogWithViewer";
 import { TradeDialogWithCustomOptions } from "@/components/TradeDialogWithCustomOptions";
+import { QuickTradeDialog } from "@/components/QuickTradeDialog";
+import { GuardBanner } from "@/components/GuardBanner";
+import { GuardModePanel } from "@/components/GuardModePanel";
+import { StreakPanel } from "@/components/StreakPanel";
+import { OnboardingPath } from "@/components/OnboardingPath";
 import { PnlCalendarWithWeeks } from "@/components/PnlCalendarWithWeeks";
 import { FlexibleGoalsView } from "@/components/FlexibleGoalsView";
 import { MentorView } from "@/components/MentorView";
@@ -190,6 +195,15 @@ type TradeForm = {
   mistake: string;
   holdQuality: string;
   patienceScore: string;
+  /** Self-rated plan-following, 1-5. "" = not rated. */
+  planFollowScore: string;
+  /** Max favorable/adverse excursion in $. "" = not recorded. */
+  mfe: string;
+  mae: string;
+  /** Price levels. "" = not recorded. */
+  entryPrice: string;
+  slPrice: string;
+  tpPrice: string;
   risk: string;
   reward: string;
   pnl: string;
@@ -268,6 +282,12 @@ export function defaultTrade(): TradeForm {
     mistake: "",
     holdQuality: "",
     patienceScore: "",
+    planFollowScore: "",
+    mfe: "",
+    mae: "",
+    entryPrice: "",
+    slPrice: "",
+    tpPrice: "",
     risk: "",
     reward: "",
     pnl: "",
@@ -498,6 +518,8 @@ export default function GoldJournal() {
   const [installEvent, setInstallEvent] = useState<any>();
   const [installHelp, setInstallHelp] = useState(false);
   const [tradeDialog, setTradeDialog] = useState(false);
+  const [quickDialog, setQuickDialog] = useState(false);
+  const [quickSaving, setQuickSaving] = useState(false);
   const [tradeForm, setTradeForm] = useState<TradeForm>(defaultTrade());
   const [editing, setEditing] = useState<any>();
   const [screenshot, setScreenshot] = useState<File>();
@@ -572,6 +594,13 @@ export default function GoldJournal() {
     // looking like the switch did nothing.
     placeholderData: keepPreviousData,
   });
+  // Weekly review count feeds the "First 30 trades" onboarding path. Lightweight:
+  // only the count matters, so limit 1 is enough to know whether any exist… but
+  // the onboarding phase needs the true count, so fetch up to 52.
+  const weeklyReviewCount = trpc.weeklyReviews.list.useQuery(
+    { accountId: accountId ?? 0, limit: 52 },
+    { enabled: Boolean(accountId), staleTime: 60_000, refetchOnWindowFocus: false },
+  ).data?.length ?? 0;
   const mt5WorkspaceInput = useMemo(
     () => (accountId ? { accountId } : undefined),
     [accountId]
@@ -1026,6 +1055,12 @@ export default function GoldJournal() {
       mistake: trade.mistake || "",
       holdQuality: trade.holdQuality || "",
       patienceScore: trade.patienceScore ? String(trade.patienceScore) : "",
+      planFollowScore: trade.planFollowScore ? String(trade.planFollowScore) : "",
+      mfe: trade.mfe ?? "",
+      mae: trade.mae ?? "",
+      entryPrice: trade.entryPrice ?? "",
+      slPrice: trade.slPrice ?? "",
+      tpPrice: trade.tpPrice ?? "",
       risk: trade.risk ?? "",
       reward: trade.reward ?? "",
       pnl: trade.pnl ?? "",
@@ -1117,6 +1152,15 @@ export default function GoldJournal() {
       patienceScore: tradeForm.patienceScore
         ? Number(tradeForm.patienceScore)
         : null,
+      planFollowScore: tradeForm.planFollowScore
+        ? Number(tradeForm.planFollowScore)
+        : null,
+      quickLogged: false,
+      entryPrice: tradeForm.entryPrice === "" ? null : Number(tradeForm.entryPrice),
+      slPrice: tradeForm.slPrice === "" ? null : Number(tradeForm.slPrice),
+      tpPrice: tradeForm.tpPrice === "" ? null : Number(tradeForm.tpPrice),
+      mfe: tradeForm.mfe === "" ? null : Number(tradeForm.mfe),
+      mae: tradeForm.mae === "" ? null : Number(tradeForm.mae),
       risk: tradeForm.risk === "" ? null : Number(tradeForm.risk),
       reward: tradeForm.reward === "" ? null : Number(tradeForm.reward),
       pnl: Number(tradeForm.pnl || 0),
@@ -1242,6 +1286,70 @@ export default function GoldJournal() {
       saveInFlightRef.current = false;
     }
   };
+  /**
+   * The 2-minute quick log. Saves a minimal OPEN trade (direction, entry, SL,
+   * TP, optional screenshot) with quickLogged=true. The full dialog finishes
+   * it later; opening a quick-logged trade there and saving clears the flag.
+   * Reuses the same idempotent screenshot-upload flow as the full dialog.
+   */
+  const saveQuickTrade = async (payload: {
+    tradeDate: string;
+    session: string;
+    direction: "BUY" | "SELL";
+    entryPrice: string;
+    slPrice: string;
+    tpPrice: string;
+    screenshotFile: File | null;
+  }) => {
+    if (!account) {
+      toast.error("No active account.");
+      return;
+    }
+    if (quickSaving) return;
+    setQuickSaving(true);
+    const attemptId = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    let uploadedKey: string | null = null;
+    try {
+      const evidence: { screenshotKey?: string; screenshotName?: string } = {};
+      if (payload.screenshotFile) {
+        const fileData = await readFileAsDataUrl(payload.screenshotFile);
+        const uploaded = await uploadScreenshotDraft.mutateAsync({
+          accountId: account.id,
+          clientMutationId: attemptId,
+          fileName: payload.screenshotFile.name,
+          mimeType: payload.screenshotFile.type as "image/jpeg" | "image/png" | "image/webp",
+          base64: fileData,
+        });
+        uploadedKey = uploaded.key;
+        evidence.screenshotKey = uploaded.key;
+        evidence.screenshotName = uploaded.name;
+      }
+      await createTrade.mutateAsync({
+        accountId: account.id,
+        clientMutationId: attemptId,
+        tradeDate: payload.tradeDate,
+        session: payload.session,
+        direction: payload.direction,
+        result: "OPEN",
+        pnl: 0,
+        quickLogged: true,
+        entryPrice: payload.entryPrice === "" ? null : Number(payload.entryPrice),
+        slPrice: payload.slPrice === "" ? null : Number(payload.slPrice),
+        tpPrice: payload.tpPrice === "" ? null : Number(payload.tpPrice),
+        ...evidence,
+      } as any);
+      await refreshCurrentAccount(utils);
+      toast.success("Quick-logged. Finish the details from the Trade Log.");
+      setQuickDialog(false);
+    } catch (error: unknown) {
+      if (uploadedKey) {
+        void discardScreenshotDraft.mutateAsync({ accountId: account.id, key: uploadedKey }).catch(() => undefined);
+      }
+      toast.error(`Quick log failed. ${saveFailureMessage(error, "The trade could not be saved. Check your connection and retry.")}`);
+    } finally {
+      setQuickSaving(false);
+    }
+  };
   const exportRows = trades.map((trade: any, index: number) => ({
     "#": index + 1,
     Date: formatDate(trade.tradeDate),
@@ -1352,6 +1460,9 @@ export default function GoldJournal() {
         }}
       />
       <UserAiProviderSettings />
+      {account?.id ? (
+        <GuardModePanel accountId={account.id} guardConfig={(account as any)?.guardConfig ?? null} />
+      ) : null}
     </>
   );
   return (
@@ -1474,7 +1585,18 @@ export default function GoldJournal() {
               />
             )}
             {view === "trades" && (
-              <TradeLog
+              <>
+                <GuardBanner
+                  guardConfig={(account as any)?.guardConfig ?? null}
+                  trades={trades as any[]}
+                  startingBalance={toNumber(account?.startingBalance)}
+                />
+                <OnboardingPath
+                  trades={trades as any[]}
+                  weeklyReviewCount={weeklyReviewCount}
+                  planCount={(data?.dailyPlans ?? []).length}
+                />
+                <TradeLog
                 stats={stats}
                 trades={pagedTrades}
                 allTrades={trades}
@@ -1498,6 +1620,7 @@ export default function GoldJournal() {
                 setResultFilter={setResultFilter}
                 onPage={setTradePage}
                 onNew={() => openNewTrade()}
+                onQuickLog={() => setQuickDialog(true)}
                 onDuplicate={() => openNewTrade(trades[0])}
                 onEdit={openEdit}
                 onDelete={async (trade: any) => {
@@ -1547,6 +1670,7 @@ export default function GoldJournal() {
                   refresh();
                 }}
               />
+              </>
             )}
             {view === "missed" && (
               <MissedView
@@ -1614,6 +1738,11 @@ export default function GoldJournal() {
                 {/* The panel owns this destination: session psychology,
                     behavioural focus, cooldowns, streaks, and identity
                     consistency, separate from the Goals risk-control desk. */}
+                <StreakPanel
+                  trades={trades as any[]}
+                  maxTradesPerDay={(behaviorConfig as any)?.maxTradesPerDay ?? null}
+                  computedAdherencePct={(development as any)?.planAdherence ?? null}
+                />
                 <TraderDevelopmentPanel
                   report={development}
                   identityStatement={(data as any)?.traderProfile?.identityStatement ?? ""}
@@ -1709,6 +1838,12 @@ export default function GoldJournal() {
         plans={data?.dailyPlans ?? []}
         dayTrades={(trades as any[]).filter((trade: any) => dateInput(new Date(trade.tradeDate)) === tradeForm.tradeDate)}
         behaviorConfig={behaviorConfig}
+      />
+      <QuickTradeDialog
+        open={quickDialog}
+        onOpenChange={setQuickDialog}
+        onSave={saveQuickTrade}
+        saving={quickSaving}
       />
       <CashDialog
         type={cashDialog}
