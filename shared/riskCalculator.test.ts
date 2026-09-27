@@ -310,3 +310,18 @@ describe("AI independence", () => {
     expect(result.riskAmount).toBe(100);
   });
 });
+
+describe("breakeven win rate", () => {
+  it("computes 1 / (1 + R) whenever a planned R:R exists", () => {
+    // Entry 2350, stop 2344 -> 6 units of risk. TP 2362 -> 12 units of reward = 2R.
+    const result = calculateRisk(input({ takeProfit: 2362 }), account, spec);
+    expect(result.riskRewardRatio).toBeCloseTo(2, 6);
+    expect(result.breakevenWinRate).toBeCloseTo(1 / 3, 6);
+  });
+
+  it("stays null when no take-profit is planned", () => {
+    const result = calculateRisk(input({ takeProfit: null }), account, spec);
+    expect(result.riskRewardRatio).toBeNull();
+    expect(result.breakevenWinRate).toBeNull();
+  });
+});

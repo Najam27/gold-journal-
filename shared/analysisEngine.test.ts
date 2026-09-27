@@ -93,4 +93,74 @@ describe("deterministic analysis engine", () => {
     const analysis = buildAnalysis([...small, ...large]);
     expect(analysis.sessions.find(row => row.label === "Large")?.edgeScore).toBeGreaterThan(analysis.sessions.find(row => row.label === "Small")?.edgeScore ?? 0);
   });
+
+  it("validates a low-win-rate, high-payoff edge on expectancy significance", () => {
+    // 45% win rate at +2R/-1R: a classic trend profile. The old 50% win-rate
+    // gate could never label this VALIDATED EDGE.
+    const rows = Array.from({ length: 100 }, (_, index) => {
+      const win = index < 45;
+      return trade({
+        tradeDate: new Date(Date.UTC(2026, 0, index + 1)),
+        result: win ? "WIN" : "LOSS",
+        pnl: win ? 20 : -10,
+        risk: 10,
+      });
+    });
+    const row = metricRow("trend", rows);
+    expect(row.sample).toBe(100);
+    expect(row.winRate).toBeLessThan(50);
+    expect(row.expectancyR).toBeCloseTo(0.35, 2);
+    expect(row.evidenceTier).toBe("VALIDATED EDGE");
+  });
+
+  it("withholds validation from a small-sample positive edge", () => {
+    const rows = Array.from({ length: 30 }, (_, index) => {
+      const win = index < 16;
+      return trade({
+        tradeDate: new Date(Date.UTC(2026, 0, index + 1)),
+        result: win ? "WIN" : "LOSS",
+        pnl: win ? 10 : -10,
+        risk: 10,
+      });
+    });
+    const row = metricRow("thin", rows);
+    expect(row.sample).toBe(30);
+    expect(row.expectancyR).toBeGreaterThan(0);
+    expect(row.evidenceTier).toBe("REPEATABLE EDGE");
+  });
+
+  it("averages drawdown depth per episode instead of dividing max by count", () => {
+    // Episode 1: +100, -30 -> depth 30, recovers with +50.
+    // Episode 2: -10 -> depth 10, never recovers.
+    const rows = [
+      trade({ tradeDate: "2026-01-01", pnl: 100 }),
+      trade({ tradeDate: "2026-01-02", result: "LOSS", pnl: -30 }),
+      trade({ tradeDate: "2026-01-03", pnl: 50 }),
+      trade({ tradeDate: "2026-01-04", result: "LOSS", pnl: -10 }),
+    ];
+    const analysis = buildAnalysis(rows);
+    expect(analysis.drawdown.maximum).toBe(30);
+    expect(analysis.drawdown.count).toBe(2);
+    // (30 + 10) / 2 — the old code reported max / count = 15.
+    expect(analysis.drawdown.average).toBe(20);
+  });
+
+  it("does not let trades without risk data inflate edge significance", () => {
+    // 30 closed trades, but only 10 carry risk data: significance must be
+    // judged on the 10 R values, not the 30 trades. With n=30 the lower bound
+    // would clear zero; with n=10 it does not.
+    const rows = Array.from({ length: 30 }, (_, index) => {
+      const win = index % 2 === 0;
+      return trade({
+        tradeDate: new Date(Date.UTC(2026, 0, index + 1)),
+        result: win ? "WIN" : "LOSS",
+        pnl: win ? 20 : -10,
+        risk: index < 10 ? 10 : null,
+      });
+    });
+    const row = metricRow("thin-risk", rows);
+    expect(row.sample).toBe(30);
+    expect(row.expectancyR).toBeGreaterThan(0);
+    expect(row.evidenceTier).toBe("REPEATABLE EDGE");
+  });
 });

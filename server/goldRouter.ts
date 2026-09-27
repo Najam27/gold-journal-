@@ -26,6 +26,7 @@ import { MAX_CUSTOM_RISK_PERCENT, MIN_CUSTOM_RISK_PERCENT, RISK_PROFILE_IDS } fr
 import { compareAnalysis } from "@shared/analysisEngine";
 import { getPktDateKey, isPktDateKey, pktDateToTimestamp } from "@shared/pktDate";
 import { normalizeTradeOptionValue } from "@shared/tradeOptionCategories";
+import { deriveTradeResult } from "@shared/tradeOutcome";
 import {
   OPTION_COLUMNS,
   ensureDefaultTradeOptions,
@@ -461,9 +462,14 @@ export const goldRouter = router({
           if (!linked[0]) throw new Error("The selected MT5 ticket is not an unjournaled closed position for this account.");
         }
         const screenshot = resolveScreenshotForWrite(ctx.user.openId, input.accountId, input);
+        // The outcome label is always derived from the signed P&L (OPEN is
+        // preserved for open positions). A journal that lets WIN disagree with
+        // a negative P&L silently corrupts every win-rate vs expectancy
+        // comparison downstream, so the server is the source of truth here.
+        const derivedResult = deriveTradeResult(input.pnl, input.result);
         const inserted = await db.insert(trades).values({
           userId: ctx.user.id, accountId: input.accountId, tradeDate: new Date(input.tradeDate), session: input.session,
-          direction: input.direction, result: input.result, level: input.level, timeframe: input.timeframe,
+          direction: input.direction, result: derivedResult, level: input.level, timeframe: input.timeframe,
           setupQuality: input.setupQuality, executionType: input.executionType, marketCondition: input.marketCondition,
           biasAlignment: input.biasAlignment, confirmationType: input.confirmationType, slPlacement: input.slPlacement,
           tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality, patienceScore: input.patienceScore,
@@ -501,8 +507,10 @@ export const goldRouter = router({
         }
         const screenshot = resolveScreenshotForWrite(ctx.user.openId, current.accountId, input);
         const db = await dbOrThrow();
+        // Same derivation as create: the stored outcome must agree with the P&L.
+        const derivedResult = deriveTradeResult(input.pnl, input.result);
         await db.update(trades).set({
-          tradeDate: new Date(input.tradeDate), session: input.session, direction: input.direction, result: input.result,
+          tradeDate: new Date(input.tradeDate), session: input.session, direction: input.direction, result: derivedResult,
           level: input.level, timeframe: input.timeframe, setupQuality: input.setupQuality, executionType: input.executionType,
           marketCondition: input.marketCondition, biasAlignment: input.biasAlignment, confirmationType: input.confirmationType,
           slPlacement: input.slPlacement, tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality,

@@ -106,6 +106,8 @@ export type RiskCalculation = {
   rewardDistance: number | null;
   rewardTicks: number | null;
   riskRewardRatio: number | null;
+  /** Win rate (0-1) at which the planned R:R breaks even: 1 / (1 + R). */
+  breakevenWinRate: number | null;
   potentialProfit: number | null;
   /** Calculated size is below the broker's minimum tradable volume. */
   belowBrokerMinimum: boolean;
@@ -169,6 +171,16 @@ export function floorLotsToStep(rawLots: number, volumeStep: number): number {
   const units = Math.floor(rawUnits / stepUnits) * stepUnits;
   if (!Number.isFinite(units) || units <= 0) return 0;
   return round(units / scale, decimals);
+}
+
+/**
+ * Breakeven win rate for a planned risk:reward ratio R: 1 / (1 + R).
+ * A 2R plan breaks even at 33.3% wins. Every new trader should know this number
+ * before judging a strategy by win rate alone — win rate without R is noise.
+ */
+export function breakevenWinRate(riskRewardRatio: number | null | undefined): number | null {
+  if (riskRewardRatio == null || !Number.isFinite(riskRewardRatio) || riskRewardRatio <= 0) return null;
+  return 1 / (1 + riskRewardRatio);
 }
 
 export function calculateRisk(
@@ -237,6 +249,7 @@ export function calculateRisk(
     rewardDistance: null,
     rewardTicks: null,
     riskRewardRatio: null,
+    breakevenWinRate: null,
     potentialProfit: null,
     belowBrokerMinimum: false,
     cappedAtBrokerMaximum: false,
@@ -408,6 +421,7 @@ export function calculateRisk(
       result.rewardDistance = round(rewardDistance, 8);
       result.rewardTicks = round(rewardTicks, 6);
       result.riskRewardRatio = round(rewardDistance / stopDistance, 4);
+      result.breakevenWinRate = breakevenWinRate(result.riskRewardRatio);
       result.potentialProfit = round(result.lots * rewardTicks * spec.tickValueLoss, 2);
     }
   }

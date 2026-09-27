@@ -354,6 +354,14 @@ export function RiskCalculatorPanel() {
                 detail={`${price(result.rewardDistance)} price units to target`}
               />
             )}
+            {result.breakevenWinRate != null && (
+              <RiskMetric
+                label="Breakeven win rate"
+                value={`${(result.breakevenWinRate * 100).toFixed(1)}%`}
+                detail="Win rate needed to break even at this R:R — judge the plan by this, not by 50%"
+                tone="gold"
+              />
+            )}
             {result.potentialProfit != null && (
               <RiskMetric
                 label="Potential profit"

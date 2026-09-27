@@ -86,4 +86,14 @@ describe("daily drill-down summaries", () => {
     expect(grouped.get("2026-08-20")).toHaveLength(4);
     expect(grouped.get("2026-08-21")).toHaveLength(2);
   });
+
+  it("measures the daily win rate over closed trades only, never open ones", () => {
+    const mixed = [
+      { id: 1, tradeDate: "2026-08-22T04:42:00.000Z", result: "WIN", pnl: "180", risk: "100", reward: "200" },
+      { id: 2, tradeDate: "2026-08-22T06:10:00.000Z", result: "WIN", pnl: "95", risk: "50", reward: "150" },
+      { id: 3, tradeDate: "2026-08-22T09:20:00.000Z", result: "OPEN", pnl: "45.20", risk: "50", reward: "150" },
+    ];
+    const summary = summarizeDayTrades(mixed, "2026-08-22");
+    expect(summary).toMatchObject({ wins: 2, losses: 0, open: 1, winRate: 100 });
+  });
 });

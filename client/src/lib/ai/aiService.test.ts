@@ -839,3 +839,30 @@ describe("dual-provider routing", () => {
     expect(report.executiveSummary).toContain("120");
   });
 });
+
+describe("AI mentor feature", () => {
+  it("coaches with the mentor contract and the deterministic brief, not the analyst prompt", async () => {
+    const { postCalls } = stubGroq(() => providerResponse(signedReport()));
+    const outcome = await analyzeJournal({ analysis, feature: "mentor" });
+    expect(outcome.available).toBe(true);
+    const [, init] = postCalls()[0];
+    const body = JSON.parse(String(init!.body));
+    const system = String(body.messages[0].content);
+    const user = String(body.messages[1].content);
+    expect(system).toContain("professional trading mentor");
+    expect(system).toContain("never predict markets");
+    expect(system).toContain("under 30 closed trades");
+    expect(user).toContain("DETERMINISTIC MENTOR BRIEF");
+  });
+
+  it("never serves a cached analyst report to the mentor", async () => {
+    const { postCalls } = stubGroq(() => providerResponse(signedReport()));
+    const first = await analyzeJournal({ analysis, feature: "analysis" });
+    expect(first.cached).toBe(false);
+    const second = await analyzeJournal({ analysis, feature: "mentor" });
+    expect(second.cached).toBe(false);
+    expect(second.deduplicated).toBeFalsy();
+    // Same dataset, different feature: a genuinely separate request.
+    expect(postCalls()).toHaveLength(2);
+  });
+});

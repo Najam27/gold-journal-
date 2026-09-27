@@ -54,6 +54,10 @@ export function groupTradesByPktDay<T extends PerformanceTrade>(trades: T[]) {
  * daily trade drill-down dialog both render this result, so the totals they show
  * can never drift apart. Every value is derived from the trade rows passed in;
  * nothing is invented or fetched.
+ *
+ * Reporting convention: winRate is measured over CLOSED trades only (open
+ * positions are unrealized and must not dilute a realized-performance metric).
+ * The open-trade count and unrealized P&L are reported separately.
  */
 export function summarizeTradeRows<T extends PerformanceTrade>(rows: T[], day: string): DayTradeSummary<T> {
   const resultOf = (trade: T) => String(trade.result || "OPEN");
@@ -62,6 +66,7 @@ export function summarizeTradeRows<T extends PerformanceTrade>(rows: T[], day: s
   const losses = rows.filter(trade => resultOf(trade) === "LOSS").length;
   const breakEven = rows.filter(trade => resultOf(trade) === "BREAK_EVEN").length;
   const openRows = rows.filter(trade => resultOf(trade) === "OPEN");
+  const closedRows = rows.length - openRows.length;
   const riskRows = rows.filter(trade => toNumber(trade.risk) > 0);
   const rMultiples = riskRows.map(trade => toNumber(trade.pnl) / toNumber(trade.risk));
   return {
@@ -74,7 +79,7 @@ export function summarizeTradeRows<T extends PerformanceTrade>(rows: T[], day: s
     breakEven,
     open: openRows.length,
     openPnl: openRows.reduce((total, trade) => total + toNumber(trade.pnl), 0),
-    winRate: rows.length ? wins / rows.length * 100 : 0,
+    winRate: closedRows ? wins / closedRows * 100 : 0,
     totalRisk: riskRows.reduce((total, trade) => total + toNumber(trade.risk), 0),
     totalReward: rows.reduce((total, trade) => total + toNumber(trade.reward), 0),
     riskTrades: riskRows.length,

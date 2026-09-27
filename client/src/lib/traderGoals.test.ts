@@ -46,4 +46,25 @@ describe("professional trader goal assessment", () => {
     const scoped = assessTraderGoal({ id: 12, name: "London A setup", description: encodeGoalControl("Only A London entries.", { session: "London", timeframe: "15m", level: "TLJ", setupQuality: "A" }), period: "WEEKLY", metric: "strategy_compliance", comparison: "GTE", target: 80, active: true }, scopedRows, [], now);
     expect(scoped).toMatchObject({ value: 33.33333333333333, status: "IN_PROGRESS", scopeLabel: "London · 15m · TLJ · A" });
   });
+
+  it("averages planned R:R and patience only over the trades that define them", () => {
+    const mixed = [
+      { id: 30, tradeDate: "2026-08-12T08:00:00Z", result: "WIN", pnl: "100", risk: "50", reward: "100", patienceScore: 4 },
+      { id: 31, tradeDate: "2026-08-12T09:00:00Z", result: "WIN", pnl: "100", risk: "50", reward: "100", patienceScore: null },
+      { id: 32, tradeDate: "2026-08-12T10:00:00Z", result: "LOSS", pnl: "-50", risk: null, reward: null, patienceScore: null },
+    ];
+    // (2 + 2) / 2 — the risk-less trade no longer drags the average toward 1.33.
+    expect(assessTraderGoal({ id: 30, name: "RR", period: "DAILY", metric: "avg_rr", comparison: "GTE", target: "1.5", active: true }, mixed, [], now).value).toBe(2);
+    // Only the scored trade counts — the two nulls are not averaged as zeros.
+    expect(assessTraderGoal({ id: 31, name: "Patience", period: "DAILY", metric: "avg_patience", comparison: "GTE", target: "3", active: true }, mixed, [], now).value).toBe(4);
+  });
+
+  it("reports an unbounded profit factor as infinity instead of the 99 sentinel", () => {
+    const winners = [
+      { id: 40, tradeDate: "2026-08-12T08:00:00Z", result: "WIN", pnl: "100", risk: "50", reward: "100" },
+      { id: 41, tradeDate: "2026-08-12T09:00:00Z", result: "WIN", pnl: "50", risk: "25", reward: "50" },
+    ];
+    const pf = assessTraderGoal({ id: 40, name: "PF", period: "DAILY", metric: "profit_factor", comparison: "GTE", target: "1.5", active: true }, winners, [], now);
+    expect(pf).toMatchObject({ value: Infinity, current: "∞", status: "MET", percentage: 100 });
+  });
 });

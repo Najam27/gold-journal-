@@ -43,6 +43,7 @@ import {
   ANALYSIS_CHUNK_SYSTEM_PROMPT,
   ANALYSIS_RESPONSE_SCHEMA,
   ANALYSIS_SYSTEM_PROMPT,
+  MENTOR_SYSTEM_PROMPT,
   DEFAULT_AI_MODEL,
   DEFAULT_GEMINI_MODEL,
   MAX_AI_TIMEOUT_MS,
@@ -64,6 +65,7 @@ import {
   type AiProviderId,
   type AiReport,
 } from "@shared/aiCore";
+import { buildMentorBrief, mentorBriefPromptText } from "@shared/mentorEngine";
 import type { AnalysisResult } from "@shared/analysisEngine";
 import {
   AI_REQUEST_VERSION,
@@ -629,6 +631,8 @@ async function executePlan(input: {
   model: string;
   apiKey: string;
   trades?: readonly CompactTrade[];
+  feature?: AiFeature;
+  mentorBrief?: string | null;
   timeoutMs: number;
   signal?: AbortSignal;
   onProgress?: (progress: AiAnalysisProgress) => void;
@@ -636,6 +640,14 @@ async function executePlan(input: {
   const { provider, plan, model, apiKey, signal, onProgress } = input;
   let schemaFallback = false;
   const onSchemaFallback = () => { schemaFallback = true; };
+  // The mentor coaches from the same evidence but with a coaching contract and
+  // the deterministic brief as grounding, so its priorities never drift from
+  // the numbers the app itself computed.
+  const system = input.feature === "mentor" ? MENTOR_SYSTEM_PROMPT : ANALYSIS_SYSTEM_PROMPT;
+  const userPrompt = (payload: unknown) => {
+    const base = analysisUserPrompt(payload);
+    return input.feature === "mentor" && input.mentorBrief ? `${base}\n\n${input.mentorBrief}` : base;
+  };
 
   if (plan.mode === "single" && plan.payload) {
     onProgress?.({ phase: "preparing", index: 1, total: 1 });
@@ -643,8 +655,8 @@ async function executePlan(input: {
     const raw = await sendWithBackoff(provider, {
       apiKey,
       model,
-      system: ANALYSIS_SYSTEM_PROMPT,
-      user: analysisUserPrompt(payload),
+      system,
+      user: userPrompt(payload),
       schemaName: "gold_journal_analysis",
       schema: ANALYSIS_RESPONSE_SCHEMA as unknown as Record<string, unknown>,
       temperature: 0.1,
@@ -673,8 +685,8 @@ async function executePlan(input: {
   const raw = await sendWithBackoff(provider, {
     apiKey,
     model,
-    system: ANALYSIS_SYSTEM_PROMPT,
-    user: analysisUserPrompt(synthesis.payload),
+    system,
+    user: userPrompt(synthesis.payload),
     schemaName: "gold_journal_analysis",
     schema: ANALYSIS_RESPONSE_SCHEMA as unknown as Record<string, unknown>,
     temperature: 0.1,
@@ -702,6 +714,7 @@ async function runProvider(input: {
   model: string;
   analysis: AnalysisResult;
   trades?: readonly CompactTrade[];
+  feature?: AiFeature;
   timeoutMs: number;
   signal?: AbortSignal;
   onProgress?: (progress: AiAnalysisProgress) => void;
@@ -712,12 +725,17 @@ async function runProvider(input: {
     model: input.model,
     allowanceTokens: getProviderRequestPolicy(input.provider, input.model).allowanceTokens,
   });
+  // The deterministic brief is computed once per provider attempt from the same
+  // analysis object, so every retry grounds the mentor in identical numbers.
+  const mentorBrief = input.feature === "mentor" ? mentorBriefPromptText(buildMentorBrief(input.analysis)) : null;
   const execute = (plan: AiRequestPlan) => executePlan({
     provider: input.provider,
     plan,
     model: input.model,
     apiKey: input.apiKey,
     trades: input.trades,
+    feature: input.feature,
+    mentorBrief,
     timeoutMs: input.timeoutMs,
     signal: input.signal,
     onProgress: input.onProgress,
@@ -736,9 +754,11 @@ async function runProvider(input: {
   }
 }
 
-/** The report cache key: contract + provider set + requested model + dataset. */
-function reportCacheKey(providers: AiProviderId[], requestedModel: string, analysis: AnalysisResult) {
-  return [AI_SERVICE_VERSION, AI_REQUEST_VERSION, providers.join("+"), requestedModel, analysisDataFingerprint(analysis)].join(":");
+/** The report cache key: contract + provider set + requested model + dataset + feature. */
+function reportCacheKey(providers: AiProviderId[], requestedModel: string, analysis: AnalysisResult, feature?: AiFeature) {
+  // The feature is part of the key: a cached analyst report must never be
+  // served to the mentor (or vice versa) — they use different system prompts.
+  return [AI_SERVICE_VERSION, AI_REQUEST_VERSION, providers.join("+"), requestedModel, feature ?? "analysis", analysisDataFingerprint(analysis)].join(":");
 }
 
 /**
@@ -805,7 +825,7 @@ export async function analyzeJournal(input: {
   }
 
   const requestedModel = String(input.model ?? "").trim();
-  const cacheKey = reportCacheKey(providers, requestedModel, input.analysis);
+  const cacheKey = reportCacheKey(providers, requestedModel, input.analysis, input.feature);
   removeExpiredCache();
   const cached = cache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return { ...cached.outcome, cached: true };
@@ -854,6 +874,7 @@ export async function analyzeJournal(input: {
           model,
           analysis: input.analysis,
           trades: input.trades,
+          feature: input.feature,
           timeoutMs,
           signal: input.signal,
           onProgress: input.onProgress,
