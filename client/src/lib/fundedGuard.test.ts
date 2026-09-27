@@ -50,12 +50,31 @@ describe("evaluateFundedGuard", () => {
 
   it("trailing drawdown locks the floor to peak equity", () => {
     const result = evaluateFundedGuard({ ...base, drawdownType: "trailing", peakEquity: 110_000 });
-    expect(result.maxDrawdownFloor).toBe(100_000); // 110k - 10k
+    expect(result.maxLossLimit).toBe(11_000); // 10% of the 110k peak
+    expect(result.maxDrawdownFloor).toBe(99_000); // 110k - 11k
   });
 
   it("trailing never drops the floor below the static level", () => {
     const result = evaluateFundedGuard({ ...base, drawdownType: "trailing", peakEquity: 95_000 });
     expect(result.maxDrawdownFloor).toBe(90_000); // max(100k, 95k) - 10k
+  });
+
+  it("measures the daily limit from day-start equity, not the starting balance", () => {
+    // Account opened the day at $108k: 5% daily = $5,400, floor $102,600.
+    // The static max stays pinned to the $100k start: floor $90,000.
+    const result = evaluateFundedGuard({ ...base, dayStartEquity: 108_000 });
+    expect(result.dayStartEquity).toBe(108_000);
+    expect(result.dailyLossLimit).toBe(5_400);
+    expect(result.dailyFloor).toBe(102_600);
+    expect(result.maxLossLimit).toBe(10_000);
+    expect(result.maxDrawdownFloor).toBe(90_000);
+  });
+
+  it("falls back to the account size when day-start equity is unknown", () => {
+    const result = evaluateFundedGuard(base);
+    expect(result.dayStartEquity).toBe(100_000);
+    expect(result.dailyLossLimit).toBe(5_000);
+    expect(result.dailyFloor).toBe(95_000);
   });
 
   it("handles a custom 3% daily / 6% max firm", () => {

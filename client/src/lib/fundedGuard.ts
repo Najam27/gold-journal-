@@ -1,11 +1,15 @@
 /**
  * Funded account guard: prop-firm drawdown math in percentages, not dollars.
  *
- * Research-backed defaults (FTMO and most major firms):
- * - Daily drawdown: 5% of the day's starting balance/equity. Resets at the
- *   firm's server midnight. Includes floating P&L. Breach = account gone.
- * - Maximum drawdown: 10% overall. Static (from initial balance, FTMO-style)
- *   or trailing (locks in from peak equity).
+ * Two separate clocks (FTMO and most major firms):
+ * - Daily drawdown: 5% of the DAY'S STARTING equity (higher of balance or
+ *   equity at the firm's server midnight). Resets every day — it moves up or
+ *   down with wherever the account opens the day. Includes floating P&L.
+ *   Breach = account gone.
+ * - Maximum drawdown: 10% overall.
+ *   - static: pinned to the STARTING balance forever — the floor never moves,
+ *     profit banks permanent buffer.
+ *   - trailing: measured from PEAK equity, ratcheting up with new highs.
  * - Single-trade guidance: never risk more than 30% of the daily allowance
  *   on one trade — three full stops should never end the day.
  *
@@ -16,8 +20,14 @@
 export type DrawdownType = "static" | "trailing";
 
 export interface FundedGuardConfig {
-  /** Starting account balance (the firm's reference point). */
+  /** Starting account balance (the firm's reference point for static max DD). */
   accountSize: number;
+  /**
+   * Equity at the start of the trading day — the reference for the daily
+   * limit. Firms reset this at server midnight from the higher of balance or
+   * equity. Falls back to accountSize when unknown.
+   */
+  dayStartEquity?: number | null;
   /** Daily drawdown limit as a percent, e.g. 5 for 5%. */
   dailyDrawdownPct: number;
   /** Maximum drawdown as a percent, e.g. 10 for 10%. */
@@ -31,8 +41,12 @@ export interface FundedGuardConfig {
 export type GuardLevel = "clear" | "caution" | "danger" | "breached";
 
 export interface FundedGuardEvaluation {
+  /** Equity at the start of the trading day (daily reference). */
+  dayStartEquity: number;
   /** Daily loss limit in account currency. */
   dailyLossLimit: number;
+  /** Equity must not print below this intraday. */
+  dailyFloor: number;
   /** Maximum total loss in account currency. */
   maxLossLimit: number;
   /** Equity must never print below this. */
@@ -69,14 +83,28 @@ export function evaluateFundedGuard(
   const dailyPct = clampPct(config.dailyDrawdownPct, 0.5, 20);
   const maxPct = clampPct(config.maxDrawdownPct, 1, 50);
 
-  const dailyLossLimit = (accountSize * dailyPct) / 100;
-  const maxLossLimit = (accountSize * maxPct) / 100;
+  // Daily drawdown is measured from the day's STARTING equity — it resets
+  // every day at the firm's server midnight (higher of balance or equity),
+  // so it moves up or down with wherever the account opens the day.
+  const dayStartEquity =
+    config.dayStartEquity != null && Number.isFinite(config.dayStartEquity) && config.dayStartEquity > 0
+      ? config.dayStartEquity
+      : accountSize;
+  const dailyLossLimit = (dayStartEquity * dailyPct) / 100;
+  const dailyFloor = dayStartEquity - dailyLossLimit;
 
-  // Trailing locks the floor to peak equity; static pins it to the start.
-  const reference = config.drawdownType === "trailing"
-    ? Math.max(accountSize, config.peakEquity ?? accountSize)
-    : accountSize;
-  const maxDrawdownFloor = reference - maxLossLimit;
+  // Maximum drawdown depends on the model:
+  // - static: pinned to the STARTING balance forever. Profit banks buffer;
+  //   the floor never moves.
+  // - trailing: measured from PEAK equity, so the max-loss dollar amount and
+  //   the floor both ratchet up as equity makes new highs.
+  const isTrailing = config.drawdownType === "trailing";
+  const maxReference =
+    isTrailing
+      ? Math.max(accountSize, config.peakEquity ?? accountSize)
+      : accountSize;
+  const maxLossLimit = (maxReference * maxPct) / 100;
+  const maxDrawdownFloor = maxReference - maxLossLimit;
 
   const lossToday = Math.max(0, -(todayPnl || 0));
   const dailyUsedPct = dailyLossLimit > 0 ? (lossToday / dailyLossLimit) * 100 : 0;
@@ -100,10 +128,12 @@ export function evaluateFundedGuard(
           ? `At ${dailyUsedPct.toFixed(0)}% of today's ${dailyPct}% limit — tighten up or stop.`
           : todayPnl < 0
             ? `Down ${dailyUsedPct.toFixed(0)}% of today's ${dailyPct}% allowance.`
-            : `Daily allowance intact — ${dailyPct}% of $${accountSize.toLocaleString("en-US")} = $${dailyLossLimit.toLocaleString("en-US", { maximumFractionDigits: 2 })} max loss today.`;
+            : `Daily allowance intact — ${dailyPct}% of day-start $${dayStartEquity.toLocaleString("en-US", { maximumFractionDigits: 2 })} = $${dailyLossLimit.toLocaleString("en-US", { maximumFractionDigits: 2 })} max loss today.`;
 
   return {
+    dayStartEquity,
     dailyLossLimit,
+    dailyFloor,
     maxLossLimit,
     maxDrawdownFloor,
     dailyUsedPct,

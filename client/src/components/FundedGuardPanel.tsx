@@ -42,6 +42,9 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
   const [maxPct, setMaxPct] = useState(String(DEFAULT_MAX_DRAWDOWN_PCT));
   const [drawdownType, setDrawdownType] = useState<DrawdownType>("static");
   const [peakEquity, setPeakEquity] = useState("");
+  // Day-start equity override: blank means "auto" (live equity minus today's
+  // realized P&L — the journal-side estimate of where the day opened).
+  const [dayStartOverride, setDayStartOverride] = useState("");
 
   // Live account for auto-detect: MT5 workspace carries equity when a
   // connection is active.
@@ -78,10 +81,22 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
   const daily = Number(dailyPct);
   const max = Number(maxPct);
   const peak = Number(peakEquity);
+  // Day-start equity: the firm's daily reference resets at server midnight
+  // from the higher of balance/equity. Journal-side estimate = live equity
+  // minus today's realized P&L; the trader can override it (e.g. from the
+  // firm's dashboard at midnight).
+  const overrideDayStart = Number(dayStartOverride);
+  const autoDayStart =
+    detectedSize != null ? detectedSize - todayPnl : null;
+  const dayStartEquity =
+    dayStartOverride.trim() !== "" && Number.isFinite(overrideDayStart) && overrideDayStart > 0
+      ? overrideDayStart
+      : autoDayStart;
   const valid =
     Number.isFinite(size) && size > 0 &&
     Number.isFinite(daily) && daily > 0 && daily <= 20 &&
     Number.isFinite(max) && max > 0 && max <= 50 &&
+    dayStartEquity != null && dayStartEquity > 0 &&
     (drawdownType === "static" || (Number.isFinite(peak) && peak > 0) || peakEquity.trim() === "");
 
   const evaluation = useMemo(
@@ -90,6 +105,7 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
         ? evaluateFundedGuard(
             {
               accountSize: size,
+              dayStartEquity,
               dailyDrawdownPct: daily,
               maxDrawdownPct: max,
               drawdownType,
@@ -98,7 +114,7 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
             todayPnl,
           )
         : null,
-    [valid, size, daily, max, drawdownType, peak, todayPnl],
+    [valid, size, dayStartEquity, daily, max, drawdownType, peak, todayPnl],
   );
 
   const LevelIcon =
@@ -110,10 +126,13 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
     <details className="risk-explanation" open>
       <summary>Funded account guard — prop-firm drawdown in %</summary>
       <p className="risk-detail-note">
-        Prop firms write drawdown rules in <strong>percentages, not dollars</strong>.
-        The industry benchmark (FTMO): 5% daily drawdown, 10% maximum drawdown.
-        Breach either and the account is terminated — no warnings. Set your
-        firm&rsquo;s numbers once; the dollar equivalents update live.
+        Prop firms write drawdown rules in <strong>percentages, not dollars</strong> —
+        and the two limits run on <strong>different clocks</strong>. The industry
+        benchmark (FTMO 2-Step): <strong>5% daily</strong> of the day&rsquo;s
+        starting equity (resets at server midnight, moves with the account),
+        <strong>10% maximum</strong> pinned to the starting balance (static — the
+        floor never moves) or trailing peak equity. Breach either and the
+        account is terminated — no warnings.
       </p>
 
       <div className="risk-calculator-grid">
@@ -161,6 +180,18 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
             step="0.5"
             value={dailyPct}
             onChange={event => setDailyPct(event.target.value)}
+          />
+        </Field>
+        <Field label="Day-start equity ($)">
+          <Input
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="100"
+            placeholder={autoDayStart != null ? `Auto: ${autoDayStart.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "e.g. 102000"}
+            title="The firm's daily reference — equity at server midnight. Auto = live equity minus today's realized P&L. Override it from your firm's dashboard if needed."
+            value={dayStartOverride}
+            onChange={event => setDayStartOverride(event.target.value)}
           />
         </Field>
         <Field label="Max drawdown %">
@@ -211,13 +242,13 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
               <RiskMetric
                 label="Daily loss limit"
                 value={`$${evaluation.dailyLossLimit.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
-                detail={`${daily}% of $${size.toLocaleString("en-US")} — resets daily`}
+                detail={`${daily}% of day-start $${dayStartEquity.toLocaleString("en-US", { maximumFractionDigits: 2 })} — floor $${evaluation.dailyFloor.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
                 tone={evaluation.level === "clear" ? "profit" : "loss"}
               />
               <RiskMetric
                 label="Max loss limit"
                 value={`$${evaluation.maxLossLimit.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
-                detail={`${max}% ${drawdownType} — floor $${evaluation.maxDrawdownFloor.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
+                detail={`${max}% ${drawdownType === "static" ? `of starting $${size.toLocaleString("en-US")} — fixed` : "of peak equity — trails up"} · floor $${evaluation.maxDrawdownFloor.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
               />
               <RiskMetric
                 label="Max risk per trade"

@@ -53,29 +53,40 @@ describe("FundedGuardPanel", () => {
 
   it("computes FTMO-style limits from percentages", () => {
     render(<FundedGuardPanel accountId={1} />);
-    // 5% daily of $100k = $5,000 ; 10% max of $100k = $10,000
-    expect(screen.getByText("$5,000")).toBeTruthy();
+    // Day-start equity = $100k live + $2.5k lost today = $102,500.
+    // 5% daily of $102,500 = $5,125 ; 10% static max of $100k = $10,000
+    expect(screen.getByText("$5,125")).toBeTruthy();
     expect(screen.getByText("$10,000")).toBeTruthy();
   });
 
   it("shows today's usage from realized journal P&L", () => {
     render(<FundedGuardPanel accountId={1} />);
-    // -$2,500 of $5,000 daily = 50%
-    expect(screen.getByText("50%")).toBeTruthy();
+    // -$2,500 of $5,125 daily = 48.78% → 49%
+    expect(screen.getByText("49%")).toBeTruthy();
   });
 
   it("allows manual account size entry", () => {
     render(<FundedGuardPanel accountId={1} />);
     fireEvent.click(screen.getByText("Manual"));
     fireEvent.change(screen.getByPlaceholderText(/100000/i), { target: { value: "50000" } });
-    // 5% daily of $50k = $2,500
-    expect(screen.getByText("$2,500")).toBeTruthy();
+    // Static max follows the manual size: 10% of $50k = $5,000.
+    // Daily still uses the auto day-start ($102,500) → $5,125.
+    expect(screen.getByText("$5,000")).toBeTruthy();
+    expect(screen.getByText("$5,125")).toBeTruthy();
+  });
+
+  it("lets the trader override day-start equity", () => {
+    render(<FundedGuardPanel accountId={1} />);
+    const dayStart = screen.getByPlaceholderText(/Auto:/i);
+    fireEvent.change(dayStart, { target: { value: "100000" } });
+    // 5% daily of the overridden $100k = $5,000
+    expect(screen.getByText("$5,000")).toBeTruthy();
   });
 
   it("caps per-trade risk at 30% of the daily allowance", () => {
     render(<FundedGuardPanel accountId={1} />);
-    // 30% of $5,000 = $1,500
-    expect(screen.getByText("$1,500")).toBeTruthy();
+    // 30% of $5,125 = $1,537.5
+    expect(screen.getByText("$1,537.5")).toBeTruthy();
   });
 
   it("reveals peak equity input for trailing drawdown", () => {
