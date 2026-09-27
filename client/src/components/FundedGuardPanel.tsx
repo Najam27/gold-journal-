@@ -104,8 +104,9 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
       setDailyPct(String(funded.dailyDrawdownPct));
       setMaxPct(String(funded.maxDrawdownPct));
       setDrawdownType(funded.drawdownType);
-      setDayStartOverride(funded.dayStartOverride);
-      setPeakEquity(funded.peakEquity);
+      // Older saves may lack newer fields — default to blank (auto).
+      setDayStartOverride(funded.dayStartOverride ?? "");
+      setPeakEquity(funded.peakEquity ?? "");
       setStartingBalanceOverride(funded.startingBalanceOverride ?? "");
     }
     setHydrated(true);

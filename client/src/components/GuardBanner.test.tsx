@@ -73,8 +73,7 @@ describe("GuardBanner (funded guard)", () => {
     expect(screen.getByText(/stop trading/i)).toBeDefined();
   });
 
-  it("derives day-start equity from all-time P&L minus today P&L", () => {
-    // Starting $100k, +$10k all-time, -$4k today → day-start $106k,
+  it("derives day-start equity from all-time P&L minus today P&L", () => {    // Starting $100k, +$10k all-time, -$4k today → day-start $106k,
     // daily limit $5,300, usage $4k = 75% → caution.
     render(
       <GuardBanner
@@ -87,5 +86,25 @@ describe("GuardBanner (funded guard)", () => {
       />,
     );
     expect(screen.getByRole("alert")).toBeDefined();
+  });
+
+  it("does not crash on old saves missing newer fields", () => {
+    // Settings saved before startingBalanceOverride existed.
+    const legacy = fundedConfig() as unknown as Record<string, unknown>;
+    const legacyFunded = { ...(legacy.funded as Record<string, unknown>) };
+    delete legacyFunded.startingBalanceOverride;
+    delete legacyFunded.dayStartOverride;
+    delete legacyFunded.peakEquity;
+    delete legacyFunded.mt5Balance;
+    delete legacyFunded.mt5Equity;
+    delete legacyFunded.snapshotAt;
+    const { container } = render(
+      <GuardBanner
+        guardConfig={{ ...legacy, funded: legacyFunded } as unknown as GuardConfig}
+        trades={[{ tradeDate: new Date().toISOString(), pnl: -4600, result: "LOSS" }]}
+        startingBalance={100000}
+      />,
+    );
+    expect(container.querySelector(".guard-banner")).not.toBeNull();
   });
 });

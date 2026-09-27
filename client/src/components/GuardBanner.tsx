@@ -62,10 +62,12 @@ export function GuardBanner({
 
     // Starting balance: the trader's manual entry wins (the funded account's
     // true initial balance), then today's MT5 snapshot balance, then the
-    // journal account's starting balance.
-    const overrideStart = Number(funded.startingBalanceOverride);
+    // journal account's starting balance. Older saves may lack the field —
+    // treat missing as blank (auto).
+    const startOverrideRaw = funded.startingBalanceOverride ?? "";
+    const overrideStart = Number(startOverrideRaw);
     const base =
-      (funded.startingBalanceOverride.trim() !== "" && Number.isFinite(overrideStart) && overrideStart > 0
+      (startOverrideRaw.trim() !== "" && Number.isFinite(overrideStart) && overrideStart > 0
         ? overrideStart
         : null) ??
       (snapshotBalance != null && snapshotBalance > 0 ? snapshotBalance : null) ??
@@ -80,9 +82,10 @@ export function GuardBanner({
         : base;
     if (!(accountSize > 0)) return null;
 
-    const override = Number(funded.dayStartOverride);
+    const dayStartRaw = funded.dayStartOverride ?? "";
+    const override = Number(dayStartRaw);
     const dayStartEquity =
-      funded.dayStartOverride.trim() !== "" && Number.isFinite(override) && override > 0
+      dayStartRaw.trim() !== "" && Number.isFinite(override) && override > 0
         ? override
         : currentEquity - todayPnl;
     if (!(dayStartEquity > 0)) return null;
