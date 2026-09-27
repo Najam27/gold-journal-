@@ -14,6 +14,16 @@
 -- are guarded — the migration refuses to run if either table holds rows, and
 -- it fails loudly instead of silently discarding them. If the guard ever
 -- trips, investigate the out-of-band writer before re-applying.
+--
+-- KNOWN GUARD TRIP (2026-09-27): the writer was the pre-browser-direct server
+-- vault itself — commit a2b3d2a wrote encrypted provider keys here through
+-- server/goldRouter.ts, and commit ea62e91 deleted every server AI path when
+-- keys moved into the trader's browser storage. No code in this repository
+-- (client, server, netlify, drizzle schema) references either table, so rows
+-- found here are orphans from the old architecture, never read by the current
+-- app. To clear: inspect the rows, optionally back them up, delete them, then
+-- re-run this migration. Do NOT weaken the guard to auto-delete: credential
+-- rows always deserve a human decision.
 
 do $$
 begin
