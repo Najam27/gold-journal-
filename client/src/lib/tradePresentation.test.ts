@@ -125,7 +125,7 @@ describe("canonical trade presentation model", () => {
     expect(presented["Planned reward"]).toBe("$93.30");
     expect(presented["Planned R:R"]).toBe("1 : 9.33");
     expect(presented["Actual P&L"]).toBe("$70.90");
-    expect(presented["Actual R"]).toBe("+7.09R");
+    expect(presented["Actual R:R"]).toBe("1 : 7.09");
     expect(presented["Running balance"]).toBe("$1,270.90");
     expect(presented["MFE"]).toBe("$80.00");
     expect(presented["MAE"]).toBe("-$6.00");
@@ -150,7 +150,7 @@ describe("canonical trade presentation model", () => {
     expect(presented.identity.line).toBe("16/09/2026 · XAUUSD · NEW YORK · SELL · WIN");
     expect(presented.identity.pnl).toBe("$70.90");
     expect(presented.identity.pnlValue).toBeCloseTo(70.9, 5);
-    expect(presented.kpis.map(kpi => kpi.value)).toEqual(["$70.90", "+7.09R", "1 : 9.33", presented.kpis[3].value, "9 / 10 checks confirmed", "4/5"]);
+    expect(presented.kpis.map(kpi => kpi.value)).toEqual(["$70.90", "1 : 7.09", "1 : 9.33", presented.kpis[3].value, "9 / 10 checks confirmed", "4/5"]);
     expect(presented.kpis.map(kpi => kpi.tone)).toEqual(["positive", "positive", "accent", "neutral", "neutral", "neutral"]);
     expect(presented.checklist).toHaveLength(10);
     expect(presented.checklist.filter(item => item.confirmed)).toHaveLength(9);

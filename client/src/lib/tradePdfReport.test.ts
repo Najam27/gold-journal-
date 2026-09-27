@@ -195,8 +195,8 @@ describe("trade data page", () => {
 
   it("leads with the trade's key figures as KPI tiles", async () => {
     const doc = await render([{ trade: completeTrade({ hasScreenshot: false }) }]);
-    ["ACTUAL P&L", "ACTUAL R", "PLANNED R:R", "RULE ADHERENCE", "CHECKLIST COMPLETION", "PATIENCE SCORE"].forEach(label => expect(doc.written()).toContain(label));
-    expect(doc.written()).toContain("+7.09R");
+    ["ACTUAL P&L", "ACTUAL R:R", "PLANNED R:R", "RULE ADHERENCE", "CHECKLIST COMPLETION", "PATIENCE SCORE"].forEach(label => expect(doc.written()).toContain(label));
+    expect(doc.written()).toContain("1 : 7.09");
     expect(doc.written()).toContain("1 : 9.33");
     expect(doc.written()).toContain("9 / 10 checks confirmed");
     expect(doc.written()).toContain("4/5");
@@ -226,7 +226,7 @@ describe("trade data page", () => {
         expect(appearsIn(doc, field.value), `missing value for ${field.label}: ${field.value}`).toBe(true);
       }
     }
-    ["XAUUSD", "1 : 9.33", "+7.09R", "$10.00", "$93.30", "$70.90", "Calm", "Fear", "Regret", "Waited for the retest", "Impatience|Closed early|Entered without confirmation", "$1,070.90"]
+    ["XAUUSD", "1 : 9.33", "1 : 7.09", "$10.00", "$93.30", "$70.90", "Calm", "Fear", "Regret", "Waited for the retest", "Impatience|Closed early|Entered without confirmation", "$1,070.90"]
       .forEach(value => expect(doc.written()).toContain(value));
     expect(doc.violations).toEqual([]);
     expect(doc.overlaps()).toEqual([]);

@@ -365,7 +365,7 @@ export const TRADE_PRESENTATION_FIELD_SPECS: FieldSpec[] = [
   { key: "reward", label: "Planned reward", section: "risk", keys: ["reward"], value: trade => money(trade.reward), tone: "signed" },
   { key: "plannedRr", label: "Planned R:R", section: "risk", keys: ["risk", "reward"], value: trade => rr(trade.risk, trade.reward), tone: "accent", kpi: true },
   { key: "pnl", label: "Actual P&L", section: "risk", keys: ["pnl"], value: trade => money(trade.pnl), tone: "signed", kpi: true },
-  { key: "actualR", label: "Actual R", section: "risk", keys: ["risk", "pnl"], value: trade => actualR(trade.risk, trade.pnl), tone: "signed", kpi: true },
+  { key: "actualR", label: "Actual R:R", section: "risk", keys: ["risk", "pnl"], value: trade => actualR(trade.risk, trade.pnl), tone: "signed", kpi: true },
   { key: "runningBalance", label: "Running balance", section: "risk", keys: ["runningBalance"], value: (_trade, context) => (context.runningBalance == null ? PRESENTATION_MISSING : formatMoney(context.runningBalance)), tone: "signed" },
   { key: "mfe", label: "MFE", section: "risk", keys: ["mfe"], value: trade => money(trade.mfe), tone: "signed" },
   { key: "mae", label: "MAE", section: "risk", keys: ["mae"], value: trade => money(trade.mae), tone: "signed" },

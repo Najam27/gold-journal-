@@ -222,7 +222,7 @@ export function buildDayBehaviorReview(day: string, trades: unknown[] | null | u
 }
 
 /** Context the trade dialog uses to preview today's process classification. */
-export function tradeProcessContext(options: { day: string; trades: unknown[] | null | undefined; plans: unknown[] | null | undefined; config?: Partial<BehaviorConfig> }) {
+export function tradeProcessContext(options: { day: string; trades: unknown[] | null | undefined; plans: unknown[] | null | undefined; config?: Partial<BehaviorConfig>; setupGrades?: string[] | null }) {
   const merged: BehaviorConfig = { ...DEFAULT_BEHAVIOR_CONFIG, ...(options.config ?? {}) };
   const plan = planForDay(options.plans, options.day);
   const [session] = buildTraderSessions((options.trades ?? []) as PsychologyTrade[], plan ? [plan] : [], merged);
@@ -240,10 +240,13 @@ export function tradeProcessContext(options: { day: string; trades: unknown[] | 
     behavioralFocus: String(plan?.behavioralFocus ?? "").trim() || null,
     hasPlan: Boolean(plan),
     sessionTradeCount: session?.closed.length ?? 0,
+    // The user's own Setup quality scale (best-first); the classifier treats the
+    // top two as A-plan grades so renamed scales are honoured in the preview.
+    validSetupGrades: (options.setupGrades ?? []).filter(Boolean).slice(0, 2),
   };
 }
 
-/** Live classification preview for the trade form, before the trade is saved. */
+/** Context the trade dialog uses to preview today's process classification. */
 export function previewTradeProcess(trade: PsychologyTrade, context: ReturnType<typeof tradeProcessContext>) {
   return classifyTradeProcess(trade, {
     riskCeiling: context.riskCeiling,
@@ -251,5 +254,6 @@ export function previewTradeProcess(trade: PsychologyTrade, context: ReturnType<
     plannedSessions: context.plannedSessions,
     maxTrades: context.maxTrades,
     tradeOrdinal: context.sessionTradeCount + 1,
+    validSetupGrades: context.validSetupGrades,
   });
 }

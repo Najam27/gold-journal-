@@ -217,7 +217,7 @@ function BaseTradeLogWithViewer({ stats, trades, allTrades, pagination, listLoad
                   <th scope="col">#</th><th scope="col">Date</th><th scope="col">Session</th><th scope="col">Side</th>
                   <th scope="col">Bias</th><th scope="col">Level</th><th scope="col">Setup</th><th scope="col">Execution</th>
                   <th scope="col">Planned risk</th><th scope="col">Planned R:R</th><th scope="col">Result</th>
-                  <th scope="col">Actual P&amp;L</th><th scope="col">Actual R</th><th scope="col"><span className="sr-only">Actions</span></th>
+                  <th scope="col">Actual P&amp;L</th><th scope="col">Actual R:R</th><th scope="col"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>                  {trades.map((trade: any, index: number) => {

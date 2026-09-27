@@ -120,6 +120,26 @@ describe("trade process classification", () => {
     expect(result.reasons.join(" ")).toMatch(/Revenge|Setup quality|not part of the plan/);
   });
 
+  it("does not auto-fail a cleanly executed B-setup trade", () => {
+    const win = assessmentFor({ tradeDate: "2026-09-27T10:00:00+05:00", result: "WIN", pnl: 150, risk: 50, setupQuality: "B", planStatus: "PLANNED", patienceScore: 5, holdQuality: "Good", mistake: "" });
+    expect(win.classification).toBe("GOOD_WIN");
+    expect(win.processCompliant).toBe(true);
+    expect(win.reasons.join(" ")).toMatch(/Setup quality/);
+    const loss = assessmentFor({ tradeDate: "2026-09-27T10:00:00+05:00", result: "LOSS", pnl: -50, risk: 50, setupQuality: "B", planStatus: "PLANNED", patienceScore: 5, holdQuality: "Good", mistake: "" });
+    expect(loss.classification).toBe("GOOD_LOSS");
+    expect(loss.processCompliant).toBe(true);
+  });
+
+  it("honours renamed setup grades passed through context", () => {
+    const context = { validSetupGrades: ["Excellent", "Good"] };
+    const top = assessmentFor({ tradeDate: "2026-09-27T10:00:00+05:00", result: "WIN", pnl: 150, risk: 50, setupQuality: "Excellent", planStatus: "PLANNED", mistake: "" }, context);
+    expect(top.classification).toBe("GOOD_WIN");
+    expect(top.setupAdherence).toBe(100);
+    const mid = assessmentFor({ tradeDate: "2026-09-27T10:00:00+05:00", result: "WIN", pnl: 150, risk: 50, setupQuality: "Average", planStatus: "PLANNED", mistake: "" }, context);
+    expect(mid.classification).toBe("GOOD_WIN");
+    expect(mid.setupAdherence).toBe(0);
+  });
+
   it("marks raw MT5 rows as not evaluated instead of inventing values", () => {
     const result = assessmentFor({ tradeDate: "2026-08-04T10:00:00+05:00", result: "WIN", pnl: 75, mt5Ticket: "9001" });
     expect(result.classification).toBe("NOT_EVALUATED");

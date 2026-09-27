@@ -47,7 +47,8 @@ export function actualRMultiple(risk: number | string | null | undefined, pnl: n
 export function formatActualR(risk: number | string | null | undefined, pnl: number | string | null | undefined) {
   const multiple = actualRMultiple(risk, pnl);
   if (multiple === null) return "—";
-  return `${multiple >= 0 ? "+" : ""}${multiple.toFixed(2)}R`;
+  // Risk is always normalized to 1, matching the planned R:R display ("1 : X").
+  return `1 : ${multiple.toFixed(2)}`;
 }
 
 export function getPktSession(date = new Date()) {

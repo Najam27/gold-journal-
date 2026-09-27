@@ -23,10 +23,11 @@ describe("getPktSession", () => {
     expect(isFuturePktDate("2026-08-17", afterPktMidnight)).toBe(false);
   });
 
-  it("keeps planned R:R separate from realized actual R and blocks undefined risk", () => {
+  it("keeps planned R:R and realized actual R in the same 1:X ratio format", () => {
     expect(formatRr(12.3, 101.25)).toBe("1 : 8.23");
     expect(actualRMultiple(12.3, -7.4)).toBeCloseTo(-0.6016, 4);
-    expect(formatActualR(12.3, -7.4)).toBe("-0.60R");
+    expect(formatActualR(12.3, -7.4)).toBe("1 : -0.60");
+    expect(formatActualR(100, 250)).toBe("1 : 2.50");
     expect(formatActualR(0, 100)).toBe("—");
     expect(actualRMultiple(0, 100)).toBeNull();
   });

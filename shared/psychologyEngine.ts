@@ -602,6 +602,13 @@ export type TradeProcessContext = {
   maxTrades?: number | null;
   /** Whether the immediately preceding closed trade that day was a loss. */
   previousWasLoss?: boolean;
+  /**
+   * Setup grades treated as A-plan quality, best-first. An empty or missing
+   * list falls back to ["A+", "A"]. Callers with access to the user's managed
+   * "Setup quality" option list should pass its top grades here so renamed
+   * scales are honoured.
+   */
+  validSetupGrades?: string[] | null;
 };
 
 export type TradeProcessAssessment = {
@@ -647,7 +654,9 @@ export function classifyTradeProcess(trade: PsychologyTrade, context: TradeProce
   const observed: string[] = [];
 
   const setupEvaluable = Boolean(setupQuality);
-  const setupValid = setupQuality ? setupQuality === "A" || setupQuality === "A+" : null;
+  const gradeList = context.validSetupGrades?.length ? context.validSetupGrades : ["A+", "A"];
+  const validSetupGrades = gradeList.map(grade => grade.toUpperCase());
+  const setupValid = setupQuality ? validSetupGrades.includes(setupQuality) : null;
   if (setupEvaluable && setupValid === false) reasons.push(`Setup quality saved as ${setupQuality}.`);
   if (tagsForCategory(tags, "ANALYTICAL").length) reasons.push(`Analytical mistake tagged: ${tagsForCategory(tags, "ANALYTICAL").map(tag => MISTAKE_BY_TAG[tag].label).join(", ")}.`);
 
@@ -713,7 +722,11 @@ export function classifyTradeProcess(trade: PsychologyTrade, context: TradeProce
   const components = [checklistAdherence, riskAdherence, setupAdherence, executionAdherence].filter((value): value is number => value != null);
   const ruleAdherence = notEvaluated ? null : components.length ? round(components.reduce((sum, value) => sum + value, 0) / components.length) : hardViolations ? 25 : 100;
 
-  const processCompliant = notEvaluated ? null : !hardViolations && (setupValid !== false) && (executionAdherence == null || executionAdherence >= 80) && (checklistAdherence == null || checklistAdherence >= 80) && (riskAdherence == null || riskAdherence >= 80);
+  // A below-top setup grade is descriptive, not a rule break: it already adds a
+  // reason and zeroes the setup component of the rule-adherence score, but it
+  // must not auto-fail process on its own — a B setup traded to plan with clean
+  // execution is a good process with an average setup, not a bad trade.
+  const processCompliant = notEvaluated ? null : !hardViolations && (executionAdherence == null || executionAdherence >= 80) && (checklistAdherence == null || checklistAdherence >= 80) && (riskAdherence == null || riskAdherence >= 80);
 
   let classification: TradeClassification = "NOT_EVALUATED";
   if (!notEvaluated) {
