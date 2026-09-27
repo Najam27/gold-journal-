@@ -760,14 +760,18 @@ export function AnalysisDashboard({ accountId }: Props) {
         <MetricTable
           title="SESSION × TIMEFRAME"
           rows={analysis.sessionTimeframes}
+          empty="No session × timeframe pair has 2+ closed trades yet."
         />
-        <MetricTable title="LEVEL × SESSION" rows={analysis.levelSessions} />
+        <MetricTable
+          title="LEVEL × SESSION"
+          rows={analysis.levelSessions}
+          empty="No level × session pair has 2+ closed trades yet. Fill both the level and session fields on your trades to populate this."
+        />
         <MetricTable
           title="LEVEL × TIMEFRAME"
           rows={analysis.levelTimeframes}
+          empty="No level × timeframe pair has 2+ closed trades yet."
         />
-      </div>
-      <div className="edge-grid">
         <MetricTable title="DIRECTION" rows={analysis.directions} />
         <MetricTable title="DAY / UTC" rows={analysis.days} />
         <MetricTable title="HOUR / UTC" rows={analysis.hours} />

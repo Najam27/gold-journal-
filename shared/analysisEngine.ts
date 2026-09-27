@@ -162,6 +162,13 @@ export type AnalysisResult = {
 };
 
 export const EDGE_MIN_SAMPLE = 5;
+/**
+ * Minimum sample for combination tables (LEVEL × SESSION, etc.). Lower than
+ * EDGE_MIN_SAMPLE: combos split the data finer, so a hard 5-trade cutoff
+ * hides valid early evidence. Small samples are already labeled LOW
+ * confidence by confidenceFor(), so showing them is honest.
+ */
+export const COMBO_MIN_SAMPLE = 2;
 export const EDGE_SCORE_WEIGHTS = { sample: 20, expectancy: 25, profitFactor: 15, consistency: 15, drawdown: 15, dataQuality: 10 } as const;
 
 const finite = (value: unknown) => { const n = typeof value === "number" ? value : Number(value ?? 0); return Number.isFinite(n) ? n : 0; };
@@ -301,7 +308,7 @@ function behavioralMetrics(trades: AnalysisTrade[]) {
   return { tags, emotions, activity: { activeDays: counts.length, averageTradesPerActiveDay: round(averageTradesPerActiveDay, 2), maxTradesInDay, concentratedDays: counts.filter(count => count >= Math.max(3, Math.ceil(averageTradesPerActiveDay * 2))).length }, coverage, limitations };
 }
 function qualityMetrics(trades: AnalysisTrade[]) { const closed = sortedClosed(trades); const fields: Array<[keyof AnalysisTrade, string]> = [["session", "session"], ["timeframe", "timeframe"], ["level", "level"], ["setupQuality", "setup"], ["direction", "direction"], ["risk", "risk"], ["reward", "R:R"], ["notes", "notes"], ["screenshotKey", "screenshots"], ["result", "result"]]; const warnings = fields.map(([field, label]) => { const missing = closed.filter(trade => field === "risk" || field === "reward" ? finite(trade[field]) <= 0 : !clean(trade[field])).length; return { field: label, missing, total: closed.length, percentage: closed.length ? round(missing / closed.length * 100, 1) : 0, message: `${closed.length ? round(missing / closed.length * 100, 1) : 0}% of closed trades have no ${label}.` }; }).filter(item => item.missing > 0); const complete = closed.filter(trade => fields.every(([field]) => field === "risk" || field === "reward" ? finite(trade[field]) > 0 : Boolean(clean(trade[field])))).length; return { complete, incomplete: closed.length - complete, completeness: closed.length ? round(complete / closed.length * 100, 1) : 0, warnings }; }
-function conditionalRows(trades: AnalysisTrade[], dimensions: Array<keyof AnalysisTrade>) { return rank(groupBy(trades, dimensions)).filter(row => row.sample >= EDGE_MIN_SAMPLE); }
+function conditionalRows(trades: AnalysisTrade[], dimensions: Array<keyof AnalysisTrade>) { return rank(groupBy(trades, dimensions)).filter(row => row.sample >= COMBO_MIN_SAMPLE); }
 function edgeDirection(a: MetricRow, b: MetricRow) { if (a.sample < 10 || b.sample < 10) return "INSUFFICIENT DATA" as const; const delta = a.expectancy - b.expectancy; return delta > Math.max(0.05, Math.abs(b.expectancy) * 0.1) ? "IMPROVING" as const : delta < -Math.max(0.05, Math.abs(b.expectancy) * 0.1) ? "DETERIORATING" as const : "STABLE" as const; }
 
 export function filterAnalysisTrades(trades: AnalysisTrade[], filters: AnalysisFilters = {}) {
