@@ -58,6 +58,11 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
   const [drawdownType, setDrawdownType] = useState<DrawdownType>("static");
   const [peakEquity, setPeakEquity] = useState("");
   const [dayStartOverride, setDayStartOverride] = useState("");
+  // Starting balance override: the MT5 snapshot balance is the *current*
+  // balance (profits/losses baked in), not the funded account's initial
+  // balance. The trader types the true starting balance once from the firm's
+  // dashboard; blank means "auto from MT5".
+  const [startingBalanceOverride, setStartingBalanceOverride] = useState("");
   const [hydrated, setHydrated] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -101,6 +106,7 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
       setDrawdownType(funded.drawdownType);
       setDayStartOverride(funded.dayStartOverride);
       setPeakEquity(funded.peakEquity);
+      setStartingBalanceOverride(funded.startingBalanceOverride ?? "");
     }
     setHydrated(true);
   }, [hydrated, accountList.isSuccess, savedGuardConfig]);
@@ -145,15 +151,20 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
     return { todayPnl: today, allTimePnl: allTime };
   }, [journal.data, todayKey]);
 
-  // Starting balance: MT5 snapshot balance first, journal starting balance
-  // as fallback. Current equity: MT5 snapshot equity first, journal-derived
-  // (starting balance + all-time realized P&L) as fallback.
   const journalStartingBalance = useMemo(() => {
     const list = (accountList.data ?? []) as Array<{ id: number; startingBalance?: unknown }>;
     const found = list.find(a => a.id === accountId);
     return numOrNull(found?.startingBalance);
   }, [accountList.data, accountId]);
-  const startingBalance = mt5Snapshot?.balance ?? journalStartingBalance;
+  // Starting balance: the trader's manual entry wins (the funded account's
+  // initial balance), then the MT5 snapshot balance, then the journal
+  // account's starting balance. MT5's balance is the *current* balance, not
+  // the initial one — that is why it must be editable.
+  const overrideStartingBalance = Number(startingBalanceOverride);
+  const startingBalance =
+    startingBalanceOverride.trim() !== "" && Number.isFinite(overrideStartingBalance) && overrideStartingBalance > 0
+      ? overrideStartingBalance
+      : (mt5Snapshot?.balance ?? journalStartingBalance);
   const currentEquity = mt5Snapshot?.equity ?? (startingBalance != null ? startingBalance + allTimePnl : null);
 
   const size = sizeMode === "auto" ? (startingBalance ?? NaN) : Number(accountSize);
@@ -212,6 +223,7 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
         drawdownType,
         dayStartOverride,
         peakEquity,
+        startingBalanceOverride,
         mt5Balance: mt5Snapshot?.balance ?? null,
         mt5Equity: mt5Snapshot?.equity ?? null,
         snapshotAt: mt5Snapshot ? new Date().toISOString() : null,
@@ -228,7 +240,7 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated, accountId, sizeMode, accountSize, dailyPct, maxPct, drawdownType, dayStartOverride, peakEquity, mt5Snapshot?.balance, mt5Snapshot?.equity]);
+  }, [hydrated, accountId, sizeMode, accountSize, dailyPct, maxPct, drawdownType, dayStartOverride, peakEquity, startingBalanceOverride, mt5Snapshot?.balance, mt5Snapshot?.equity]);
 
   const LevelIcon =
     evaluation?.level === "breached" ? ShieldAlert
@@ -263,9 +275,37 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
             {mt5Snapshot ? <span className="funded-live-badge">Live</span> : null}
           </h4>
           <dl>
-            <div>
-              <dt>Starting balance</dt>
-              <dd>{money(startingBalance)}</dd>
+            <div className="funded-balance-edit">
+              <dt>
+                <label htmlFor="funded-starting-balance">Starting balance</label>
+                {startingBalanceOverride.trim() !== "" && (
+                  <button
+                    type="button"
+                    className="funded-reset-link"
+                    onClick={() => setStartingBalanceOverride("")}
+                    title="Clear and use the MT5 snapshot balance again"
+                  >
+                    auto
+                  </button>
+                )}
+              </dt>
+              <dd>
+                <Input
+                  id="funded-starting-balance"
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="100"
+                  placeholder={
+                    mt5Snapshot?.balance != null
+                      ? `MT5: ${mt5Snapshot.balance.toLocaleString("en-US", { maximumFractionDigits: 2 })}`
+                      : "e.g. 5000"
+                  }
+                  title="Your funded account's initial balance (from the firm's dashboard). MT5 only reports the current balance, so type the true starting balance here once."
+                  value={startingBalanceOverride}
+                  onChange={event => setStartingBalanceOverride(event.target.value)}
+                />
+              </dd>
             </div>
             <div>
               <dt>Current equity</dt>
@@ -282,7 +322,7 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
           </dl>
           <p className="funded-snapshot-note">
             {mt5Snapshot
-              ? `Auto-fetched from MT5${mt5Snapshot.brokerServer ? ` (${mt5Snapshot.brokerServer})` : ""}.`
+              ? `Equity auto-fetched from MT5${mt5Snapshot.brokerServer ? ` (${mt5Snapshot.brokerServer})` : ""}. Starting balance is the account's initial balance — type it once from your firm's dashboard.`
               : "No live MT5 connection — using the journal account's starting balance."}
           </p>
           <Field label="Account size (static max-DD reference)">

@@ -1215,6 +1215,11 @@ select option:disabled { color: var(--text-disabled); }
 .funded-guard-snapshot dd.neg { color: var(--accent-red, #f87171); }
 .funded-guard-snapshot dd.pos { color: var(--accent-green, #4ade80); }
 .funded-snapshot-note { font-size: .75rem; color: var(--text-muted); margin: 0 0 .8rem; }
+.funded-balance-edit dt { display: flex; align-items: center; gap: .5rem; }
+.funded-balance-edit label { cursor: pointer; }
+.funded-reset-link { background: none; border: none; padding: 0; font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--accent-amber); cursor: pointer; }
+.funded-reset-link:hover { text-decoration: underline; }
+.funded-balance-edit dd input { width: 130px; text-align: right; font-weight: 700; }
 .funded-rules-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
 .funded-rules-fields .field { min-width: 0; }
 @media (max-width: 760px) { .funded-guard-grid { grid-template-columns: 1fr; } }

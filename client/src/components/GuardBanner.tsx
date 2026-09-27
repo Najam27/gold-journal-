@@ -60,7 +60,14 @@ export function GuardBanner({
     const snapshotEquity = snapshotToday ? funded.mt5Equity : null;
     const snapshotBalance = snapshotToday ? funded.mt5Balance : null;
 
+    // Starting balance: the trader's manual entry wins (the funded account's
+    // true initial balance), then today's MT5 snapshot balance, then the
+    // journal account's starting balance.
+    const overrideStart = Number(funded.startingBalanceOverride);
     const base =
+      (funded.startingBalanceOverride.trim() !== "" && Number.isFinite(overrideStart) && overrideStart > 0
+        ? overrideStart
+        : null) ??
       (snapshotBalance != null && snapshotBalance > 0 ? snapshotBalance : null) ??
       (Number.isFinite(startingBalance) && startingBalance > 0 ? startingBalance : 0);
     const journalEquity = base + allTimePnl;

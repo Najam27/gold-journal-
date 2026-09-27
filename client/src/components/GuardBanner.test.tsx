@@ -25,6 +25,7 @@ const fundedConfig = (overrides = {}): GuardConfig => ({
     mt5Balance: null,
     mt5Equity: null,
     snapshotAt: null,
+    startingBalanceOverride: "",
     ...overrides,
   },
 });

@@ -398,6 +398,7 @@ export const goldRouter = router({
           drawdownType: z.enum(["static", "trailing"]),
           dayStartOverride: z.string().max(32),
           peakEquity: z.string().max(32),
+          startingBalanceOverride: z.string().max(32),
           mt5Balance: z.number().finite().min(0).max(MAX_MONEY).nullable(),
           mt5Equity: z.number().finite().min(0).max(MAX_MONEY).nullable(),
           snapshotAt: z.string().max(64).nullable(),

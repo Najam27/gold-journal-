@@ -115,4 +115,14 @@ describe("FundedGuardPanel", () => {
     const peakInput = screen.getByLabelText(/Peak equity so far/i);
     expect(peakInput.getAttribute("placeholder")).toMatch(/Auto:/i);
   });
+
+  it("lets the trader type the true starting balance (MT5 balance is current, not initial)", () => {
+    render(<FundedGuardPanel accountId={1} />);
+    const input = screen.getByLabelText(/Starting balance/i) as HTMLInputElement;
+    // Placeholder shows the MT5 auto value ($100,000 mocked balance).
+    expect(input.getAttribute("placeholder")).toMatch(/100,000/);
+    fireEvent.change(input, { target: { value: "5000" } });
+    // Static max-DD now pins to the typed $5,000: 10% = $500 limit.
+    expect(screen.getByText("$500")).toBeTruthy();
+  });
 });

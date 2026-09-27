@@ -53,6 +53,13 @@ export interface FundedGuardSettings {
   dayStartOverride: string;
   /** Manual peak equity for trailing; "" means auto. */
   peakEquity: string;
+  /**
+   * Manual starting balance (the funded account's initial balance). "" means
+   * auto from the MT5 snapshot balance. The MT5 balance is the *current*
+   * balance — with profits/losses baked in — so for a funded account the
+   * true starting balance must be typed once from the firm's dashboard.
+   */
+  startingBalanceOverride: string;
   /** MT5 snapshot balance at save time (starting-balance reference). */
   mt5Balance: number | null;
   /** MT5 snapshot equity at save time (daily-reference input). */
