@@ -95,7 +95,8 @@ export interface GoalPortfolioBalance {
 }
 
 export function goalPortfolioBalance(goals: TraderGoal[]): GoalPortfolioBalance {
-  const active = goals.filter(goal => goal.active);
+  const list = goals ?? [];
+  const active = list.filter(goal => goal.active);
   const outcome = active.filter(goal => goalCategory(goal.metric) === "PERFORMANCE").length;
   const process = active.length - outcome;
   const outcomeShare = active.length ? outcome / active.length : 0;

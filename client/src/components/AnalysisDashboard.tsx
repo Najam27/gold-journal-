@@ -8,6 +8,7 @@ import {
   RefreshCcw,
   ShieldAlert,
   Sparkles,
+  TrendingUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -118,8 +119,13 @@ function MetricTable({
 }
 
 function PlaybookCardView({ card, tone }: { card: PlaybookCard; tone: "trade" | "avoid" }) {
+  // .edge-callout is a 30px-icon + content grid (see gold-overrides.css): the
+  // icon must be the first child or the content div collapses into the 30px
+  // icon column.
+  const Icon = tone === "trade" ? TrendingUp : ShieldAlert;
   return (
     <article className={`edge-callout ${tone === "trade" ? "strong" : "weak"}`}>
+      <Icon size={18} />
       <div>
         <span>
           {card.dimension.toUpperCase()} &middot; {card.evidenceTier}

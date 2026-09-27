@@ -126,13 +126,14 @@ export function assessTiltRisk(inputTrades: TiltTrade[], options: TiltOptions = 
     }
   }
 
-  const cooldownMinutes = level === "STAND_DOWN" ? 60 : level === "CAUTION" ? 15 : null;
+  const finalLevel = level as TiltLevel;
+  const cooldownMinutes = finalLevel === "STAND_DOWN" ? 60 : finalLevel === "CAUTION" ? 15 : null;
   const summary =
-    level === "STAND_DOWN"
+    finalLevel === "STAND_DOWN"
       ? "Stand down. No more trades today — protect the account and come back with a plan."
-      : level === "CAUTION"
+      : finalLevel === "CAUTION"
         ? "Proceed with caution: halve size, re-read your plan, and take 15 minutes before the next entry."
         : "Clear. Nothing in your recent trading demands a stop — trade the plan as written.";
 
-  return { level, reasons, cooldownMinutes, summary };
+  return { level: finalLevel, reasons, cooldownMinutes, summary };
 }

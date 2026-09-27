@@ -18,7 +18,7 @@ import type { BehaviorConfig } from "@/lib/psychology";
  * optional evidence-bound AI edge analyst. Extracted from the journal page so
  * the page stays a router, not a 3,300-line god component.
  */
-export function MentorView({ account, behaviorConfig }: { account?: any; behaviorConfig?: Partial<BehaviorConfig> }) {
+export function MentorView({ account, behaviorConfig }: { account?: any; behaviorConfig?: Partial<BehaviorConfig>; trades?: any; stats?: any; user?: any }) {
   const aiSettings = useAiSettings();
   const behaviorEvidence = trpc.analysis.get.useQuery(
     { accountId: account?.id ?? 0, filters: {} },

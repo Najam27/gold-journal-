@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import React, { useMemo } from "react";
 import { AlertTriangle, CheckCircle2, Compass, Eye } from "lucide-react";
 import { buildMentorBrief, type MentorInsight, type MentorInsightLevel } from "@shared/mentorEngine";
 import type { TiltAssessment } from "@shared/tiltGuard";
