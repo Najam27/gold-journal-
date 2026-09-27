@@ -25,15 +25,29 @@
 -- re-run this migration. Do NOT weaken the guard to auto-delete: credential
 -- rows always deserve a human decision.
 
+-- GUARD IMPLEMENTATION NOTE: the row checks use dynamic SQL (EXECUTE) on
+-- purpose. A static EXISTS subquery is parsed as part of the enclosing
+-- expression, so Postgres resolves the table name before the to_regclass()
+-- short-circuit can ever run — the guard would crash with 42P01 on a database
+-- where the table is already gone instead of passing cleanly. EXECUTE defers
+-- parsing until the table is known to exist, which keeps this migration
+-- idempotent: safe to run on a fresh database, safe to re-run after the drops.
+
 do $$
+declare
+  has_rows boolean;
 begin
-  if to_regclass('public.gj_ai_provider_settings') is not null
-     and exists (select 1 from public.gj_ai_provider_settings) then
-    raise exception 'Refusing to retire gj_ai_provider_settings: the table is not empty. Investigate the writer before dropping.';
+  if to_regclass('public.gj_ai_provider_settings') is not null then
+    execute 'select exists (select 1 from public.gj_ai_provider_settings)' into has_rows;
+    if has_rows then
+      raise exception 'Refusing to retire gj_ai_provider_settings: the table is not empty. Investigate the writer before dropping.';
+    end if;
   end if;
-  if to_regclass('public.gj_ai_jobs') is not null
-     and exists (select 1 from public.gj_ai_jobs) then
-    raise exception 'Refusing to retire gj_ai_jobs: the table is not empty. Investigate the writer before dropping.';
+  if to_regclass('public.gj_ai_jobs') is not null then
+    execute 'select exists (select 1 from public.gj_ai_jobs)' into has_rows;
+    if has_rows then
+      raise exception 'Refusing to retire gj_ai_jobs: the table is not empty. Investigate the writer before dropping.';
+    end if;
   end if;
 end
 $$;
