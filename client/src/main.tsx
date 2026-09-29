@@ -23,6 +23,9 @@ import "./risk-calculator.css";
 // renders identically to the share image and the PDF report.
 import "./trade-presentation.css";
 import "./ai-providers.css";
+// AI Mentor readability layer: large high-contrast coaching text, own file so
+// the mentor's typography stays independent of the premium theme.
+import "./mentor.css";
 
 const redirectToLoginIfUnauthorized = (error: unknown) => {
   if (!(error instanceof TRPCClientError)) return;

@@ -14,17 +14,17 @@ function InsightCard({ insight }: { insight: MentorInsight }) {
   const meta = LEVEL_META[insight.level];
   const Icon = meta.icon;
   return (
-    <article className="ai-evidence-card" data-mentor-level={insight.level}>
-      <strong>
-        <Icon size={15} aria-hidden /> {insight.title}
-      </strong>
-      <p>{insight.message}</p>
-      <p>
+    <article className="mentor-card" data-mentor-level={insight.level}>
+      <div className="mentor-card-head">
+        <Icon size={17} aria-hidden />
+        <h4>{insight.title}</h4>
+        <span className="mentor-level-badge">{meta.label}</span>
+      </div>
+      <p className="mentor-card-message">{insight.message}</p>
+      <p className="mentor-card-action">
         <b>Do this:</b> {insight.action}
       </p>
-      <small>
-        {meta.label} · {insight.evidence}
-      </small>
+      <small className="mentor-card-evidence">{insight.evidence}</small>
     </article>
   );
 }
@@ -38,28 +38,28 @@ export function MentorBriefPanel({ analysis, tilt }: { analysis: AnalysisResult 
   const brief = useMemo(() => (analysis ? buildMentorBrief(analysis, tilt ? { tilt } : {}) : null), [analysis, tilt]);
   if (!brief) return null;
   return (
-    <section className="analysis-ai-report" aria-label="Mentor brief">
+    <section className="mentor-brief" aria-label="Mentor brief">
       <span className="section-label">MENTOR BRIEF — NO AI KEY NEEDED</span>
-      <p>{brief.headline}</p>
+      <p className="mentor-headline">{brief.headline}</p>
       {brief.nextAction ? (
-        <div className="analysis-ai-empty" role="note">
-          <Compass size={20} />
+        <div className="mentor-priority" role="note">
+          <Compass size={22} aria-hidden />
           <div>
             <strong>Your one priority</strong>
             <p>{brief.nextAction}</p>
           </div>
         </div>
       ) : null}
-      <div className="analysis-ai-columns">
-        <section aria-label="Mentor insights">
-          <span className="section-label">WHAT YOUR JOURNAL SAYS</span>
-          {brief.insights.length ? (
-            brief.insights.map(item => <InsightCard key={item.title} insight={item} />)
-          ) : (
-            <p>Log and close a few trades first — the mentor reads closed trades, not intentions.</p>
-          )}
-        </section>
-      </div>
+      {brief.insights.length ? (
+        <>
+          <span className="section-label" style={{ display: "block", marginTop: 20 }}>WHAT YOUR JOURNAL SAYS</span>
+          <div className="mentor-insights">
+            {brief.insights.map(item => <InsightCard key={item.title} insight={item} />)}
+          </div>
+        </>
+      ) : (
+        <p className="mentor-headline">Log and close a few trades first — the mentor reads closed trades, not intentions.</p>
+      )}
     </section>
   );
 }

@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { Bot, ShieldAlert } from "lucide-react";
+import { AlertTriangle, Bot, CheckCircle2, Eye, ShieldAlert } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { formatMoney } from "@/lib/gold";
 import { openJournalView } from "@/lib/journalViewNavigation";
@@ -251,7 +251,7 @@ export function MentorView({ account, behaviorConfig }: { account?: any; behavio
           </div>
         )}
         {report && (
-          <div className="analysis-ai-report">
+          <div className="mentor-report">
             {ai?.reducedAfterTooLarge && (
               <p className="analysis-warning" role="status">
                 That journal period needed more tokens than one request may carry,
@@ -282,20 +282,22 @@ export function MentorView({ account, behaviorConfig }: { account?: any; behavio
                 {ai.requestStats.journalTrades.toLocaleString()}.
               </p>
             )}
-            <div className="analysis-ai-summary">
+            <div className="mentor-verdict">
               <span className="section-label">DIRECT, EVIDENCE-BOUND VERDICT</span>
               <p>{report.executiveSummary}</p>
             </div>
-            <div className="analysis-ai-columns">
+            <div className="mentor-report-grid">
               <section>
                 <span className="section-label">STRONGEST EDGES</span>
                 {report.strongestEdges.map((item: any) => (
-                  <article className="ai-evidence-card" key={item.label}>
-                    <strong>{item.label}</strong>
-                    <p>{item.claim}</p>
-                    <small>
-                      {item.sample} trades · {item.confidence} confidence ·{" "}
-                      {item.evidence}
+                  <article className="mentor-card" data-mentor-level="strength" key={item.label}>
+                    <div className="mentor-card-head">
+                      <CheckCircle2 size={17} aria-hidden />
+                      <h4>{item.label}</h4>
+                    </div>
+                    <p className="mentor-card-message">{item.claim}</p>
+                    <small className="mentor-card-evidence">
+                      {item.sample} trades · {item.confidence} confidence
                     </small>
                   </article>
                 ))}
@@ -303,28 +305,35 @@ export function MentorView({ account, behaviorConfig }: { account?: any; behavio
               <section>
                 <span className="section-label">NEXT HYPOTHESES</span>
                 {report.edgeHypotheses.map((item: any) => (
-                  <article className="ai-evidence-card" key={item.title}>
-                    <strong>{item.title}</strong>
-                    <p>{item.statement}</p>
-                    <small>
-                      {item.confidence} confidence · Next test: {item.nextTest}
-                    </small>
+                  <article className="mentor-card" data-mentor-level="watch" key={item.title}>
+                    <div className="mentor-card-head">
+                      <Eye size={17} aria-hidden />
+                      <h4>{item.title}</h4>
+                    </div>
+                    <p className="mentor-card-message">{item.statement}</p>
+                    <p className="mentor-card-action">
+                      <b>Next test:</b> {item.nextTest}
+                    </p>
+                    <small className="mentor-card-evidence">{item.confidence} confidence</small>
                   </article>
                 ))}
               </section>
             </div>
-            <div className="analysis-ai-columns">
+            <div className="mentor-report-grid">
               <section>
                 <span className="section-label">WEAKEST CONTEXTS</span>
                 {report.weakestContexts.length ? report.weakestContexts.map((item: any) => (
-                  <article className="ai-evidence-card" key={`${item.label}-${item.claim}`}>
-                    <strong>{item.label}</strong>
-                    <p>{item.claim}</p>
-                    <small>{item.sample} trades · {item.confidence} confidence · {item.evidence}</small>
+                  <article className="mentor-card" data-mentor-level="fix" key={`${item.label}-${item.claim}`}>
+                    <div className="mentor-card-head">
+                      <AlertTriangle size={17} aria-hidden />
+                      <h4>{item.label}</h4>
+                    </div>
+                    <p className="mentor-card-message">{item.claim}</p>
+                    <small className="mentor-card-evidence">{item.sample} trades · {item.confidence} confidence</small>
                   </article>
                 )) : <p>No qualified weak context can be supported by this sample.</p>}
               </section>
-              <section>
+              <section className="mentor-leaks">
                 <span className="section-label">LEAKS AND BLIND SPOTS</span>
                 {(report.behavioralLeaks.length ? report.behavioralLeaks : report.winLossDifferences.potentialLeaks).map((item: string) => <p key={item}>• {item}</p>)}
                 {!report.behavioralLeaks.length && !report.winLossDifferences.potentialLeaks.length && <p>No behavioral conclusion can be supported from the saved fields.</p>}

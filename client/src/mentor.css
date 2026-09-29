@@ -1,0 +1,189 @@
+/* AI Mentor readability overhaul.
+ *
+ * The mentor is the trader's coach: its text must be large, high-contrast,
+ * left-aligned, and scannable. Every rule below exists to fix the old
+ * 10px muted-gray cards that nobody could read.
+ */
+
+.mentor-brief {
+  margin-top: 18px;
+  padding: 22px;
+  border: 1px solid color-mix(in srgb, var(--accent-violet) 30%, var(--border));
+  border-radius: 18px;
+  background:
+    radial-gradient(120% 140% at 92% 4%, color-mix(in srgb, var(--accent-violet) 14%, transparent), transparent 62%),
+    linear-gradient(150deg, var(--surface-panel-elevated), var(--surface-panel));
+  box-shadow: var(--shadow-card);
+}
+
+.mentor-headline {
+  margin: 8px 0 0;
+  font-size: 17px;
+  line-height: 1.55;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  max-width: 72ch;
+}
+
+/* The single priority action: impossible to miss. */
+.mentor-priority {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  margin-top: 16px;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--accent-amber) 45%, var(--border));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent-amber) 9%, var(--surface-panel));
+}
+.mentor-priority > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--accent-amber);
+}
+.mentor-priority strong {
+  display: block;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-amber);
+  margin-bottom: 6px;
+}
+.mentor-priority p {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+/* Insight cards: full-width responsive grid, never a narrow single column. */
+.mentor-insights {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.mentor-card {
+  position: relative;
+  padding: 16px 18px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-subtle);
+  border-left: 4px solid var(--mentor-accent, var(--accent-violet));
+}
+.mentor-card[data-mentor-level="fix"] { --mentor-accent: var(--accent-red, #f87171); }
+.mentor-card[data-mentor-level="watch"] { --mentor-accent: var(--accent-amber); }
+.mentor-card[data-mentor-level="strength"] { --mentor-accent: var(--accent-green, #4ade80); }
+
+.mentor-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.mentor-card-head > svg {
+  flex: none;
+  color: var(--mentor-accent, var(--accent-violet));
+}
+.mentor-level-badge {
+  margin-left: auto;
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mentor-accent, var(--accent-violet));
+  border: 1px solid color-mix(in srgb, var(--mentor-accent, var(--accent-violet)) 45%, transparent);
+  border-radius: 999px;
+  padding: 3px 10px;
+  background: color-mix(in srgb, var(--mentor-accent, var(--accent-violet)) 10%, transparent);
+}
+.mentor-card h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+.mentor-card-message {
+  margin: 8px 0 0;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+.mentor-card-action {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--mentor-accent, var(--accent-violet)) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--mentor-accent, var(--accent-violet)) 22%, transparent);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+.mentor-card-action b {
+  color: var(--mentor-accent, var(--accent-violet));
+}
+.mentor-card-evidence {
+  display: block;
+  margin-top: 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* AI report sections: same readable card system, left-aligned. */
+.mentor-report {
+  margin-top: 16px;
+  border-top: 1px solid color-mix(in srgb, var(--accent-violet) 24%, var(--border));
+  padding-top: 18px;
+}
+.mentor-verdict {
+  border: 1px solid color-mix(in srgb, var(--accent-violet) 28%, var(--border));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent-violet) 8%, var(--surface-panel));
+  padding: 18px 20px;
+  text-align: left;
+}
+.mentor-verdict p {
+  margin: 8px 0 0;
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  max-width: 78ch;
+}
+.mentor-report-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+.mentor-report-grid > section {
+  min-width: 0;
+}
+.mentor-leaks p {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  margin: 8px 0;
+}
+
+/* Readability repairs for the legacy AI card classes used elsewhere. */
+.ai-evidence-card strong { font-size: 13px; }
+.ai-evidence-card p {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.ai-evidence-card small { font-size: 11px; color: var(--text-muted); }
+.analysis-ai-empty p { font-size: 12.5px; line-height: 1.6; color: var(--text-secondary); }
+.analysis-ai-summary { text-align: left; }
+.analysis-ai-summary p { font-size: 14px; line-height: 1.7; color: var(--text-primary); }
+
+@media (max-width: 760px) {
+  .mentor-brief { padding: 16px; }
+  .mentor-report-grid { grid-template-columns: 1fr; }
+  .mentor-insights { grid-template-columns: 1fr; }
+}
