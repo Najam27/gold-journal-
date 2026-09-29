@@ -302,3 +302,18 @@
 @media (min-width: 860px) {
   .dev-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* Overtrading auto-tag notice: visible warning when the journal pre-tags the
+   Overtrading mistake on the 4th+ trade of the day. */
+.overtrading-notice {
+  display: block;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #f59e0b;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}

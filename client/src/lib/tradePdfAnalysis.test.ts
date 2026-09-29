@@ -39,9 +39,9 @@ describe("PDF period analysis", () => {
     expect(metricValue(blocks, "Performance", "Average loss")).toBe(formatMoney(overview.averageLoser as number));
     expect(metricValue(blocks, "Performance", "Profit factor")).toBe(overview.profitFactor?.toFixed(2));
     expect(metricValue(blocks, "Performance", "Expectancy")).toBe(formatMoney(overview.expectancy));
-    expect(metricValue(blocks, "Performance", "Average R")).toBe(`+${(overview.averageR as number).toFixed(2)}R`);
-    expect(metricValue(blocks, "Performance", "Total R")).toBe(`+${(overview.totalR as number).toFixed(2)}R`);
-    expect(metricValue(blocks, "Performance", "Median R")).toBe(`+${(overview.medianR as number).toFixed(2)}R`);
+    expect(metricValue(blocks, "Performance", "Average R")).toBe(`1 : ${(overview.averageR as number).toFixed(2)}`);
+    expect(metricValue(blocks, "Performance", "Total R")).toBe(`1 : ${(overview.totalR as number).toFixed(2)}`);
+    expect(metricValue(blocks, "Performance", "Median R")).toBe(`1 : ${(overview.medianR as number).toFixed(2)}`);
     expect(metricValue(blocks, "Performance", "Median trade")).toBe(formatMoney(overview.medianPnl));
     expect(metricValue(blocks, "Performance", "Best trade")).toBe(formatMoney(overview.largestWinner as number));
     expect(metricValue(blocks, "Performance", "Worst trade")).toBe(formatMoney(overview.largestLoser as number));
@@ -56,7 +56,7 @@ describe("PDF period analysis", () => {
     expect(kpis && kpis.kind === "kpis" ? kpis.items.map(item => item.label) : null).toEqual(["Net P&L", "Win rate", "Profit factor", "Expectancy", "Total R", "Max drawdown"]);
     const items = kpis && kpis.kind === "kpis" ? kpis.items : [];
     expect(items[0].tone).toBe("positive");
-    expect(items[4].value).toBe(`+${(buildAnalysis(rows as never).overview.totalR as number).toFixed(2)}R`);
+    expect(items[4].value).toBe(`1 : ${(buildAnalysis(rows as never).overview.totalR as number).toFixed(2)}`);
     expect(items[4].tone).toBe("positive");
   });
 

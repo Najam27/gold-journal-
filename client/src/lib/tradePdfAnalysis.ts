@@ -166,7 +166,7 @@ const money = (value: number | null | undefined): string => (value == null || !N
 const count = (value: number | null | undefined): string => (value == null ? ANALYSIS_MISSING : String(value));
 const rate = (value: number | null | undefined, sample: number): string => (value == null || !sample ? ANALYSIS_MISSING : `${value.toFixed(1)}%`);
 const factor = (value: number | null | undefined): string => (value == null || !Number.isFinite(value) ? ANALYSIS_MISSING : value.toFixed(2));
-const rMultiple = (value: number | null | undefined): string => (value == null || !Number.isFinite(value) ? ANALYSIS_MISSING : `${value >= 0 ? "+" : ""}${value.toFixed(2)}R`);
+const rMultiple = (value: number | null | undefined): string => (value == null || !Number.isFinite(value) ? ANALYSIS_MISSING : `1 : ${value.toFixed(2)}`);
 const percent = (value: number | null | undefined, digits = 1): string => (value == null || !Number.isFinite(value) ? ANALYSIS_MISSING : `${value.toFixed(digits)}%`);
 const clean = (value: unknown): string => String(value ?? "").trim().replace(/\s+/g, " ");
 const toneFor = (value: number): TradeTone => (value > 0 ? "positive" : value < 0 ? "negative" : "neutral");
@@ -262,7 +262,7 @@ export function buildPeriodAnalysis(trades: Record<string, unknown>[], options: 
     { label: "Win rate", value: rate(overview.winRate, closed) },
     { label: "Profit factor", value: factor(overview.profitFactor) },
     signed("Expectancy", closed ? overview.expectancy : null, value => formatMoney(value)),
-    signed("Total R", overview.totalR, value => `${value >= 0 ? "+" : ""}${value.toFixed(2)}R`),
+    signed("Total R", overview.totalR, value => `1 : ${value.toFixed(2)}`),
     { label: "Max drawdown", value: closed >= 2 ? `-${money(analysis.drawdown.maximum).replace("-", "")}` : ANALYSIS_MISSING, tone: "negative" },
   ];
 
@@ -279,9 +279,9 @@ export function buildPeriodAnalysis(trades: Record<string, unknown>[], options: 
     signed("Average win", overview.averageWinner, value => formatMoney(value)),
     signed("Average loss", overview.averageLoser, value => formatMoney(value)),
     { label: "Expectancy", value: closed ? money(overview.expectancy) : ANALYSIS_MISSING },
-    signed("Average R", overview.averageR, value => `${value >= 0 ? "+" : ""}${value.toFixed(2)}R`),
-    signed("Total R", overview.totalR, value => `${value >= 0 ? "+" : ""}${value.toFixed(2)}R`),
-    signed("Median R", overview.medianR, value => `${value >= 0 ? "+" : ""}${value.toFixed(2)}R`),
+    signed("Average R", overview.averageR, value => `1 : ${value.toFixed(2)}`),
+    signed("Total R", overview.totalR, value => `1 : ${value.toFixed(2)}`),
+    signed("Median R", overview.medianR, value => `1 : ${value.toFixed(2)}`),
     signed("Best trade", overview.largestWinner, value => formatMoney(value)),
     signed("Worst trade", overview.largestLoser, value => formatMoney(value)),
     { label: "Win rate range (95%)", value: closed ? `${overview.winRateInterval[0].toFixed(1)}% – ${overview.winRateInterval[1].toFixed(1)}%` : ANALYSIS_MISSING },
