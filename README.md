@@ -1,76 +1,93 @@
 # Gold Journal
 
-Gold Journal is the complete application ported from [Najam27/MyGoldJournal](https://github.com/Najam27/MyGoldJournal). The target repository contains the source UI, feature pages, reusable components, validation, MT5 workflows, exports, PWA behavior, server procedures, and regression tests.
+A trading journal built for XAUUSD (gold) traders on funded accounts. Log every trade, guard your risk rules, analyze your edge, and get brutally honest AI coaching — all in one dark, fast, installable web app.
 
-The application now uses **Supabase as the single backend**:
+## Features
 
-| Layer | Supabase implementation |
+### Journal
+- **Trade Log** — full trade entry: direction, session, setup, execution scores, MFE/MAE, mistake tags, screenshots. More than 3 trades in a day is flagged as overtrading, and the 4th+ trade is auto-tagged with a visible warning explaining the consequence.
+- **Missed Trades** — capture the setups you didn't take and why.
+- **Analysis** — win rate, profit factor, expectancy, R-multiples, and breakdowns by session, setup, timeframe, and hour (PKT). Every R value is normalized to the `1 : X` convention with risk always 1.
+- **Weekly Review** — structured weekly reflection with persistent review records.
+- **PnL Calendar** — daily/weekly P&L with overtrading days flagged.
+
+### Discipline
+- **Goals** — flexible trading goals with progress tracking.
+- **Psychology** — behavioral tracking: patience and plan-following scores, emotional state, rule breaks.
+- **Plan & Execution** — pre-trade checklist gate and plan-adherence scoring computed by the journal, not self-reported.
+
+### Intelligence
+- **AI Mentor** — professional-trader coaching powered by the free tiers of Groq and Gemini. Direct, no fluff, and brutally honest about bad numbers. Requests are paced and budgeted to stay inside free-tier limits.
+- **MT5 Live** — real-time connection to MetaTrader 5 via the bundled Expert Advisor (`GoldJournal_EA.mq5`, v2.19). Live positions, history sync, and trade reconciliation.
+- **Risk Calculator** — position sizing with a percentage-based **Funded guard** per account: warns at 70% and 90% of your daily loss allowance, blocks at 100%, and enforces the max-drawdown floor.
+
+### Workspace
+- **Options** — manage every dropdown/taxonomy in the journal (setups, sessions, mistakes, market conditions…). All lists are editable; defaults ship as ordinary rows.
+- **Exports** — per-trade PDF reports, trade cards, PNG share images, and bulk PDF export.
+- **PWA** — installable, works offline, auto-updates.
+
+## Tech stack
+
+| Layer | Technology |
 | --- | --- |
-| Authentication | Supabase Auth with email/password and magic-link sign-in |
-| Database | Supabase PostgreSQL through the Supabase client API |
-| File storage | Private Supabase Storage bucket with server-generated signed URLs |
-| API delivery | Cloudflare Worker running the tRPC/MT5/AI API (same origin as the app) |
-| Frontend delivery | Cloudflare Worker static assets (Vite build) |
+| Frontend | React + Vite + TypeScript (dark-only UI) |
+| API | tRPC, served by the same origin |
+| Auth & database | Supabase Auth + Supabase PostgreSQL |
+| File storage | Private Supabase Storage bucket (trade screenshots, signed URLs) |
+| Hosting | Cloudflare Workers (frontend + API on one origin) |
+| AI | Groq + Gemini free tiers, browser-side with request budgeting |
+| MT5 bridge | MQL5 Expert Advisor posting to the Worker API |
 
-The previous source OAuth/session provider, Manus session SDK, source OAuth callback, Forge storage proxy, source MySQL adapter, and Netlify Function packaging are no longer used by the application. The same API code also runs as the local Node/Express development server (`pnpm dev`) and as a standalone Node production server (`pnpm start`).
+## Setup
 
-## Supabase setup
+### 1. Supabase
 
-Create a Supabase project. In **Authentication → Providers**, enable Email. In **Authentication → URL Configuration**, set **Site URL** to the deployed Cloudflare URL and add both the deployed URL and the local Vite URL (for example `http://localhost:5173/`) to **Redirect URLs**. Email confirmation may remain enabled; the login form supports password sign-in, account creation, and magic links. The app requests an environment-aware callback: locally it uses the current origin/path, while `VITE_AUTH_REDIRECT_URL` can pin production email links to the deployed site.
+Create a Supabase project. In **Authentication → Providers**, enable Email. In **Authentication → URL Configuration**, set the Site URL to your deployed URL and add your local dev URL (e.g. `http://localhost:5173/`) to Redirect URLs.
 
-Open the Supabase SQL Editor and run the migrations in order: `0001_source_gold_journal.sql` through `0027_unbounded_trade_text_fields.sql`. Migration 0007 replaces the production trade-summary RPC with fully qualified trade columns and keeps it service-role-only. Migration 0008 adds composite account ownership constraints, corrected MT5 OPEN/CLOSE semantics, analysis fields, and the Supabase-backed distributed rate limiter. Migration 0009 adds immutable, account-scoped AI report, edge-history, and experiment-history persistence. Migration 0014 adds the encrypted per-user AI-provider vault; direct browser roles have no access to this table and only the verified server service role can read or write its ciphertext. Migration 0015 adds a service-role-only durable AI job queue with opaque hashed dispatch tokens; it records filtered Analysis and Risk Coach work without storing plaintext provider credentials. Migration 0016 adds durable MT5 contact, summary, open-position, and failure diagnostics plus one service-role-only transaction for each open-position batch. Migration 0017 preserves the account-scoped MT5 connection row when a user retires it, invalidates its active state, and supports a replacement key without removing retained history. Migrations 0018–0020 harden connection ownership repair, write confirmation, and multi-user routing. Migration 0021 stores the outgoing MT5 key *fingerprint* when a key is rotated or replaced, so a terminal still sending a retired key is reported as a credential problem instead of looking offline; it stores no second credential and changes no existing row. Migration 0022 adds the behavioural-psychology fields. Migration 0023 adds the read-path indexes the Trade Log and MT5 reconciliation need; it changes no data. Migration 0024 makes the Trade Log option system canonical in `gj_option_lists`, seeding the provided defaults as ordinary editable rows. **Migration 0025 is required for trade persistence and screenshot durability**: it re-asserts `clientMutationId` plus the unique `(userId, accountId, clientMutationId)` index that makes a replayed offline write idempotent instead of a duplicate trade, keeps `screenshotKey`/`screenshotName` on the trade row as the permanent record of its evidence, constrains the key so an expiring signed URL can never be persisted as the source of truth, scopes screenshot storage policies to the owning account instead of the first path segment only, and adds the composite `(accountId, userId)` owner foreign key for `gj_trades`. **Migration 0027 removes the artificial character limits from Trade Log text**: it converts the free-form `gj_trades` columns (`session`, `level`, `timeframe`, `setupQuality`, `executionType`, `marketCondition`, `biasAlignment`, `confirmationType`, `slPlacement`, `tpPlacement`, `mistake`, `holdQuality`) and the `gj_option_lists` label columns (`value`, `normalizedValue`) from `varchar(n)` to unbounded `text`. It widens columns in place — no row is rewritten, truncated, or deleted, every default and index is preserved, and structured fields (`direction`, `result`, `planStatus`, numerics, MT5 ticket, client mutation id, screenshot key) keep their validation. The migrations create the source-compatible users/accounts/trades/goals/plans/options/notifications/MT5 tables, indexes, ownership constraints, private Storage bucket policies, server-side financial aggregates, the full-history trade summary, and real PostgreSQL transaction functions for destructive account, MT5, and notification multi-write operations. The Cloudflare Worker (or Node server) maps each Supabase Auth UUID to the `users.openId` column and enforces ownership through the server procedures; the service-role-only RPC functions are not a substitute for that authorization chain.
+Run the migrations in order from `supabase/migrations/` (`0001` → `0031`) in the Supabase SQL Editor. They create the users/accounts/trades/goals/plans/options/notifications/MT5 tables, ownership constraints, storage policies, and service-role-only RPC functions.
 
-The server uses the Supabase service role only server-side (Cloudflare Worker secrets or Node environment variables). Browser code receives only the Supabase anonymous key. Do not expose the service role key in a `VITE_` variable. No separate `DATABASE_URL`, PostgreSQL pool, or direct database connection is required.
+### 2. Environment variables
 
-## Required environment variables
-
-Use `.env.example` as the template. On Cloudflare, server variables are `wrangler.toml` `[vars]` entries or `wrangler secret` values (never commit the secrets); the browser-safe pair is only needed at `vite build` time.
+Copy `.env.example` to `.env`:
 
 | Variable | Where | Purpose |
 | --- | --- | --- |
-| `VITE_SUPABASE_URL` | Browser (build-time) | Supabase project URL for Supabase Auth |
+| `VITE_SUPABASE_URL` | Browser (build-time) | Supabase project URL |
 | `VITE_SUPABASE_ANON_KEY` | Browser (build-time) | Supabase anonymous public key |
-| `VITE_AUTH_REDIRECT_URL` | Browser (build-time) | Optional safe origin/path for email confirmation and magic-link callbacks; use the deployed Cloudflare URL in production |
-| `VITE_API_BASE_URL` | Browser (build-time) | Optional API origin override. Blank = same origin (`/api`), correct for Workers Assets and `pnpm dev`. Set it only when the frontend and the API live on different origins. |
-| `SUPABASE_URL` | Server | Server-side Supabase project URL (public identifier; safe as a `[vars]` value) |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server secret | Server-side Auth verification, Supabase database/storage access |
-| `SUPABASE_STORAGE_BUCKET` | Server | Private screenshot bucket; use `trade-screenshots` |
-| `NODE_ENV` | Server | `production` on deployed targets so the API validates server configuration. |
+| `VITE_AUTH_REDIRECT_URL` | Browser (build-time) | Optional: pins email-link callbacks to the deployed URL |
+| `VITE_API_BASE_URL` | Browser (build-time) | Optional API origin override; blank = same origin |
+| `SUPABASE_URL` | Server | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server secret | Server-side DB/storage access — never expose as `VITE_` |
+| `SUPABASE_STORAGE_BUCKET` | Server | Private screenshot bucket (`trade-screenshots`) |
 
-### AI runs only in the browser
+On Cloudflare, server variables are `wrangler.toml` `[vars]` entries or `wrangler secret` values.
 
-There is **no server-side AI configuration**. Analysis, AI Mentor, and Risk Coach call **Google Gemini or Groq** directly from the user's browser using the user's own keys, so Cloudflare never spends AI tokens and the backend never receives a provider credential.
-
-**Both providers are optional and independent.** Configure one, both, or neither. There is no OpenRouter, OpenAI, or Anthropic client, model list, key slot, or fallback anywhere in the active application.
-
-1. Create a free key at `https://aistudio.google.com/app/apikey` and/or `https://console.groq.com/keys`.
-2. In **Options → Private AI Providers**, paste each key and press its **Test connection** button. Each test performs a real model-listing request with that key — `GET https://generativelanguage.googleapis.com/v1beta/models` or `GET https://api.groq.com/openai/v1/models` — lists the models that key can actually call (non-generative Gemini models and Groq audio/guardrail/embedding models are filtered out), and pre-selects the best available one (`gemini-2.5-flash` and `openai/gpt-oss-120b` are the first preferences).
-3. Keys are stored in this browser's `localStorage` under the single record `gold-journal.ai.providers:v1` and are read only by `client/src/lib/ai`. A previously saved single-provider Gemini (`gold-journal.ai.google:v1`) or Groq (`gold-journal.ai.groq:v1`) key is **migrated** into that record. A retired OpenRouter key is deleted, never migrated. The app starts at "no AI provider configured" until at least one key is added.
-4. Pressing **Analyze my journal**, **AI Mentor**, or **AI risk coach review** resolves the model against the provider's live model list (one cached lookup per key, then repaired and re-saved if the provider retired it) and sends the request straight from the browser. Providers are tried in fallback order (Gemini first by default): if Gemini fails for any recoverable reason — bad key, missing model, quota, rate limit, outage, oversized request, unreadable answer — Groq is used automatically, and vice versa. Only one request per provider is ever in flight for the same dataset, and a repeated click joins the request already running instead of spending tokens twice.
-5. Structured output is requested natively (`response_format: { type: "json_schema", strict: true }` on Groq's strict models, `generationConfig.responseSchema` on Gemini) and a schema rejection downgrades exactly once to plain JSON mode. Either way the browser-side zod schema and the evidence-grounding checks are the source of truth: **verified numbers are overwritten from the deterministic evidence manifest and only the individual claims that cannot be repaired are dropped**, so one bad optional insight can never reject the whole report. A model the provider rejects at generation time is reported as a model error with a link into AI settings — never as a generic provider failure.
-6. **A complete deterministic report is always shown.** If both providers fail, the report is built locally from the deterministic analysis engine, so an AI outage, an expired key, or a rate limit can never make the report disappear. AI output never overrides a deterministic calculation.
-
-The keys are never sent to Cloudflare, Supabase, tRPC, logs, telemetry, or this repository. They travel in an `x-goog-api-key` or `Authorization: Bearer <key>` header, never in a URL or query parameter. Local storage is readable by JavaScript running on the site, so use a key you are willing to keep on the device and remove it on shared machines. The finished report (no credential) is POSTed to `analysis.saveAiReport` so report history keeps working. The old `VITE_APP_ID`, `JWT_SECRET`, `OAUTH_SERVER_URL`, `VITE_OAUTH_PORTAL_URL`, `OWNER_OPEN_ID`, `OWNER_NAME`, source Forge variables, and Netlify's `URL`/`DEPLOY_PRIME_URL` are not required by the Supabase Auth flow.
-
-## Cloudflare deployment (production)
-
-The repository deploys to **Cloudflare Workers with static assets**: one worker serves the Vite build from `dist/public` and answers `/api/*` and `/mt5` on the same origin. No Netlify configuration is used anymore. The full runbook (exact commands, logs, troubleshooting, rollback) is in `deliverables/cloudflare-deployment-guide-2026-09-09.md`; the migration report is `deliverables/netlify-to-cloudflare-migration-report-2026-09-09.md`.
-
-Before deploying: apply all Supabase migrations in order (`0001` through `0027`), then deploy. Verify account creation, email confirmation or magic-link return, password sign-in, sign-out, local-first trade creation (including offline save then reconnect), screenshot upload, account clearing/removal, notification pagination/mark-all-read, MT5 connection setup, the browser-local Gemini and Groq key Test → Save/Replace → Delete lifecycle in Options, and browser-side AI completion (including the automatic provider fallback) in Analysis, AI Mentor, and Risk Coach. After a confirmation link is opened, Supabase consumes the URL session fragment in the browser client; do not copy access or refresh tokens from the address bar or share them. If a link still targets `localhost:3000`, update the Supabase Redirect URLs and the `VITE_AUTH_REDIRECT_URL` value, then request a new confirmation email. Do not deploy code that calls the atomic or trade-summary RPCs before migrations `0004` and `0005` have been applied. Apply `0006` before relying on its database checks, notification uniqueness, or updatedAt triggers, and apply `0007` before relying on the corrected trade-summary RPC. Apply `0016` before relying on MT5 Live health diagnostics or atomic open-position batches, and apply `0017` before relying on the non-destructive MT5 connection retirement lifecycle. Apply `0021` before relying on retired-key attribution (`AUTH_REVOKED`) in MT5 Live health; the EA payload contract and reconciliation feed work without it, but the connection tile then reports a rejected key only as a stale/offline terminal. Apply `0025` before relying on trade persistence itself: without it a replayed offline write can insert a duplicate trade and a saved screenshot reference has no durable home. Apply `0026` before relying on plan copy provenance or the behavioural trigger history: it adds only nullable columns to `gj_daily_plans` (`copiedFromPlanId`, `copiedFromPlanDate`, `psychologyTriggers`, `primaryPsychologyTrigger`, `behavioralObjectiveStatus`, `postSessionBehavioralReview`) with checks that accept NULL, so every existing plan keeps loading and stays editable. Without it, saving a plan still succeeds — the behavioural close-out is reported as not stored instead of failing the save. Apply `0027` before relying on unbounded trade text: without it a long Mistake, Level, Notes, or emotion value is rejected by the bounded column even though the form accepts it. `pnpm schema:audit` fails until every expected migration (through `0027`) is present and the offline-replay, screenshot-durability, ownership, and plan-copy/behavioural-loop objects it asserts exist. After applying `0007`, directly test `public.gj_account_trade_summary(target_user_id, target_account_id)` with zero, open, winning, losing, break-even, positive-P&L, negative-P&L, and zero-P&L trade cases; the function must not produce an ambiguous-column error.
-
-Cloudflare free-plan notes: 100,000 Worker requests/day, 10 ms CPU per invocation (I/O waits do not count). AI inference no longer runs on the Worker at all, so it consumes none of that budget; the Worker only serves assets, the tRPC API, MT5 ingest, and report-history persistence.
-
-## Local verification
+### 3. Run it
 
 ```bash
-pnpm install
-pnpm check
-pnpm test
-pnpm build
+npm install
+npm run dev      # local dev server
+npm run build    # production build → dist/
+npm test         # vitest suites
 ```
 
-The source feature suite remains in the repository. The Supabase-only conversion adds dedicated Auth, runtime configuration, storage-content, aggregate-statistics, query-adapter, and atomic-operation tests while retaining the source UI, journal, goals, plans, exports, and MT5 regression coverage. Deterministic Analysis is cached independently in the client query layer and invalidated with account-scoped journal mutations; AI results use a bounded server cache keyed by the deterministic aggregate hash. The Analysis AI procedure allows three requests per ten minutes per user and returns deterministic-unavailable results on provider failure. Production endpoint throttles use the Supabase-backed limiter created by migration 0008; local in-memory buckets are retained only for unconfigured development and tests. The limiter fails closed when the shared RPC is unavailable. The included local burst harness measures API routing only and is not evidence of authenticated Supabase/database capacity.
+Deploy with `wrangler deploy` (see `wrangler.toml`; staging config in `wrangler.staging.toml`).
 
-## MT5
+## MT5 Expert Advisor
 
-The source MT5 feature set remains intact. Create an MT5 connection from the MT5 Live view and download the EA from that same page. The download is generated by the MT5 API for the current deployed origin, so its endpoint is the exact backend that displayed the connection key rather than a fixed domain. On Cloudflare the same Worker answers `/api/mt5`, `/api/mt5/ea`, and `/api/mt5/compat`; the EA derivation honors the request host and forwarded protocol headers exactly as the previous Express server did. The EA is a **strict read-only journal bridge**: it never opens, closes, modifies, or cancels trades, orders, SL, or TP. It requires only that the exact site origin is allow-listed for MT5 `WebRequest()`; Auto Trading may remain off because the EA contains no trade-execution API. It prints safe attached, authentication, summary, open-position, and history status lines in the MT5 Experts tab before sending sync events. Account metrics, open positions, history, ticket reconciliation, UTC offset handling, and journal linking are stored through Supabase. Retiring a connection invalidates its current key but preserves its account-scoped record, diagnostics, history, and Trade Log rows; issue a replacement key from that retained record to reactivate it. If a legacy deployment already has historical positions but no connection row, the historical records remain safe; create a replacement connection for that same Gold Journal account, copy its newly issued key into the EA, and restart the EA once to resume snapshot and live-position events.
+`client/public/GoldJournal_EA.mq5` is the bridge between MetaTrader 5 and the journal.
+
+1. Open the **MT5 Live** tab → **Setup guide** and download the current EA build.
+2. Copy it to MT5's `MQL5/Experts` folder.
+3. Open it in MetaEditor and press **F7** to compile.
+4. Attach it to an XAUUSD chart, paste your journal API key, and connect.
+
+The EA reports open positions and history to the journal for live monitoring and reconciliation.
+
+## Key rules the app enforces
+
+- **Overtrading** = more than 3 trades in one day (flagged in the calendar, Analysis, and Trade Log).
+- **R:R display** is always normalized with risk = 1 (`1 : 2.50`), everywhere including PDF exports.
+- **Funded guard** is percentage-based per account: 70% caution, 90% danger, 100% breached.
+- **Closed-trade outcomes** come from the sign of the P&L, not a manual result field.
+- **AI** runs on free Groq/Gemini tiers with pacing (12s between Groq chunks, 3s between Gemini chunks) and automatic smaller retries — free-tier limits are treated as hard engineering constraints.
