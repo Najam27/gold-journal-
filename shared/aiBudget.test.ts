@@ -146,7 +146,7 @@ describe("model request policy", () => {
     expect(loose.maxOutputTokens).toBeLessThan(strict.maxOutputTokens);
 
     // The request version participates in the cache key.
-    expect(AI_REQUEST_VERSION).toBe("v2");
+    expect(AI_REQUEST_VERSION).toBe("v3");
   });
 
   it("sizes a tight tier to fit the whole request inside one minute", () => {

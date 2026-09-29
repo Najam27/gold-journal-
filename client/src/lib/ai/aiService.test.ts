@@ -19,7 +19,7 @@ import {
 import { GEMINI_BASE_URL } from "./geminiClient";
 import { AI_TOKEN_POLICY, getWorkingTokenAllowance, resetWorkingTokenAllowance } from "@shared/aiBudget";
 import { selectRepresentativeTrades } from "@shared/aiPayload";
-import { analyzeJournal, checkGroqConnection, clearAiCache, getAvailableGroqModels, isAiConfigured, resolveCompatibleModel, testAiConnection } from "./aiService";
+import { analyzeJournal, checkGroqConnection, clearAiCache, getAvailableGroqModels, isAiConfigured, resolveCompatibleModel, setChunkPacingDelayMs, setTpmRetryDelayMs, testAiConnection } from "./aiService";
 import { GROQ_CHAT_COMPLETIONS_URL, GROQ_MODELS_URL } from "./groqClient";
 import { isModelError, uiStateForErrorCode } from "./aiTypes";
 
@@ -86,6 +86,9 @@ function signedReport(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   setAiSettingsPersistence(memoryAiSettingsPersistence());
   clearAiCache();
+  setTpmRetryDelayMs(0);
+  setChunkPacingDelayMs("groq", 0);
+  setChunkPacingDelayMs("gemini", 0);
 });
 
 afterEach(() => {

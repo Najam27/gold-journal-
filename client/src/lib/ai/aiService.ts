@@ -70,8 +70,11 @@ import type { AnalysisResult } from "@shared/analysisEngine";
 import {
   AI_REQUEST_VERSION,
   AI_TOKEN_POLICY,
+  estimateRequestTokens,
+  estimateTokens,
   getProviderRequestPolicy,
   recordRefusedRequest,
+  recordTpmUsage,
   resetWorkingTokenAllowance,
   type AiRequestStats,
 } from "@shared/aiBudget";
@@ -549,7 +552,15 @@ async function sendWithBackoff(provider: AiProviderId, args: StructuredRequest, 
   let lastError: unknown;
   for (let attempt = 1; attempt <= TRANSIENT_MAX_ATTEMPTS; attempt++) {
     try {
-      return await requestProviderStructuredCompletion(provider, args);
+      const result = await requestProviderStructuredCompletion(provider, args);
+      // Count the request against the rolling TPM window even when it succeeds:
+      // Groq's free-tier allowance is per-minute, not per-request, so back-to-back
+      // requests (chunks, retries, Analysis followed by Mentor) share one budget.
+      recordTpmUsage(provider, estimateRequestTokens(
+        estimateTokens(args.system) + estimateTokens(args.user),
+        args.maxCompletionTokens ?? getProviderRequestPolicy(provider, args.model).maxOutputTokens
+      ));
+      return result;
     } catch (error) {
       lastError = error;
       if (attempt >= TRANSIENT_MAX_ATTEMPTS || !isTransientFailure(error) || signal?.aborted) throw error;
@@ -603,6 +614,10 @@ async function executeChunkSummary(input: {
   const summaries: AiChunkSummary[] = [];
   for (const chunk of input.chunks) {
     input.onProgress?.({ phase: "chunk", index: chunk.index, total: chunk.total });
+    // Space chunked requests so they don't saturate a per-minute token window:
+    // Groq's free tier allows 8K TPM on a rolling window, and rapid-fire chunks
+    // would exceed it even when each chunk fits in isolation.
+    if (chunk.index > 1) await delay(chunkPacingDelayMs[input.provider] ?? 0, input.signal);
     const raw = await sendWithBackoff(input.provider, {
       apiKey: input.apiKey,
       model: input.model,
@@ -699,6 +714,22 @@ async function executePlan(input: {
   return { report, repairs, stats: synthesis.stats, mode: "chunked", schemaFallback };
 }
 
+/** Delay between chunked requests. Exported for tests to shorten. */
+export let chunkPacingDelayMs: Record<AiProviderId, number> = { groq: 12_000, gemini: 3_000 };
+
+/** Overrides the delay between chunked requests (tests use 0 to avoid waiting). */
+export function setChunkPacingDelayMs(provider: AiProviderId, ms: number): void {
+  chunkPacingDelayMs = { ...chunkPacingDelayMs, [provider]: Math.max(0, ms) };
+}
+
+/** Delay before retrying a 413-refused request. Exported for tests to shorten. */
+export let tpmRetryDelayMs = 15_000;
+
+/** Overrides the 413 retry delay (tests use 0 to avoid waiting). */
+export function setTpmRetryDelayMs(ms: number): void {
+  tpmRetryDelayMs = Math.max(0, ms);
+}
+
 /**
  * Runs one provider end to end, including the one-shot 413 re-plan.
  *
@@ -750,6 +781,11 @@ async function runProvider(input: {
     const shrank = smaller.stats.estimatedInputTokens < plan.stats.estimatedInputTokens || smaller.chunks.length > 0;
     if (!shrank) throw error;
     plan = smaller;
+    // The refused request counted against the provider's rolling per-minute
+    // window, so retrying instantly risks a second 413 for the same window.
+    // A short pause lets the window slide before the smaller request goes out.
+    // Groq's free tier is the binding case; Gemini is metered per request.
+    if (input.provider === "groq") await delay(tpmRetryDelayMs, input.signal);
     return { execution: await execute(plan), reducedAfterTooLarge: true };
   }
 }

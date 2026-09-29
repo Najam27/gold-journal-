@@ -34,7 +34,7 @@ import { isStrictSchemaModel, normalizeGeminiModelId, normalizeGroqModelId, supp
  * Bumped whenever the *payload shape* changes. It participates in the AI cache
  * key, so a format change can never serve a report built from the old prompt.
  */
-export const AI_REQUEST_VERSION = "v2";
+export const AI_REQUEST_VERSION = "v3";
 
 /**
  * Conservative characters-per-token divisor.
@@ -201,6 +201,7 @@ export function recordRefusedRequest(sizedAgainst: number): number {
 /** Restores the conservative default (used by tests and by a full reset). */
 export function resetWorkingTokenAllowance(): void {
   workingAllowanceTokens = AI_TOKEN_POLICY.assumedTpmFloorTokens;
+  resetTpmUsage();
 }
 
 /** The prompt budget that fits this allowance alongside a reserved output budget. */
@@ -391,4 +392,43 @@ export function measureRequest(input: {
     overheadTokens,
     trimmed: input.trimmed,
   };
+}
+
+/**
+ * Rolling TPM window tracker. Groq's free-tier TPM is a rolling 60-second
+ * window, not a per-request budget: five requests that each fit 8K TPM in
+ * isolation still get rejected when they land inside the same minute. This
+ * tracker records estimated token usage per provider and tells callers how
+ * long to wait before a new request fits the window.
+ *
+ * It is deliberately conservative: it tracks *estimated* tokens (which
+ * over-count) and it counts a request the moment it is sent, not when the
+ * response arrives.
+ */
+const TPM_WINDOW_MS = 60_000;
+
+type TpmUsageEntry = { timestamp: number; tokens: number };
+
+const tpmUsageByProvider = new Map<AiProviderId, TpmUsageEntry[]>();
+
+/** Removes entries older than the rolling window. Returns the live entries. */
+function liveTpmEntries(provider: AiProviderId, now: number): TpmUsageEntry[] {
+  const entries = tpmUsageByProvider.get(provider) ?? [];
+  const live = entries.filter(entry => now - entry.timestamp < TPM_WINDOW_MS);
+  tpmUsageByProvider.set(provider, live);
+  return live;
+}
+
+/** Records a sent request against the provider's rolling TPM window. */
+export function recordTpmUsage(provider: AiProviderId, estimatedTokens: number, now: number = Date.now()): void {
+  if (provider !== "groq") return;
+  if (!Number.isFinite(estimatedTokens) || estimatedTokens <= 0) return;
+  const live = liveTpmEntries(provider, now);
+  live.push({ timestamp: now, tokens: Math.ceil(estimatedTokens) });
+  tpmUsageByProvider.set(provider, live);
+}
+
+/** Clears tracked usage (used by tests and by a full reset). */
+export function resetTpmUsage(): void {
+  tpmUsageByProvider.clear();
 }
