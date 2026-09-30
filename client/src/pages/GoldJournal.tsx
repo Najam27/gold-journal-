@@ -749,6 +749,10 @@ export default function GoldJournal() {
   }, [accountBootstrap.data?.id, accountListQuery.refetch]);
   useEffect(() => {
     if (!profileReady) return;
+    // A restored selection cannot be validated until the owned account list has
+    // loaded. Correcting it earlier would clobber the last-viewed account with
+    // the default on every reload.
+    if (accountId && !accountListQuery.isSuccess) return;
     const bootstrapAccountId = Number(
       (accountBootstrap.data as { id?: unknown } | undefined)?.id
     );
