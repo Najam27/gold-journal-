@@ -77,3 +77,14 @@
 
 @media (max-width: 1050px) { .control-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.control-library > section > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }.strategy-scope > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }.goal-editor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 700px) { .control-workspace { gap: 12px; }.goals-workspace-header { align-items: flex-start; flex-direction: column; padding: 17px; }.goals-header-actions { justify-content: flex-start; }.goals-psychology-link { width: 100%; }.control-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }.control-signal { grid-template-columns: auto minmax(0, 1fr); align-items: flex-start; }.control-signal > span { grid-column: 2; white-space: normal; }.control-table-header { align-items: flex-start; flex-direction: column; }.period-filter { width: 100%; overflow-x: auto; }.period-filter button { flex: 1; white-space: nowrap; }.control-library > section > div, .strategy-scope > div, .goal-editor-grid { grid-template-columns: 1fr; }.goal-editor { padding: 14px; }.goal-editor footer { justify-content: stretch; }.goal-editor footer .button { flex: 1; }.strategy-scope header { align-items: flex-start; flex-direction: column; }.table-empty { justify-content: flex-start; padding: 15px; } }
+
+/* One-click control bundles at the top of the library */
+.control-library > section.control-bundle { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--gj-line); border-radius: 10px; padding: 12px 14px; margin-bottom: 4px; background: var(--gj-panel); }
+.control-library > section.control-bundle > div { display: block; }
+.control-bundle strong { font-size: 14px; display: block; margin-bottom: 2px; color: var(--gj-text); }
+.control-bundle p { margin: 0 0 4px; font-size: 12.5px; line-height: 1.5; color: var(--gj-subtext); }
+.control-bundle small { font-size: 11.5px; color: var(--gj-dim); }
+.control-bundle .button { flex-shrink: 0; }
+@media (max-width: 640px) {
+  .control-library > section.control-bundle { flex-direction: column; align-items: stretch; }
+}

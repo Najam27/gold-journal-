@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatMoney } from "@/lib/gold";
 import { BEHAVIORAL_OBJECTIVE_STATUS_LABELS, type TraderDevelopment } from "@/lib/psychology";
+import { detectBehavioralTags, MISTAKE_BY_TAG, type BehavioralTag } from "@shared/psychologyEngine";
 
 /**
  * Goals-page "trader development" block.
@@ -67,16 +68,119 @@ function Panel({ title, eyebrow, icon: Icon, children, actions }: { title: strin
   );
 }
 
+/**
+ * One concrete if-then rule per mistake pattern. Implementation intentions
+ * ("if X, then I will do Y") are the smallest psychology intervention with
+ * real evidence behind it — a vague resolution is not.
+ */
+const PATTERN_RULES: Partial<Record<BehavioralTag, string>> = {
+  FOMO: "If I feel the urge to chase a move I missed, I close the platform for 15 minutes.",
+  REVENGE: "If I close a losing trade, I stand up for 10 minutes before looking at a chart again.",
+  IMPATIENCE: "If I want to enter before confirmation, I set a 5-minute timer and re-check the setup.",
+  OVERCONFIDENCE: "After two wins in a row, risk stays exactly the same — confidence never sizes the trade.",
+  BOREDOM: "If I am bored, boredom is the signal to close the platform, not to trade.",
+  EARLY_ENTRY: "If the entry trigger has not printed, my hands stay off the mouse.",
+  LATE_ENTRY: "If the entry zone is gone, the trade is gone — I log the missed setup instead of chasing it.",
+  MOVED_SL: "The stop is placed before entry and never moves further away. Ever.",
+  REMOVED_SL: "No stop, no trade. A trade without a stop is a decision to gamble.",
+  EARLY_EXIT: "Exits happen at the planned target or the stop — not at the first sign of discomfort.",
+  OVERSIZED: "Position size is fixed by the plan. If I want more size, the answer is no.",
+  ADDED_TO_LOSER: "I never add to a losing trade. The first entry was the thesis; averaging down is denial.",
+  OVERTRADING: "After the planned number of trades, the platform closes — win or lose.",
+  WRONG_BIAS: "If price takes out my invalidation level, my bias is wrong and I stand aside until the next session.",
+  IGNORED_HTF: "If I have not checked the higher timeframe, I have not finished the analysis.",
+  IGNORED_LIQUIDITY: "If I cannot point to the liquidity pool, I do not know where price is going.",
+  POOR_SETUP: "If the setup is not A-grade, it is a no-trade. B setups are how accounts bleed out.",
+  NO_CONFIRMATION: "No confirmation, no trade. I log the skipped setup instead of entering early.",
+  IGNORED_INVALIDATION: "Every trade gets an invalidation level written before entry. If it breaks, I am out.",
+  TRADED_TIRED: "If I am tired, I do not trade. Tired decisions cost more than a missed day earns.",
+  TRADED_DISTRACTED: "If I cannot give the screen full attention, the session is over.",
+  OUTSIDE_SESSION: "I only trade my planned sessions. Outside them, the charts do not exist.",
+  UNSUITABLE_CONDITIONS: "If conditions do not fit the strategy, there is no trade to take.",
+  AFTER_EMOTIONAL_EVENT: "After an emotional event, I stay out for the rest of the day. The market will be there tomorrow.",
+};
+
+function MistakeCostHero({ trades }: { trades: any[] }) {
+  const costs = React.useMemo(() => {
+    const map = new Map<BehavioralTag, { count: number; total: number }>();
+    for (const trade of trades ?? []) {
+      const pnl = Number(trade?.pnl);
+      if (!Number.isFinite(pnl)) continue;
+      const { tags } = detectBehavioralTags(trade?.mistake);
+      for (const tag of tags) {
+        const entry = map.get(tag) ?? { count: 0, total: 0 };
+        entry.count += 1;
+        entry.total += pnl;
+        map.set(tag, entry);
+      }
+    }
+    return Array.from(map.entries())
+      .map(([tag, data]: [BehavioralTag, { count: number; total: number }]) => ({
+        tag,
+        label: (MISTAKE_BY_TAG as Record<string, { label: string }>)[tag]?.label ?? tag,
+        count: data.count,
+        total: data.total,
+        avg: data.total / data.count,
+        rule: (PATTERN_RULES as Record<string, string>)[tag] ?? "If I notice this pattern starting, I pause for 10 minutes and re-read my plan.",
+      }))
+      .filter(item => item.count >= 2)
+      .sort((a, b) => a.total - b.total)
+      .slice(0, 3);
+  }, [trades]);
+
+  return (
+    <section className="dev-panel panel dev-cost-hero" aria-label="What your mistakes cost">
+      <header className="dev-panel-head">
+        <div>
+          <span className="eyebrow">FIX YOUR WORST FIRST</span>
+          <h3>What your mistakes cost you</h3>
+        </div>
+        <TrendingDown size={17} />
+      </header>
+      {costs.length ? (
+        <>
+          <p className="dev-note" style={{ marginTop: 0 }}>
+            Ranked by total dollars lost on trades carrying each tag — from the mistake tags you already save. No extra journaling needed.
+          </p>
+          <div className="dev-cost-grid">
+            {costs.map((item, index) => (
+              <article key={item.tag} className="dev-cost-card risk">
+                <div className="dev-cost-top">
+                  <span className="dev-cost-rank">#{index + 1}</span>
+                  <strong>{item.label}</strong>
+                </div>
+                <div className="dev-cost-numbers">
+                  <span><b className="data-text">{item.count}</b> trades</span>
+                  <span><b className={`data-text ${item.avg >= 0 ? "positive" : "negative"}`}>{formatMoney(item.avg)}</b> avg</span>
+                  <span><b className={`data-text ${item.total >= 0 ? "positive" : "negative"}`}>{formatMoney(item.total)}</b> total</span>
+                </div>
+                <p className="dev-cost-rule"><em>Your rule:</em> {item.rule}</p>
+              </article>
+            ))}
+          </div>
+        </>
+      ) : (
+        <p className="dev-empty">
+          Tag the mistake on a trade (Impatience, Early entry, Revenge…) and its dollar cost appears here automatically.
+          Your most expensive pattern becomes your one rule to fix.
+        </p>
+      )}
+    </section>
+  );
+}
+
 export function TraderDevelopmentPanel({
   report,
   identityStatement,
   onSaveIdentity,
   pending = false,
+  trades = [],
 }: {
   report: TraderDevelopment;
   identityStatement?: string;
   onSaveIdentity?: (statement: string) => Promise<void> | void;
   pending?: boolean;
+  trades?: any[];
 }) {
   const [statement, setStatement] = useState(identityStatement ?? "");
   // The page leads with the decision-oriented summary; the full analytics stay
@@ -139,6 +243,8 @@ export function TraderDevelopmentPanel({
           <small>{hasSessions ? `${report.totals.sessions} session${report.totals.sessions === 1 ? "" : "s"} evaluated` : "Waiting for a completed session"}</small>
         </div>
       </header>
+
+      <MistakeCostHero trades={trades} />
 
       <section className="dev-brief">
         <div className="dev-brief-grid">

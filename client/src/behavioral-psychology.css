@@ -317,3 +317,18 @@
   font-weight: 600;
   line-height: 1.4;
 }
+
+/* Mistake-cost hero: the most expensive patterns, with one if-then rule each. */
+.dev-cost-hero { margin-bottom: 14px; }
+.dev-cost-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 10px; margin-top: 10px; }
+.dev-cost-card { border: 1px solid var(--border, #e5e7eb); border-left: 3px solid #ef4444; border-radius: 10px; padding: 12px 14px; background: var(--card, #fff); }
+.dev-cost-top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.dev-cost-rank { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; border-radius: 999px; background: #fef2f2; color: #b91c1c; font-weight: 700; font-size: 12px; padding: 0 6px; }
+.dev-cost-top strong { font-size: 14px; }
+.dev-cost-numbers { display: flex; gap: 14px; margin-bottom: 8px; font-size: 12px; color: var(--muted-foreground, #6b7280); }
+.dev-cost-numbers b { font-size: 14px; margin-right: 2px; }
+.dev-cost-rule { margin: 0; font-size: 13px; line-height: 1.5; }
+.dev-cost-rule em { font-style: normal; font-weight: 700; }
+@media (max-width: 640px) {
+  .dev-cost-numbers { flex-wrap: wrap; gap: 8px 14px; }
+}

@@ -120,6 +120,10 @@ export function PlanExecutionEditor({ account, plans = [], trades = [], behavior
   const [archiveSearch, setArchiveSearch] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
+  // The plan desk is a 3-step flow — Plan, Check-in, Review — so a full
+  // session record never presents as one endless form. All steps share the
+  // same draft and the same save; only the visible slice changes.
+  const [step, setStep] = useState(0);
   const [copySource, setCopySource] = useState<{ day: string; draft: PlanDraft } | null>(null);
   const [notice, setNotice] = useState<{ tone: "info" | "error"; text: string } | null>(null);
   const debouncedSearch = useDebouncedValue(archiveSearch, 300);
@@ -535,7 +539,28 @@ export function PlanExecutionEditor({ account, plans = [], trades = [], behavior
             </div>
           </div>
 
-          <Section number="01" title="TODAY'S PLAN" copy="Bias, levels, scenarios, risk, and the rules that apply today. Everything else is one click away." icon={ClipboardCheck}>
+          <div className="plan-steps" role="tablist" aria-label="Session workflow">
+            {[
+              { index: 0, label: "Plan", hint: "60 seconds before the open" },
+              { index: 1, label: "Check-in", hint: "10 seconds, guides the day" },
+              { index: 2, label: "Review", hint: "Planned vs executed" },
+            ].map(item => (
+              <button
+                key={item.index}
+                type="button"
+                role="tab"
+                aria-selected={step === item.index}
+                className={step === item.index ? "active" : ""}
+                onClick={() => setStep(item.index)}
+              >
+                <b>{`0${item.index + 1}`}</b>
+                <span>{item.label}<small>{item.hint}</small></span>
+              </button>
+            ))}
+          </div>
+
+          {step === 0 && (
+          <Section number="01" title="TODAY'S PLAN — 60 SECONDS" copy="The five things that matter before the open: bias, levels, loss limit, trade cap, one rule. Everything else is one click away." icon={ClipboardCheck}>
             <div className="field-grid">
               <Field label="Working bias">
                 <div className="pill-options">
@@ -544,53 +569,6 @@ export function PlanExecutionEditor({ account, plans = [], trades = [], behavior
                   ))}
                 </div>
               </Field>
-              <Field label="Session focus">
-                <div className="checkbox-cluster">
-                  {sessions.map(value => (
-                    <label key={value}>
-                      <input type="checkbox" checked={draft.sessionFocus.includes(value)} onChange={() => toggleSession(value)} /> {value}
-                    </label>
-                  ))}
-                </div>
-              </Field>
-              <Field label="Key levels" className="field-span-full">
-                <Textarea value={draft.keyLevels} onChange={event => set("keyLevels", event.target.value)} rows={3} placeholder="Asia high/low, London open, HTF zones, premium / discount, liquidity pools…" />
-              </Field>
-              <Field label="High-impact event / news risk" className="field-span-full">
-                <Textarea value={draft.eventRisk} onChange={event => set("eventRisk", event.target.value)} rows={2} placeholder="Release time, spread / volatility risk, or 'No scheduled risk'." />
-              </Field>
-              <Field label="Long scenario" className="field-span-full">
-                <Textarea value={draft.longScenario} onChange={event => set("longScenario", event.target.value)} rows={2} placeholder="Only long if price accepts above ___, confirms ___, with target at ___." />
-              </Field>
-              <Field label="Short scenario" className="field-span-full">
-                <Textarea value={draft.shortScenario} onChange={event => set("shortScenario", event.target.value)} rows={2} placeholder="Only short if price rejects ___, confirms ___, with target at ___." />
-              </Field>
-              <Field label="No-trade condition" className="field-span-full" hint="What makes me stay out today?">
-                <Textarea value={draft.noTradeCondition} onChange={event => set("noTradeCondition", event.target.value)} rows={2} placeholder="Stand aside if structure is choppy, event risk is unresolved, or no A setup appears." />
-              </Field>
-              <Field label="Session loss limit ($)">
-                <Input inputMode="decimal" value={draft.riskLimit} onChange={event => set("riskLimit", event.target.value)} placeholder="e.g. 150" />
-              </Field>
-              <Field label="Maximum trades">
-                <Input type="number" min="1" max="99" value={draft.maxTrades} onChange={event => set("maxTrades", event.target.value)} placeholder="e.g. 3" />
-              </Field>
-              <Field label="Position-sizing rule" className="field-span-full">
-                <Textarea value={draft.sizingPlan} onChange={event => set("sizingPlan", event.target.value)} rows={2} placeholder="Risk 0.5R on A setup; reduce after first loss; no size increase after loss." />
-              </Field>
-              {rulesChecklist(
-                "Rules that apply today",
-                applied.applied.length,
-                effectiveRules.map(rule => (
-                  <label key={rule.id}>
-                    <input type="checkbox" checked={rule.checked} onChange={() => toggleRule(rule.id)} />
-                    <span>{rule.text}</span>
-                  </label>
-                )),
-                <div className="plan-rules-empty">
-                  <p>No active Trading rules yet. Add your own rules once, then each new plan uses them as its baseline.</p>
-                  {onManageRules ? <Button type="button" variant="outline" onClick={onManageRules}>Manage Trading rules</Button> : null}
-                </div>,
-              )}
               <Field label="Behavioural objective today" hint="Choose ONE. One objective beats fifteen.">
                 <select value={draft.behavioralFocus} onChange={event => set("behavioralFocus", event.target.value)}>
                   <option value="">No single objective set</option>
@@ -599,6 +577,15 @@ export function PlanExecutionEditor({ account, plans = [], trades = [], behavior
                   ))}
                 </select>
               </Field>
+              <Field label="Key levels" className="field-span-full">
+                <Textarea value={draft.keyLevels} onChange={event => set("keyLevels", event.target.value)} rows={3} placeholder="Asia high/low, London open, HTF zones, premium / discount, liquidity pools…" />
+              </Field>
+              <Field label="Session loss limit ($)">
+                <Input inputMode="decimal" value={draft.riskLimit} onChange={event => set("riskLimit", event.target.value)} placeholder="e.g. 150" />
+              </Field>
+              <Field label="Maximum trades">
+                <Input type="number" min="1" max="99" value={draft.maxTrades} onChange={event => set("maxTrades", event.target.value)} placeholder="e.g. 3" />
+              </Field>
             </div>
 
             <button type="button" className="plan-advanced-toggle" aria-expanded={showAdvanced} onClick={() => setShowAdvanced(current => !current)}>
@@ -606,6 +593,44 @@ export function PlanExecutionEditor({ account, plans = [], trades = [], behavior
             </button>
             {showAdvanced && (
               <div className="field-grid plan-advanced-grid">
+                <Field label="Session focus">
+                  <div className="checkbox-cluster">
+                    {sessions.map(value => (
+                      <label key={value}>
+                        <input type="checkbox" checked={draft.sessionFocus.includes(value)} onChange={() => toggleSession(value)} /> {value}
+                      </label>
+                    ))}
+                  </div>
+                </Field>
+                <Field label="High-impact event / news risk" className="field-span-full">
+                  <Textarea value={draft.eventRisk} onChange={event => set("eventRisk", event.target.value)} rows={2} placeholder="Release time, spread / volatility risk, or 'No scheduled risk'." />
+                </Field>
+                <Field label="Long scenario" className="field-span-full">
+                  <Textarea value={draft.longScenario} onChange={event => set("longScenario", event.target.value)} rows={2} placeholder="Only long if price accepts above ___, confirms ___, with target at ___." />
+                </Field>
+                <Field label="Short scenario" className="field-span-full">
+                  <Textarea value={draft.shortScenario} onChange={event => set("shortScenario", event.target.value)} rows={2} placeholder="Only short if price rejects ___, confirms ___, with target at ___." />
+                </Field>
+                <Field label="No-trade condition" className="field-span-full" hint="What makes me stay out today?">
+                  <Textarea value={draft.noTradeCondition} onChange={event => set("noTradeCondition", event.target.value)} rows={2} placeholder="Stand aside if structure is choppy, event risk is unresolved, or no A setup appears." />
+                </Field>
+                <Field label="Position-sizing rule" className="field-span-full">
+                  <Textarea value={draft.sizingPlan} onChange={event => set("sizingPlan", event.target.value)} rows={2} placeholder="Risk 0.5R on A setup; reduce after first loss; no size increase after loss." />
+                </Field>
+                {rulesChecklist(
+                  "Rules that apply today",
+                  applied.applied.length,
+                  effectiveRules.map(rule => (
+                    <label key={rule.id}>
+                      <input type="checkbox" checked={rule.checked} onChange={() => toggleRule(rule.id)} />
+                      <span>{rule.text}</span>
+                    </label>
+                  )),
+                  <div className="plan-rules-empty">
+                    <p>No active Trading rules yet. Add your own rules once, then each new plan uses them as its baseline.</p>
+                    {onManageRules ? <Button type="button" variant="outline" onClick={onManageRules}>Manage Trading rules</Button> : null}
+                  </div>,
+                )}
                 <Field label="Market context" className="field-span-full">
                   <Textarea value={draft.marketContext} onChange={event => set("marketContext", event.target.value)} rows={2} placeholder="Overnight structure, DXY / yields context, Asia range, liquidity condition…" />
                 </Field>
@@ -622,7 +647,9 @@ export function PlanExecutionEditor({ account, plans = [], trades = [], behavior
               </div>
             )}
           </Section>
+          )}
 
+          {step === 1 && (
           <Section number="02" title="PSYCHOLOGY CHECK-IN" copy="Ten seconds before the session. It guides the day and never blocks a trade." icon={ShieldCheck}>
             <div className="field-grid">
               <Field label="Emotional state">
@@ -651,7 +678,9 @@ export function PlanExecutionEditor({ account, plans = [], trades = [], behavior
               </div>
             </div>
           </Section>
+          )}
 
+          {step === 2 && (
           <Section number="03" title="SESSION REVIEW" copy="Record adherence before explaining P&L. A profitable trade can still break the plan, and a losing trade can still be executed correctly." icon={CheckCircle2}>
             {(execution.actual.trades > 0 || selectedPlan) && (
               <div className="plan-versus-strip field-span-full">
@@ -773,6 +802,7 @@ export function PlanExecutionEditor({ account, plans = [], trades = [], behavior
               <Button disabled={!account || saving} onClick={() => void save()}>{saving ? "Saving…" : "Save review"}</Button>
             </div>
           </Section>
+          )}
 
           <div className="plan-save-footer">
             <CircleAlert size={15} />

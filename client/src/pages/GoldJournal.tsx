@@ -1744,6 +1744,7 @@ export default function GoldJournal() {
                 />
                 <TraderDevelopmentPanel
                   report={development}
+                  trades={trades as any[]}
                   identityStatement={(data as any)?.traderProfile?.identityStatement ?? ""}
                   pending={saveProfile.isPending}
                   onSaveIdentity={async (statement: string) => {
