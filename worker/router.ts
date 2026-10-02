@@ -147,6 +147,11 @@ async function serveStaticAssets(request: Request, env: WorkerEnv): Promise<Resp
   const url = new URL(request.url);
   let response = await env.ASSETS.fetch(request);
   if (response.status !== 404 || (request.method !== "GET" && request.method !== "HEAD")) return response;
+  // Asset misses must stay 404s. Falling back to index.html here hands a
+  // stale lazy-chunk request an HTML document, which the service worker
+  // then caches under the script URL and the browser rejects as a module —
+  // the whole app lands on the error screen after a deploy.
+  if (url.pathname.startsWith("/assets/")) return response;
   const fallbackRequest = new Request(`${url.origin}/index.html`, request);
   const fallback = await env.ASSETS.fetch(fallbackRequest);
   if (fallback.status === 200) return new Response(fallback.body, { status: 200, headers: fallback.headers });

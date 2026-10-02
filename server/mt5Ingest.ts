@@ -20,8 +20,16 @@ export const MT5_MAX_HISTORY_BATCH = 50;
 const MT5_BATCH_HARD_CAP = 1_000;
 const MT5_FAILED_RECORD_REPORT_LIMIT = 20;
 
-const numeric = z.coerce.number().finite();
-const ticket = z.union([z.string().regex(/^\d+$/), z.number().int().nonnegative()]).transform(value => BigInt(value));
+// numeric(14,2) is the widest money column the MT5 payload feeds; anything
+// past its bound makes the atomic sync RPCs abort the whole batch, so the
+// range is enforced here, per record, where the rejection stays per record.
+const MT5_NUMERIC_MAX = 999_999_999_999.99;
+const numeric = z.coerce.number().finite().min(-MT5_NUMERIC_MAX).max(MT5_NUMERIC_MAX);
+// Postgres bigint tops out at 9223372036854775807; a longer digit string
+// passes the digit regex and then explodes the ::bigint cast inside the
+// sync RPCs (SQLSTATE 22003), which used to retry the batch forever.
+const PG_BIGINT_MAX = BigInt("9223372036854775807");
+const ticket = z.union([z.string().regex(/^\d+$/), z.number().int().nonnegative()]).transform(value => BigInt(value)).refine(value => value <= PG_BIGINT_MAX, "Ticket exceeds the storable range.");
 const timestamp = z.union([z.string().trim().min(8).max(40), z.number().finite().positive()]);
 const direction = z.enum(["Buy", "Sell", "BUY", "SELL"]).transform(value => value.toUpperCase() as "BUY" | "SELL");
 const result = z.enum(["Win", "Loss", "Break-even", "WIN", "LOSS", "BREAK_EVEN"]).transform(value => value === "Win" || value === "WIN" ? "WIN" : value === "Loss" || value === "LOSS" ? "LOSS" : "BREAK_EVEN" as const);
@@ -103,7 +111,7 @@ export function syncFailureDiagnostic(error: unknown) {
   const providerCode = String(wrapped?.supabaseCode || "").toUpperCase();
   const text = errorText(error);
   if (providerCode === "PGRST202" || providerCode === "42601" || /schema cache|could not find the function|function .*gj_sync_mt5_(position|open_batch)|function .*gj_record_mt5_event_failure|column .* does not exist|relation .* does not exist|migration|position_payload|syntax error|insert has more target columns/.test(text)) return "Supabase MT5 RPC migration is invalid or stale; apply migration 0016 and reload the PostgREST schema (Supabase dashboard → SQL → 'Reload schema cache' or run NOTIFY pgrst, 'reload schema').";
-  if (providerCode === "22P02" || providerCode === "22007" || /invalid input syntax|date\/time field|numeric value out of range/.test(text)) return "MT5 history contains an invalid timestamp or numeric value.";
+  if (providerCode === "22P02" || providerCode === "22007" || providerCode === "22003" || /invalid input syntax|date\/time field|numeric value out of range/.test(text)) return "MT5 history contains an invalid timestamp or numeric value.";
   if (providerCode === "42501" || /permission denied|account unavailable|not authorized/.test(text)) return "Supabase rejected the MT5 account or service-role operation.";
   if (/supabase database is unavailable|server configuration is unavailable|fetch failed|econnreset|enotfound/.test(text)) return "The server could not reach Supabase or its server configuration is incomplete.";
   if (/deadlock|timeout|timed out|lock not available|temporarily unavailable/.test(text)) return "Supabase was temporarily unavailable or the account row was locked; retry history.";
@@ -117,7 +125,7 @@ export function classifySyncFailure(error: unknown): Mt5FailureCode {
   const providerCode = String(wrapped?.supabaseCode || "").toUpperCase();
   const message = errorText(error);
   if (providerCode === "PGRST202" || providerCode === "42601" || /schema cache|could not find the function|function .*gj_sync_mt5_(position|open_batch)|function .*gj_record_mt5_event_failure|column .* does not exist|relation .* does not exist|migration|position_payload|syntax error|insert has more target columns/.test(message)) return "MIGRATION_REQUIRED_0008";
-  if (providerCode === "22P02" || providerCode === "22007" || /invalid input syntax|date\/time field|numeric value out of range/.test(message)) return "INVALID_SYNC_DATA";
+  if (providerCode === "22P02" || providerCode === "22007" || providerCode === "22003" || /invalid input syntax|date\/time field|numeric value out of range/.test(message)) return "INVALID_SYNC_DATA";
   if (providerCode === "42501" || /permission denied|account unavailable|not authorized/.test(message)) return "SYNC_PERMISSION_DENIED";
   if (/deadlock|timeout|timed out|lock not available|temporarily unavailable/.test(message)) return "DATABASE_RETRYABLE";
   return "SYNC_UNAVAILABLE";

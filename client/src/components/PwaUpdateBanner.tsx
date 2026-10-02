@@ -20,7 +20,13 @@ export function PwaUpdateBanner({ reload = () => window.location.reload() }: { r
     updateInProgress = true;
     const registration = await navigator.serviceWorker.getRegistration();
     const waiting = registration?.waiting;
-    if (!waiting) { updateInProgress = false; setReady(false); return; }
+    if (!waiting) {
+      // No parked worker (already activated, or the browser dropped it):
+      // a plain reload still lands the user on the newest bundle. Never
+      // just hide the banner and strand them on the old one.
+      reload();
+      return;
+    }
     const onControllerChange = () => {
       navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
       reload();

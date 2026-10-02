@@ -17,7 +17,7 @@ import { openJournalView } from "@/lib/journalViewNavigation";
 import { trpc } from "@/lib/trpc";
 import { AI_PROVIDER_META } from "@shared/aiCore";
 import { AI_UI_COPY, analyzeJournal, type AiAnalysisOutcome } from "@/lib/ai/aiService";
-import { isModelError, isRequestSizeError, uiStateForErrorCode, type AiUiState } from "@/lib/ai/aiTypes";
+import { isModelError, isRequestSizeError, uiStateForError, uiStateForErrorCode, type AiUiState } from "@/lib/ai/aiTypes";
 import { useAiSettings } from "@/lib/ai/useAiSettings";
 import type {
   AnalysisFilters,
@@ -408,23 +408,32 @@ export function AnalysisDashboard({ accountId }: Props) {
     setAiOutcome(null);
     setAiUiState("analyzing");
     setAiStage(null);
-    const outcome = await analyzeJournal({
-      analysis,
-      trades: representativeTrades,
-      feature: "analysis",
-      signal: controller.signal,
-      model: aiSettings.model ?? undefined,
-      onProgress: progress => {
-        if (controller.signal.aborted) return;
-        setAiStage(
-          progress.phase === "chunk"
-            ? `Analyzing your journal in batches (${progress.index} of ${progress.total})…`
-            : progress.phase === "synthesis"
-              ? "Synthesizing the batch summaries…"
-              : "Preparing compact journal evidence…"
-        );
-      },
-    });
+    // Same guard as the mentor runner: a throw out of analyzeJournal must
+    // not strand this view on "analyzing" with a disabled button.
+    let outcome: AiAnalysisOutcome;
+    try {
+      outcome = await analyzeJournal({
+        analysis,
+        trades: representativeTrades,
+        feature: "analysis",
+        signal: controller.signal,
+        model: aiSettings.model ?? undefined,
+        onProgress: progress => {
+          if (controller.signal.aborted) return;
+          setAiStage(
+            progress.phase === "chunk"
+              ? `Analyzing your journal in batches (${progress.index} of ${progress.total})…`
+              : progress.phase === "synthesis"
+                ? "Synthesizing the batch summaries…"
+                : "Preparing compact journal evidence…"
+          );
+        },
+      });
+    } catch (error) {
+      setAiStage(null);
+      setAiUiState(controller.signal.aborted ? "cancelled" : uiStateForError(error));
+      return;
+    }
     setAiStage(null);
     if (controller.signal.aborted) {
       setAiUiState("cancelled");
@@ -437,6 +446,7 @@ export function AnalysisDashboard({ accountId }: Props) {
         await saveAiReport.mutateAsync({
           accountId,
           filters,
+          feature: "analysis",
           // A deterministic report is labelled as such so history can tell the
           // two apart without pretending a provider produced it.
           model: outcome.deterministic ? "deterministic-local" : outcome.model ?? "unknown",

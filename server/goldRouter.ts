@@ -40,6 +40,20 @@ import {
 } from "./tradeOptions";
 
 const MAX_MONEY = 999_999_999_999.99;
+
+/**
+ * True when a write failed on a Postgres unique constraint (SQLSTATE 23505,
+ * surfaced by PostgREST with the code attached). Idempotent creates check
+ * for the existing row first, but two submissions in flight at once can
+ * both pass that check — the loser must degrade to the same "already
+ * stored" answer instead of a raw 500 that wedges the client's retry.
+ */
+export function isUniqueViolation(error: unknown): boolean {
+  const candidate = error as { supabaseCode?: unknown; code?: unknown; message?: unknown } | null | undefined;
+  if (!candidate) return false;
+  if (candidate.supabaseCode === "23505" || candidate.code === "23505") return true;
+  return typeof candidate.message === "string" && /duplicate key|unique constraint/i.test(candidate.message);
+}
 const optionalText = (max = 5000) => z.string().trim().max(max).optional().default("");
 // Free-form journal text.
 //
@@ -67,7 +81,9 @@ const riskCalculatorInput = accountIdInput.extend({
   stopLoss: z.number().finite().positive(),
   takeProfit: z.number().finite().positive().nullable().optional().default(null),
 });
-const mt5TicketInput = z.string().regex(/^\d+$/).max(20).optional();
+// Postgres bigint range: at most 19 digits and never above the max, or the
+// value explodes a ::bigint cast downstream instead of failing validation.
+const mt5TicketInput = z.string().regex(/^\d{1,19}$/).refine(value => BigInt(value) <= BigInt("9223372036854775807"), "MT5 ticket is out of range.").optional();
 const clientMutationIdInput = z.string().regex(/^[A-Za-z0-9_-]{16,64}$/, "Invalid offline replay id.").optional();
 const requiredClientMutationIdInput = z.string().regex(/^[A-Za-z0-9_-]{16,64}$/, "Invalid offline replay id.");
 const screenshotMimeInput = z.enum(["image/jpeg", "image/png", "image/webp"]);
@@ -335,9 +351,9 @@ export const goldRouter = router({
     // AI inference runs in the user's browser. The server only stores the
     // finished report so history keeps working; no credential ever arrives
     // here and no AI provider is called server-side.
-    saveAiReport: protectedProcedure.input(analysisInput.extend({ model: z.string().trim().min(1).max(160), report: aiReportSchema })).mutation(async ({ ctx, input }) => {
+    saveAiReport: protectedProcedure.input(analysisInput.extend({ model: z.string().trim().min(1).max(160), report: aiReportSchema, feature: z.enum(["analysis", "mentor"]).default("analysis") })).mutation(async ({ ctx, input }) => {
       const analysis = await getAccountAnalysis(ctx.user.id, input.accountId, input.filters);
-      const persisted = await persistAiReport(ctx.user.id, input.accountId, analysis, input.model, input.report);
+      const persisted = await persistAiReport(ctx.user.id, input.accountId, analysis, input.model, input.report, input.feature);
       return { success: true, reportId: persisted.reportId, persisted: persisted.persisted };
     }),
     history: protectedProcedure.input(accountIdInput.extend({ limit: z.number().int().min(1).max(50).default(20) })).query(async ({ ctx, input }) => { await getOwnedAccount(ctx.user.id, input.accountId); return listAiReports(ctx.user.id, input.accountId, input.limit); }),
@@ -360,8 +376,14 @@ export const goldRouter = router({
       const normalizedName = normalizeAccountName(input.name);
       const duplicate = await db.select({ id: accounts.id }).from(accounts).where(and(eq(accounts.userId, ctx.user.id), eq(accounts.normalizedName, normalizedName))).limit(1);
       if (duplicate[0]) throw new TRPCError({ code: "CONFLICT", message: "A journal account with this name already exists. Rename the existing account or choose a distinct name before linking MT5." });
-      const inserted = await db.insert(accounts).values({ userId: ctx.user.id, name: input.name, normalizedName, startingBalance: input.startingBalance.toFixed(2) }).returning({ id: accounts.id });
-      return { id: inserted[0].id };
+      try {
+        const inserted = await db.insert(accounts).values({ userId: ctx.user.id, name: input.name, normalizedName, startingBalance: input.startingBalance.toFixed(2) }).returning({ id: accounts.id });
+        return { id: inserted[0].id };
+      } catch (error) {
+        // A same-name create landed first; answer with the friendly conflict.
+        if (!isUniqueViolation(error)) throw error;
+        throw new TRPCError({ code: "CONFLICT", message: "A journal account with this name already exists. Rename the existing account or choose a distinct name before linking MT5." });
+      }
     }),
     rename: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), name: z.string().trim().min(1).max(100) })).mutation(async ({ ctx, input }) => {
       await getOwnedAccount(ctx.user.id, input.accountId);
@@ -369,7 +391,12 @@ export const goldRouter = router({
       const normalizedName = normalizeAccountName(input.name);
       const duplicate = await db.select({ id: accounts.id }).from(accounts).where(and(eq(accounts.userId, ctx.user.id), eq(accounts.normalizedName, normalizedName))).limit(1);
       if (duplicate[0] && duplicate[0].id !== input.accountId) throw new TRPCError({ code: "CONFLICT", message: "A journal account with this name already exists. Choose a distinct name." });
-      await db.update(accounts).set({ name: input.name, normalizedName }).where(and(eq(accounts.id, input.accountId), eq(accounts.userId, ctx.user.id)));
+      try {
+        await db.update(accounts).set({ name: input.name, normalizedName }).where(and(eq(accounts.id, input.accountId), eq(accounts.userId, ctx.user.id)));
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error;
+        throw new TRPCError({ code: "CONFLICT", message: "A journal account with this name already exists. Choose a distinct name." });
+      }
       return { success: true };
     }),
     remove: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), confirmed: z.literal(true) })).mutation(async ({ ctx, input }) => {
@@ -466,7 +493,7 @@ export const goldRouter = router({
     }),
   }),
   trades: router({
-    list: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(50).default(12), search: z.string().trim().optional().default(""), result: z.enum(["WIN", "LOSS", "BREAK_EVEN", "OPEN"]).optional() })).query(async ({ ctx, input }) => {
+    list: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(50).default(12), search: z.string().trim().max(100).optional().default(""), result: z.enum(["WIN", "LOSS", "BREAK_EVEN", "OPEN"]).optional() })).query(async ({ ctx, input }) => {
       // Pure read: the Trade Log must render from the paginated trade list alone,
       // without waiting for MT5 reconciliation, analysis, or notifications.
       const account = await getOwnedAccount(ctx.user.id, input.accountId);
@@ -474,7 +501,9 @@ export const goldRouter = router({
       let where = and(eq(trades.userId, ctx.user.id), eq(trades.accountId, account.id));
       if (input.result) where = and(where, eq(trades.result, input.result));
       if (input.search) {
-        const needle = `%${input.search}%`;
+        // Escape the LIKE wildcards so a literal "%" or "_" in the trader's
+        // text searches for itself instead of broadening the match.
+        const needle = `%${input.search.replace(/[%_\\]/g, "\\$&")}%`;
         where = and(where, or(like(trades.session, needle), like(trades.level, needle), like(trades.notes, needle)));
       }
       const totalRows = await db.select({ total: count() }).from(trades).where(where);
@@ -504,7 +533,12 @@ export const goldRouter = router({
         }
         let linkedPosition: { mfeUsd: unknown; maeUsd: unknown } | undefined;
         if (input.mt5Ticket) {
-          const linked = await db.select({ id: mt5LivePositions.id, mfeUsd: mt5LivePositions.mfeUsd, maeUsd: mt5LivePositions.maeUsd }).from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, input.accountId), eq(mt5LivePositions.ticket, BigInt(input.mt5Ticket)), eq(mt5LivePositions.status, "CLOSED"))).limit(1);
+          const ticket = BigInt(input.mt5Ticket);
+          // A ticket already linked to a journal trade can never be journaled
+          // twice; say so plainly instead of surfacing the unique constraint.
+          const alreadyJournaled = await db.select({ id: trades.id }).from(trades).where(and(eq(trades.accountId, input.accountId), eq(trades.mt5Ticket, ticket))).limit(1);
+          if (alreadyJournaled[0]) throw new Error("That MT5 ticket is already linked to another journal trade.");
+          const linked = await db.select({ id: mt5LivePositions.id, mfeUsd: mt5LivePositions.mfeUsd, maeUsd: mt5LivePositions.maeUsd }).from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, input.accountId), eq(mt5LivePositions.ticket, ticket), eq(mt5LivePositions.status, "CLOSED"))).limit(1);
           if (!linked[0]) throw new Error("The selected MT5 ticket is not an unjournaled closed position for this account.");
           linkedPosition = linked[0];
         }
@@ -518,23 +552,37 @@ export const goldRouter = router({
         // a negative P&L silently corrupts every win-rate vs expectancy
         // comparison downstream, so the server is the source of truth here.
         const derivedResult = deriveTradeResult(input.pnl, input.result);
-        const inserted = await db.insert(trades).values({
-          userId: ctx.user.id, accountId: input.accountId, tradeDate: new Date(input.tradeDate), session: input.session,
-          direction: input.direction, result: derivedResult, level: input.level, timeframe: input.timeframe,
-          setupQuality: input.setupQuality, executionType: input.executionType, marketCondition: input.marketCondition,
-          biasAlignment: input.biasAlignment, confirmationType: input.confirmationType, slPlacement: input.slPlacement,
-          tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality, patienceScore: input.patienceScore,
-          planFollowScore: input.planFollowScore, quickLogged: input.quickLogged ?? false,
-          entryPrice: input.entryPrice?.toFixed(6) ?? null, slPrice: input.slPrice?.toFixed(6) ?? null, tpPrice: input.tpPrice?.toFixed(6) ?? null,
-          mfe: autoMfe?.toFixed(2) ?? null, mae: autoMae?.toFixed(2) ?? null,
-          risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null, pnl: input.pnl.toFixed(2),
-          notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
-          planStatus: input.planStatus, planChecklist: input.planChecklist,
-          // The trade row and its evidence are committed by this one write, so a
-          // screenshot can never be half-attached.
-          screenshotKey: screenshot.key ?? null, screenshotName: screenshot.name ?? null,
-          mt5Ticket: input.mt5Ticket ? BigInt(input.mt5Ticket) : null, clientMutationId: input.clientMutationId ?? null,
-        }).returning({ id: trades.id });
+        let inserted: { id: number }[];
+        try {
+          inserted = await db.insert(trades).values({
+            userId: ctx.user.id, accountId: input.accountId, tradeDate: new Date(input.tradeDate), session: input.session,
+            direction: input.direction, result: derivedResult, level: input.level, timeframe: input.timeframe,
+            setupQuality: input.setupQuality, executionType: input.executionType, marketCondition: input.marketCondition,
+            biasAlignment: input.biasAlignment, confirmationType: input.confirmationType, slPlacement: input.slPlacement,
+            tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality, patienceScore: input.patienceScore,
+            planFollowScore: input.planFollowScore, quickLogged: input.quickLogged ?? false,
+            entryPrice: input.entryPrice?.toFixed(6) ?? null, slPrice: input.slPrice?.toFixed(6) ?? null, tpPrice: input.tpPrice?.toFixed(6) ?? null,
+            mfe: autoMfe?.toFixed(2) ?? null, mae: autoMae?.toFixed(2) ?? null,
+            risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null, pnl: input.pnl.toFixed(2),
+            notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
+            planStatus: input.planStatus, planChecklist: input.planChecklist,
+            // The trade row and its evidence are committed by this one write, so a
+            // screenshot can never be half-attached.
+            screenshotKey: screenshot.key ?? null, screenshotName: screenshot.name ?? null,
+            mt5Ticket: input.mt5Ticket ? BigInt(input.mt5Ticket) : null, clientMutationId: input.clientMutationId ?? null,
+          }).returning({ id: trades.id });
+        } catch (error) {
+          // A twin of this submission landed first (offline replay racing the
+          // original request, or a double-tap): the unique constraint kept
+          // the data correct, so answer with the stored row, not a 500.
+          if (!isUniqueViolation(error)) throw error;
+          if (input.clientMutationId) {
+            const winner = await db.select().from(trades).where(and(eq(trades.userId, ctx.user.id), eq(trades.accountId, input.accountId), eq(trades.clientMutationId, input.clientMutationId))).limit(1);
+            if (winner[0]) return { id: winner[0].id, replayed: true, trade: toSafeTrade(winner[0]) };
+          }
+          if (input.mt5Ticket) throw new Error("That MT5 ticket is already linked to another journal trade.");
+          throw error;
+        }
         const id = inserted[0].id;
         const created = (await db.select().from(trades).where(and(eq(trades.id, id), eq(trades.userId, ctx.user.id))).limit(1))[0];
         logPersistenceEvent("trade.create.persisted", { stage: "trade.create", userId: ctx.user.id, accountId: input.accountId, mutationId: input.clientMutationId ?? null, tradeId: id });
@@ -714,7 +762,13 @@ export const goldRouter = router({
         const existing = await db.select({ id: cashMovements.id }).from(cashMovements).where(and(eq(cashMovements.userId, ctx.user.id), eq(cashMovements.accountId, input.accountId), eq(cashMovements.clientMutationId, input.clientMutationId))).limit(1);
         if (existing[0]) return { success: true, replayed: true };
       }
-      await db.insert(cashMovements).values({ userId: ctx.user.id, accountId: input.accountId, movementDate: new Date(input.movementDate), type: input.type, amount: input.amount.toFixed(2), note: input.note, clientMutationId: input.clientMutationId ?? null });
+      try {
+        await db.insert(cashMovements).values({ userId: ctx.user.id, accountId: input.accountId, movementDate: new Date(input.movementDate), type: input.type, amount: input.amount.toFixed(2), note: input.note, clientMutationId: input.clientMutationId ?? null });
+      } catch (error) {
+        // Twin submission landed first; the stored movement is the answer.
+        if (!input.clientMutationId || !isUniqueViolation(error)) throw error;
+        return { success: true, replayed: true };
+      }
       return { success: true, replayed: false };
     }),
   }),
@@ -784,20 +838,35 @@ export const goldRouter = router({
         updatedAt: new Date(),
       };
       // One review per account per calendar week: a repeat review for the same
-      // week replaces the stored row. Single-user, single-action — no
-      // lost-update race to worry about here.
+      // week replaces the stored row.
       const existing = await db.select({ id: weeklyReviews.id }).from(weeklyReviews).where(and(
         eq(weeklyReviews.userId, ctx.user.id),
         eq(weeklyReviews.accountId, input.accountId),
         eq(weeklyReviews.weekStartDate, values.weekStartDate),
       )).limit(1);
-      if (existing[0]) {
+      const replaceExisting = async (id: number) => {
         await db.update(weeklyReviews).set({
           weekStart: values.weekStart, weekEnd: values.weekEnd, statsSnapshot: values.statsSnapshot, lesson: values.lesson,
           ruleForNextWeek: values.ruleForNextWeek, updatedAt: values.updatedAt,
-        }).where(and(eq(weeklyReviews.id, existing[0].id), eq(weeklyReviews.userId, ctx.user.id)));
+        }).where(and(eq(weeklyReviews.id, id), eq(weeklyReviews.userId, ctx.user.id)));
+      };
+      if (existing[0]) {
+        await replaceExisting(existing[0].id);
       } else {
-        await db.insert(weeklyReviews).values(values);
+        try {
+          await db.insert(weeklyReviews).values(values);
+        } catch (error) {
+          // A concurrent save of the same week landed first: replace it,
+          // which is what this save means anyway.
+          if (!isUniqueViolation(error)) throw error;
+          const winner = await db.select({ id: weeklyReviews.id }).from(weeklyReviews).where(and(
+            eq(weeklyReviews.userId, ctx.user.id),
+            eq(weeklyReviews.accountId, input.accountId),
+            eq(weeklyReviews.weekStartDate, values.weekStartDate),
+          )).limit(1);
+          if (!winner[0]) throw error;
+          await replaceExisting(winner[0].id);
+        }
       }
       return { success: true };
     }),

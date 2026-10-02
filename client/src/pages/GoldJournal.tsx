@@ -50,12 +50,14 @@ import {
 import { beginAccountSwitchForApp, payloadBelongsToAccount, refreshCurrentAccount, resolveActiveAccount } from "@/lib/accountScope";
 import { classifyApiError } from "@/lib/apiErrors";
 import { JournalQueryError, SwitchingAccount } from "@/components/QueryError";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import { AccountStatusStrip } from "@/components/premium/AccountStatusStrip";
 import { AmbientField } from "@/components/premium/AmbientField";
 import { Premium3DBackground } from "@/components/premium/Premium3DBackground";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useIsDrawerNav } from "@/hooks/useMobile";
 import { purgeLegacyLocalJournalStore } from "@/lib/journal/legacyLocalJournalCleanup";
+import { pktDateToTimestamp } from "@shared/pktDate";
 
 /** How long the confirmed "Saved" state stays on screen before the dialog closes. */
 const SAVED_BADGE_MS = 700;
@@ -907,15 +909,26 @@ export default function GoldJournal() {
     // risk calculator, and MT5 Live all read the same active account.
     if (account?.id) setSelectedAccountId(account.id);
   }, [account?.id]);
+  // The last alert set actually sent, by content. recordGoalAlerts is the
+  // whole mutation object, whose identity changes on every state transition;
+  // depending on it re-fired this effect after every settle and looped the
+  // RPC for as long as any goal stayed at risk.
+  const goalAlertsSentRef = useRef("");
   useEffect(() => {
     if (!account?.id || !goalAlertPayload.length || recordGoalAlerts.isPending)
       return;
+    const signature = `${account.id}:${goalAlertPayload.map((alert: { goalId: number; status: string; cycleKey: string }) => `${alert.goalId}|${alert.status}|${alert.cycleKey}`).join(";")}`;
+    if (goalAlertsSentRef.current === signature) return;
+    goalAlertsSentRef.current = signature;
     void recordGoalAlerts
       .mutateAsync({ accountId: account.id, alerts: goalAlertPayload })
       .then(result => {
         if (result.recorded) void utils.notifications?.get?.invalidate?.();
       })
-      .catch(() => undefined);
+      .catch(() => {
+        // A failed send may retry when the payload next changes.
+        if (goalAlertsSentRef.current === signature) goalAlertsSentRef.current = "";
+      });
   }, [account?.id, goalAlertPayload, recordGoalAlerts, utils.notifications]);
   const switchAccount = React.useCallback(
     (nextAccountId: number) => {
@@ -1133,10 +1146,11 @@ export default function GoldJournal() {
       return;
     }
     const date = Date.parse(`${tradeForm.tradeDate}T12:00:00+05:00`);
-    if (
-      !Number.isFinite(date) ||
-      (!editing && isFuturePktDate(tradeForm.tradeDate))
-    ) {
+    if (!Number.isFinite(date)) {
+      toast.error("Enter a valid trade date before saving.");
+      return;
+    }
+    if (!editing && isFuturePktDate(tradeForm.tradeDate)) {
       toast.error("Future trade dates are not allowed.");
       return;
     }
@@ -1354,20 +1368,28 @@ export default function GoldJournal() {
         evidence.screenshotKey = uploaded.key;
         evidence.screenshotName = uploaded.name;
       }
+      // The server takes the trade date as a millisecond timestamp anchored
+      // at PKT noon (same conversion as the full trade dialog); the dialog
+      // itself works with the YYYY-MM-DD input string. pktDateToTimestamp
+      // throws on an unreadable date, which the catch turns into the
+      // "could not be saved" toast.
       await createTrade.mutateAsync({
         accountId: account.id,
         clientMutationId: attemptId,
-        tradeDate: payload.tradeDate,
+        tradeDate: pktDateToTimestamp(payload.tradeDate),
         session: payload.session,
         direction: payload.direction,
         result: "OPEN",
         pnl: 0,
         quickLogged: true,
+        patienceScore: null,
+        risk: null,
+        reward: null,
         entryPrice: payload.entryPrice === "" ? null : Number(payload.entryPrice),
         slPrice: payload.slPrice === "" ? null : Number(payload.slPrice),
         tpPrice: payload.tpPrice === "" ? null : Number(payload.tpPrice),
         ...evidence,
-      } as any);
+      });
       await refreshCurrentAccount(utils);
       toast.success("Quick-logged. Finish the details from the Trade Log.");
       setQuickDialog(false);
@@ -1553,6 +1575,15 @@ export default function GoldJournal() {
             </Button>
           </div>
         )}
+        {data?.cashNetError && (
+          <div className="derived-status" role="status">
+            <ShieldAlert size={15} />
+            <span>{data.cashNetError.message} The balance shown may be understated.</span>
+            <Button variant="outline" size="sm" onClick={retryJournal}>
+              Retry summary
+            </Button>
+          </div>
+        )}
         {view === "options" ? (
           <div className="view-wrap">{optionsPanel}</div>
         ) : blockingLoading ? (
@@ -1572,6 +1603,10 @@ export default function GoldJournal() {
           />
         ) : (
           <div className="view-wrap">
+            {/* A render failure in any single view is contained here: the
+                shell, sidebar, and other accounts stay usable, and switching
+                views (the key) clears the failure. */}
+            <ErrorBoundary key={view} variant="section" label="This view">
             {switchPending && (
               <div className="derived-status" role="status">
                 <RefreshCcw size={15} />
@@ -1839,18 +1874,6 @@ export default function GoldJournal() {
                 accounts={
                   ownedAccounts.length ? ownedAccounts : (data?.accounts ?? [])
                 }
-                onJournalNow={(position: any) =>
-                  openNewTrade({
-                    direction: position.direction,
-                    risk: String(position.riskUsd ?? ""),
-                    reward: String(position.rewardUsd ?? ""),
-                    pnl: String(position.realizedPnl ?? ""),
-                    result: position.result,
-                    mt5Ticket: position.ticket,
-                    notes:
-                      "MT5 trade auto-filled. Add your analysis details below.",
-                  })
-                }
                 onSwitchAccount={selectAccount}
               />
               </React.Suspense>
@@ -1860,6 +1883,7 @@ export default function GoldJournal() {
                 <RiskCalculatorPanelLazy />
               </React.Suspense>
             )}
+            </ErrorBoundary>
           </div>
         )}
       </main>
@@ -2219,195 +2243,6 @@ export function QueryError({
   );
 }
 
-function MissedView({ rows, account, refresh }: any) {
-  const createSkipped = trpc.skipped.create.useMutation();
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({
-    date: dateInput(),
-    session: getPktSession(),
-    direction: "BUY",
-    reason: "Fear - SL looked too big",
-    confidence: "3",
-    outcome: "TP Hit - Full",
-    missed: "",
-    notes: "",
-  });
-  return (
-    <>
-      <section className="section-heading">
-        <div>
-          <span className="eyebrow">OPPORTUNITY REVIEW</span>
-          <h2>Missed / skipped trades</h2>
-          <p>
-            Track what you saw, why you passed, and what happened afterwards.
-          </p>
-        </div>
-        <Button onClick={() => setOpen(true)}>
-          <Plus size={16} /> Log Skipped Trade
-        </Button>
-      </section>
-      <div className="stats-grid compact">
-        <StatCard
-          label="Total skipped"
-          value={String(rows.length)}
-          detail="Recorded opportunities"
-          tone="neutral"
-        />
-        <StatCard
-          label="Estimated missed"
-          value={formatMoney(
-            rows.reduce(
-              (sum: number, row: any) => sum + toNumber(row.estimatedMissed),
-              0
-            )
-          )}
-          detail="Potential, not realized"
-        />
-        <StatCard
-          label="Top reason"
-          value={rows[0]?.skipReason || "—"}
-          detail="Based on entries"
-          tone="neutral"
-        />
-      </div>
-      <section className="panel">
-        {rows.length ? (
-          <div className="trade-table-wrap">
-            <table className="trade-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Session</th>
-                  <th>Direction</th>
-                  <th>Reason</th>
-                  <th>Confidence</th>
-                  <th>Outcome</th>
-                  <th>Est. missed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row: any) => (
-                  <tr key={row.id}>
-                    <td className="data-text">{formatDate(row.tradeDate)}</td>
-                    <td>{row.session}</td>
-                    <td>{row.direction}</td>
-                    <td>{row.skipReason}</td>
-                    <td>{row.confidence}/5</td>
-                    <td>{row.outcome}</td>
-                    <td className="positive data-text">
-                      {formatMoney(row.estimatedMissed)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <EmptyState
-            title="No skipped opportunities yet."
-            copy="Logging a skipped setup turns a moment of uncertainty into reviewable evidence."
-          />
-        )}
-      </section>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Log skipped trade</DialogTitle>
-            <DialogDescription>
-              Capture the missed opportunity without diluting the main trade
-              log.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="stacked-fields">
-            <Field label="Date">
-              <Input
-                type="date"
-                value={form.date}
-                onChange={event =>
-                  setForm({ ...form, date: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Session">
-              <select
-                value={form.session}
-                onChange={event =>
-                  setForm({ ...form, session: event.target.value })
-                }
-              >
-                {sessions.map(item => (
-                  <option key={item}>{item}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Skip reason">
-              <Input
-                value={form.reason}
-                onChange={event =>
-                  setForm({ ...form, reason: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Outcome">
-              <Input
-                value={form.outcome}
-                onChange={event =>
-                  setForm({ ...form, outcome: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Estimated $ missed">
-              <Input
-                type="number"
-                value={form.missed}
-                onChange={event =>
-                  setForm({ ...form, missed: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Notes">
-              <Textarea
-                value={form.notes}
-                onChange={event =>
-                  setForm({ ...form, notes: event.target.value })
-                }
-              />
-            </Field>
-          </div>
-          <div className="dialog-actions">
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={async () => {
-                if (!account) return;
-                await createSkipped.mutateAsync({
-                  accountId: account.id,
-                  tradeDate: new Date(`${form.date}T12:00:00`).getTime(),
-                  session: form.session,
-                  level: "",
-                  timeframe: "",
-                  direction: form.direction as "BUY" | "SELL",
-                  skipReason: form.reason,
-                  confidence: Number(form.confidence),
-                  outcome: form.outcome,
-                  estimatedMissed: Number(form.missed || 0),
-                  notes: form.notes,
-                });
-                toast.success("Skipped trade logged.");
-                setOpen(false);
-                refresh();
-              }}
-            >
-              Save skipped trade
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
 export function OptionsView({
   user,
   account,
@@ -2531,298 +2366,6 @@ export function OptionsView({
   );
 }
 
-function TradeDialog({
-  open,
-  setOpen,
-  form,
-  setForm,
-  editing,
-  onSave,
-  pending,
-  screenshot,
-  setScreenshot,
-  progress,
-}: any) {
-  const fileRef = useRef<HTMLInputElement>(null);
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="trade-dialog">
-        <DialogHeader>
-          <DialogTitle>{editing ? "Edit trade" : "New trade"}</DialogTitle>
-          <DialogDescription>
-            {editing
-              ? "Update the journal detail and retain the original session."
-              : "Session is detected from Pakistan Standard Time and can be overridden."}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="trade-form">
-          <FormSection title="Trade details">
-            <Field label="Date">
-              <Input
-                type="date"
-                value={form.tradeDate}
-                max={dateInput()}
-                onChange={event =>
-                  setForm({ ...form, tradeDate: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Session">
-              <select
-                value={form.session}
-                onChange={event =>
-                  setForm({ ...form, session: event.target.value })
-                }
-              >
-                {sessions.map(item => (
-                  <option key={item}>{item}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Direction">
-              <select
-                value={form.direction}
-                onChange={event =>
-                  setForm({ ...form, direction: event.target.value })
-                }
-              >
-                <option>BUY</option>
-                <option>SELL</option>
-              </select>
-            </Field>
-            <Field label="Result">
-              <select
-                value={form.result}
-                onChange={event =>
-                  setForm({ ...form, result: event.target.value })
-                }
-              >
-                {results.map(item => (
-                  <option key={item} value={item}>
-                    {item.replace("_", " ")}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </FormSection>
-          <FormSection title="Strategy">
-            <Field label="Level">
-              <select
-                value={form.level}
-                onChange={event =>
-                  setForm({ ...form, level: event.target.value })
-                }
-              >
-                <option value="">Select level</option>
-                {levels.map(item => (
-                  <option key={item}>{item}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Timeframe">
-              <select
-                value={form.timeframe}
-                onChange={event =>
-                  setForm({ ...form, timeframe: event.target.value })
-                }
-              >
-                {["1m", "5m", "15m", "H1", "4H"].map(item => (
-                  <option key={item}>{item}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Setup quality">
-              <select
-                value={form.setupQuality}
-                onChange={event =>
-                  setForm({ ...form, setupQuality: event.target.value })
-                }
-              >
-                {["A+", "A", "B"].map(item => (
-                  <option key={item}>{item}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Confirmation">
-              <Input
-                value={form.confirmationType}
-                placeholder="BOS, CHoCH…"
-                onChange={event =>
-                  setForm({ ...form, confirmationType: event.target.value })
-                }
-              />
-            </Field>
-          </FormSection>
-          <FormSection title="Execution">
-            <Field label="Execution type">
-              <select
-                value={form.executionType}
-                onChange={event =>
-                  setForm({ ...form, executionType: event.target.value })
-                }
-              >
-                {executionTypes.map(item => (
-                  <option key={item}>{item}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Market condition">
-              <Input
-                value={form.marketCondition}
-                placeholder="Bullish, ranging…"
-                onChange={event =>
-                  setForm({ ...form, marketCondition: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Patience 1–5">
-              <Input
-                type="number"
-                min="1"
-                max="5"
-                value={form.patienceScore}
-                onChange={event =>
-                  setForm({ ...form, patienceScore: event.target.value })
-                }
-              />
-            </Field>
-          </FormSection>
-          <FormSection title="Risk">
-            <Field label="Risk $">
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.risk}
-                onChange={event =>
-                  setForm({ ...form, risk: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="Reward $">
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.reward}
-                onChange={event =>
-                  setForm({ ...form, reward: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="P&L $">
-              <Input
-                type="number"
-                step="0.01"
-                value={form.pnl}
-                onChange={event =>
-                  setForm({ ...form, pnl: event.target.value })
-                }
-              />
-            </Field>
-            <div className="rr-live">
-              <span>LIVE R:R</span>
-              <strong className="data-text">
-                {formatRr(form.risk, form.reward)}
-              </strong>
-            </div>
-          </FormSection>
-          <FormSection title="Screenshot">
-            <div
-              className="upload-box"
-              onClick={() => fileRef.current?.click()}
-            >
-              <ImagePlus size={20} />
-              <div>
-                <strong>
-                  {screenshot
-                    ? screenshot.name
-                    : "Click to upload a screenshot"}
-                </strong>
-                <span>JPG, PNG or WEBP · 5MB maximum</span>
-              </div>
-              <input
-                ref={fileRef}
-                hidden
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                onChange={event => {
-                  const file = event.target.files?.[0];
-                  if (!file) return;
-                  if (
-                    !["image/jpeg", "image/png", "image/webp"].includes(
-                      file.type
-                    )
-                  ) {
-                    toast.error("Use a JPG, PNG, or WEBP screenshot.");
-                    return;
-                  }
-                  if (file.size > 5 * 1024 * 1024) {
-                    toast.error("Screenshot must be 5MB or smaller.");
-                    return;
-                  }
-                  setScreenshot(file);
-                }}
-              />
-            </div>
-            {progress > 0 && (
-              <div className="upload-progress">
-                <i style={{ width: `${progress}%` }} />
-              </div>
-            )}
-          </FormSection>
-          <FormSection title="Emotions">
-            <Field label="Before trade">
-              <Textarea
-                value={form.emotionBefore}
-                placeholder="Calm, focused, dar raha tha…"
-                onChange={event =>
-                  setForm({ ...form, emotionBefore: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="During trade">
-              <Textarea
-                value={form.emotionDuring}
-                placeholder="What were you thinking?"
-                onChange={event =>
-                  setForm({ ...form, emotionDuring: event.target.value })
-                }
-              />
-            </Field>
-            <Field label="After trade">
-              <Textarea
-                value={form.emotionAfter}
-                placeholder="Satisfied, gussa aya, should have held…"
-                onChange={event =>
-                  setForm({ ...form, emotionAfter: event.target.value })
-                }
-              />
-            </Field>
-          </FormSection>
-          <FormSection title="Notes">
-            <Textarea
-              value={form.notes}
-              rows={4}
-              placeholder="English + Roman Urdu supported…"
-              onChange={event =>
-                setForm({ ...form, notes: event.target.value })
-              }
-            />
-          </FormSection>
-        </div>
-        <div className="dialog-actions">
-          <Button variant="outline" onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
-          <Button disabled={pending} onClick={onSave}>
-            {pending ? "Saving…" : editing ? "Save changes" : "Save trade"}
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
 function CashDialog({
   type,
   setType,
@@ -2871,90 +2414,6 @@ function CashDialog({
           <Button disabled={pending || Number(amount) <= 0} onClick={save}>
             {pending ? "Saving…" : "Save movement"}
           </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-function GoalDialog({ open, setOpen, draft, setDraft, onSave }: any) {
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Add custom goal</DialogTitle>
-          <DialogDescription>
-            Create a trackable goal for the active account.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="stacked-fields">
-          <Field label="Name">
-            <Input
-              value={draft.name}
-              onChange={event =>
-                setDraft({ ...draft, name: event.target.value })
-              }
-            />
-          </Field>
-          <Field label="Description">
-            <Input
-              value={draft.description}
-              onChange={event =>
-                setDraft({ ...draft, description: event.target.value })
-              }
-            />
-          </Field>
-          <Field label="Period">
-            <select
-              value={draft.period}
-              onChange={event =>
-                setDraft({ ...draft, period: event.target.value })
-              }
-            >
-              <option value="DAILY">Daily</option>
-              <option value="WEEKLY">Weekly</option>
-              <option value="MONTHLY">Monthly</option>
-            </select>
-          </Field>
-          <Field label="Metric">
-            <select
-              value={draft.metric}
-              onChange={event =>
-                setDraft({ ...draft, metric: event.target.value })
-              }
-            >
-              <option value="trade_count">Trade count</option>
-              <option value="net_pnl">Net P&L</option>
-              <option value="win_rate">Win rate</option>
-              <option value="avg_rr">Average R:R</option>
-            </select>
-          </Field>
-          <Field label="Direction">
-            <select
-              value={draft.comparison}
-              onChange={event =>
-                setDraft({ ...draft, comparison: event.target.value })
-              }
-            >
-              <option value="GTE">At least</option>
-              <option value="LTE">At most</option>
-            </select>
-          </Field>
-          <Field label="Target">
-            <Input
-              type="number"
-              min="0"
-              value={draft.target}
-              onChange={event =>
-                setDraft({ ...draft, target: event.target.value })
-              }
-            />
-          </Field>
-        </div>
-        <div className="dialog-actions">
-          <Button variant="outline" onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
-          <Button onClick={onSave}>Add goal</Button>
         </div>
       </DialogContent>
     </Dialog>
@@ -3121,12 +2580,19 @@ export function LoginScreen() {
     }
     setBusy(true);
     setMessage("");
-    const result = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: { emailRedirectTo: getAuthRedirectUrl() },
-    });
-    setBusy(false);
-    setMessage(result.error?.message || "Magic link sent. Check your email.");
+    try {
+      const result = await supabase.auth.signInWithOtp({
+        email: email.trim(),
+        options: { emailRedirectTo: getAuthRedirectUrl() },
+      });
+      setMessage(result.error?.message || "Magic link sent. Check your email.");
+    } catch {
+      // signInWithOtp reports failures on its result, but a transport-level
+      // throw must not strand the busy state.
+      setMessage("The magic link could not be sent. Check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
   };
   // GSAP owns the login hero choreography: lockup, headline, readout and form
   // stagger in once per mount. Framer Motion is not attached to these nodes, so

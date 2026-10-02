@@ -5,7 +5,7 @@ import { formatMoney } from "@/lib/gold";
 import { openJournalView } from "@/lib/journalViewNavigation";
 import { useAiSettings } from "@/lib/ai/useAiSettings";
 import { AI_UI_COPY, analyzeJournal, type AiAnalysisOutcome } from "@/lib/ai/aiService";
-import { isModelError, isRequestSizeError, uiStateForErrorCode, type AiUiState } from "@/lib/ai/aiTypes";
+import { isModelError, isRequestSizeError, uiStateForError, uiStateForErrorCode, type AiUiState } from "@/lib/ai/aiTypes";
 import { Button } from "@/components/ui/button";
 import { RiskMetric } from "@/components/journalPrimitives";
 import { MentorBriefPanel } from "@/components/MentorBriefPanel";
@@ -62,23 +62,33 @@ export function MentorView({ account, behaviorConfig }: { account?: any; behavio
     const mentorEvidence = behaviorEvidence.data as unknown as AnalysisResult & {
       representativeTrades?: readonly any[];
     };
-    const outcome = await analyzeJournal({
-      analysis: mentorEvidence,
-      trades: mentorEvidence.representativeTrades,
-      feature: "mentor",
-      signal: controller.signal,
-      model: aiSettings.model ?? undefined,
-      onProgress: progress => {
-        if (controller.signal.aborted) return;
-        setMentorStage(
-          progress.phase === "chunk"
-            ? `Analyzing your journal in batches (${progress.index} of ${progress.total})…`
-            : progress.phase === "synthesis"
-              ? "Synthesizing the batch summaries…"
-              : "Preparing compact journal evidence…"
-        );
-      },
-    });
+    // analyzeJournal resolves failures as outcomes, but a throw from the
+    // deterministic fallback construction must still land somewhere: without
+    // this guard the view would sit on "analyzing" forever.
+    let outcome: AiAnalysisOutcome;
+    try {
+      outcome = await analyzeJournal({
+        analysis: mentorEvidence,
+        trades: mentorEvidence.representativeTrades,
+        feature: "mentor",
+        signal: controller.signal,
+        model: aiSettings.model ?? undefined,
+        onProgress: progress => {
+          if (controller.signal.aborted) return;
+          setMentorStage(
+            progress.phase === "chunk"
+              ? `Analyzing your journal in batches (${progress.index} of ${progress.total})…`
+              : progress.phase === "synthesis"
+                ? "Synthesizing the batch summaries…"
+                : "Preparing compact journal evidence…"
+          );
+        },
+      });
+    } catch (error) {
+      setMentorStage(null);
+      setMentorUiState(controller.signal.aborted ? "cancelled" : uiStateForError(error));
+      return;
+    }
     setMentorStage(null);
     if (controller.signal.aborted) {
       setMentorUiState("cancelled");
@@ -91,7 +101,10 @@ export function MentorView({ account, behaviorConfig }: { account?: any; behavio
         await saveAiReport.mutateAsync({
           accountId: account.id,
           filters: {},
-          model: outcome.model ?? "unknown",
+          feature: "mentor",
+          // Labelled like the analyst path so history can tell a local
+          // deterministic report from a provider-produced one.
+          model: outcome.deterministic ? "deterministic-local" : outcome.model ?? "unknown",
           report: outcome.report,
         });
       } catch {

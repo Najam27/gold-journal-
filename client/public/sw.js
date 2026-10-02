@@ -1,10 +1,13 @@
 // Bump on any shell/stylesheet change: the fetch handler is network-first, but a
 // stale cached bundle is what makes a shipped fix look like it never landed.
-const CACHE_NAME = "gold-journal-static-v26";
+const CACHE_NAME = "gold-journal-static-v27";
 const PRECACHE = ["/manifest.json", "/gold-journal-3d.svg"];
 
+// No skipWaiting here: the new worker must park in `waiting` so the app's
+// "Update now" banner has a worker to activate. Activating eagerly left the
+// banner with nothing to promote and the user stuck on the old bundle.
 self.addEventListener("install", event => {
-  event.waitUntil(caches.open(CACHE_NAME).then(cache => Promise.allSettled(PRECACHE.map(asset => cache.add(asset)))).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => Promise.allSettled(PRECACHE.map(asset => cache.add(asset)))));
 });
 
 self.addEventListener("activate", event => {

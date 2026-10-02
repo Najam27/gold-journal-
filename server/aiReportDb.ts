@@ -14,13 +14,16 @@ export { analysisDataFingerprint };
  * analysis for the fingerprint, and persists history so past reports remain
  * viewable.
  */
-export async function persistAiReport(userId: number, accountId: number, analysis: AnalysisResult, model: string, report: AiReport) {
+export async function persistAiReport(userId: number, accountId: number, analysis: AnalysisResult, model: string, report: AiReport, feature: "analysis" | "mentor" = "analysis") {
   const dataFingerprint = analysisDataFingerprint(analysis);
   const db = await getDb();
   if (!db) return { persisted: false as const, reportId: null, dataFingerprint };
   const manifest = buildEvidenceManifest(analysis);
-  const inserted = await db.insert(aiReports).values({ userId, accountId, analysisVersion: analysis.version, dataFingerprint, model, report, evidenceManifest: manifest }).onConflictDoNothing({ target: [aiReports.userId, aiReports.accountId, aiReports.dataFingerprint] }).returning({ id: aiReports.id });
-  const reportId = inserted[0]?.id ?? (await db.select({ id: aiReports.id }).from(aiReports).where(and(eq(aiReports.userId, userId), eq(aiReports.accountId, accountId), eq(aiReports.dataFingerprint, dataFingerprint))).limit(1))[0]?.id;
+  // The kind is part of the identity: an analyst and a mentor report over
+  // the same dataset are different reports, and neither may absorb the
+  // other's edge/experiment history.
+  const inserted = await db.insert(aiReports).values({ userId, accountId, analysisVersion: analysis.version, dataFingerprint, feature, model, report, evidenceManifest: manifest }).onConflictDoNothing({ target: [aiReports.userId, aiReports.accountId, aiReports.dataFingerprint, aiReports.feature] }).returning({ id: aiReports.id });
+  const reportId = inserted[0]?.id ?? (await db.select({ id: aiReports.id }).from(aiReports).where(and(eq(aiReports.userId, userId), eq(aiReports.accountId, accountId), eq(aiReports.dataFingerprint, dataFingerprint), eq(aiReports.feature, feature))).limit(1))[0]?.id;
   if (!reportId) throw new Error("AI report persistence did not return a report identifier.");
 
   const allEvidence = [...report.strongestEdges, ...report.weakestContexts, ...report.sessionAnalysis, ...report.timeframeAnalysis, ...report.levelAnalysis, ...report.setupAnalysis];
@@ -33,7 +36,7 @@ export async function persistAiReport(userId: number, accountId: number, analysi
 export async function listAiReports(userId: number, accountId: number, limit = 20) {
   const db = await getDb();
   if (!db) throw new Error("Supabase database is unavailable. Please retry shortly.");
-  return db.select({ id: aiReports.id, analysisVersion: aiReports.analysisVersion, dataFingerprint: aiReports.dataFingerprint, model: aiReports.model, report: aiReports.report, evidenceManifest: aiReports.evidenceManifest, createdAt: aiReports.createdAt }).from(aiReports).where(and(eq(aiReports.userId, userId), eq(aiReports.accountId, accountId))).orderBy(desc(aiReports.createdAt)).limit(limit);
+  return db.select({ id: aiReports.id, analysisVersion: aiReports.analysisVersion, dataFingerprint: aiReports.dataFingerprint, feature: aiReports.feature, model: aiReports.model, report: aiReports.report, evidenceManifest: aiReports.evidenceManifest, createdAt: aiReports.createdAt }).from(aiReports).where(and(eq(aiReports.userId, userId), eq(aiReports.accountId, accountId))).orderBy(desc(aiReports.createdAt)).limit(limit);
 }
 
 export async function listAiExperiments(userId: number, accountId: number, limit = 50) {

@@ -19,7 +19,12 @@ describe("Gold Journal MT5 EA reliability contract", () => {
   });
 
   it("keeps the three-second cadence while using bounded retry for transient HTTP failures", () => {
-    expect(source).toContain('#property version   "2.18"');
+    // The #property version must track EA_VERSION (major.minor of the full
+    // version); deriving both from the source keeps this green across
+    // releases instead of breaking on every version bump.
+    const eaVersion = source.match(/EA_VERSION = "(\d+)\.(\d+)\.\d+"/);
+    expect(eaVersion).not.toBeNull();
+    expect(source).toContain(`#property version   "${eaVersion![1]}.${eaVersion![2]}"`);
     expect(source).toContain("input int SyncSeconds = 3");
     // The transient-backoff ceiling is now a clamped EA input (default 60 s,
     // hard-capped at 900 s) instead of a magic constant.

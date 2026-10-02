@@ -846,6 +846,7 @@ describe("dual-provider routing", () => {
 describe("AI mentor feature", () => {
   it("coaches with the mentor contract and the deterministic brief, not the analyst prompt", async () => {
     const { postCalls } = stubGroq(() => providerResponse(signedReport()));
+    saveProviderSettings("groq", { apiKey: KEY, model: MODEL });
     const outcome = await analyzeJournal({ analysis, feature: "mentor" });
     expect(outcome.available).toBe(true);
     const [, init] = postCalls()[0];
@@ -860,6 +861,7 @@ describe("AI mentor feature", () => {
 
   it("never serves a cached analyst report to the mentor", async () => {
     const { postCalls } = stubGroq(() => providerResponse(signedReport()));
+    saveProviderSettings("groq", { apiKey: KEY, model: MODEL });
     const first = await analyzeJournal({ analysis, feature: "analysis" });
     expect(first.cached).toBe(false);
     const second = await analyzeJournal({ analysis, feature: "mentor" });

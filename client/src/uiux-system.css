@@ -190,6 +190,12 @@ a:focus-visible {
 .derived-status > svg { flex: 0 0 auto; color: var(--gj-gold); }
 .derived-status > span { margin-right: auto; color: var(--gj-subtext); }
 
+.gj-section-error { display: flex; gap: .9rem; margin: 1rem var(--gj-space-page); padding: 1rem 1.1rem; border: 1px solid color-mix(in srgb, var(--destructive) 40%, var(--gj-line)); border-radius: .75rem; background: color-mix(in srgb, var(--destructive) 8%, var(--gj-panel)); color: var(--gj-text); }
+.gj-section-error h3 { margin: 0 0 .25rem; font-size: .95rem; }
+.gj-section-error p { margin: 0; color: var(--gj-subtext); font-size: .8rem; }
+.gj-section-error-detail { margin: .6rem 0 0; max-height: 8rem; overflow: auto; white-space: pre-wrap; font-size: .7rem; color: var(--gj-subtext); }
+.gj-section-error-actions { display: flex; gap: .5rem; margin-top: .8rem; }
+
 /* Account-switch progress: a switch is a transaction, so it says which account
    it is moving to and which read loads first instead of showing the generic
    full-page loader that made a switch look like nothing had happened. */

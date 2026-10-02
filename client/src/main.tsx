@@ -78,6 +78,18 @@ createRoot(document.getElementById("root")!).render(
   </trpc.Provider>
 );
 
+// A deploy deletes the previous build's hashed chunks; a page still running
+// the old bundle then fails its next lazy import. Reload once (guarded, so
+// a genuinely broken build can't loop) instead of stranding the user on the
+// error screen.
+window.addEventListener("vite:preloadError", () => {
+  const KEY = "gj-chunk-reload-at";
+  const last = Number(sessionStorage.getItem(KEY) ?? 0);
+  if (Date.now() - last < 30_000) return;
+  sessionStorage.setItem(KEY, String(Date.now()));
+  window.location.reload();
+});
+
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).then(async registration => {

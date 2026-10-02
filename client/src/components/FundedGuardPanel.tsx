@@ -63,7 +63,12 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
   // balance. The trader types the true starting balance once from the firm's
   // dashboard; blank means "auto from MT5".
   const [startingBalanceOverride, setStartingBalanceOverride] = useState("");
-  const [hydrated, setHydrated] = useState(false);
+  const [hydratedAccountId, setHydratedAccountId] = useState<number | null>(null);
+  // Field values as last hydrated/saved for the current account. The persist
+  // effect compares against this so hydration itself never triggers a save.
+  const hydratedFieldsRef = useRef("");
+  const hadSavedFundedRef = useRef(false);
+  const savedSnapshotRef = useRef<{ balance: number | null; equity: number | null }>({ balance: null, equity: null });
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -94,23 +99,37 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
     },
   });
 
-  // Hydrate once from saved settings.
+  // Hydrate from the selected account's saved settings. Keyed by account:
+  // switching accounts re-hydrates, so one account's field values can never
+  // be carried into another account's saved config.
   useEffect(() => {
-    if (hydrated || !accountList.isSuccess) return;
+    if (!accountId || !accountList.isSuccess) return;
+    if (hydratedAccountId === accountId) return;
     const funded = savedGuardConfig?.funded;
-    if (funded) {
-      setSizeMode(funded.sizeMode);
-      setAccountSize(funded.accountSize != null ? String(funded.accountSize) : "");
-      setDailyPct(String(funded.dailyDrawdownPct));
-      setMaxPct(String(funded.maxDrawdownPct));
-      setDrawdownType(funded.drawdownType);
+    const next = {
+      sizeMode: funded?.sizeMode ?? "auto",
+      accountSize: funded?.accountSize != null ? String(funded.accountSize) : "",
+      dailyPct: funded ? String(funded.dailyDrawdownPct) : String(DEFAULT_DAILY_DRAWDOWN_PCT),
+      maxPct: funded ? String(funded.maxDrawdownPct) : String(DEFAULT_MAX_DRAWDOWN_PCT),
+      drawdownType: funded?.drawdownType ?? "static",
       // Older saves may lack newer fields — default to blank (auto).
-      setDayStartOverride(funded.dayStartOverride ?? "");
-      setPeakEquity(funded.peakEquity ?? "");
-      setStartingBalanceOverride(funded.startingBalanceOverride ?? "");
-    }
-    setHydrated(true);
-  }, [hydrated, accountList.isSuccess, savedGuardConfig]);
+      dayStartOverride: funded?.dayStartOverride ?? "",
+      peakEquity: funded?.peakEquity ?? "",
+      startingBalanceOverride: funded?.startingBalanceOverride ?? "",
+    };
+    setSizeMode(next.sizeMode);
+    setAccountSize(next.accountSize);
+    setDailyPct(next.dailyPct);
+    setMaxPct(next.maxPct);
+    setDrawdownType(next.drawdownType);
+    setDayStartOverride(next.dayStartOverride);
+    setPeakEquity(next.peakEquity);
+    setStartingBalanceOverride(next.startingBalanceOverride);
+    hydratedFieldsRef.current = JSON.stringify(next);
+    hadSavedFundedRef.current = Boolean(funded);
+    if (funded) savedSnapshotRef.current = { balance: funded.mt5Balance ?? null, equity: funded.mt5Equity ?? null };
+    setHydratedAccountId(accountId);
+  }, [accountId, accountList.isSuccess, savedGuardConfig, hydratedAccountId]);
 
   // MT5 snapshot: auto-fetch starting balance and current equity from the
   // live connection (the EA's summary). Balance = the account's snapshot
@@ -208,9 +227,22 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
 
   // Persist on change (debounced) so the Trade Log banner follows the guard.
   // The MT5 snapshot is saved too, so the banner can use live equity even
-  // when it cannot reach MT5 itself.
+  // when it cannot reach MT5 itself. Two guards keep this honest:
+  //  - it runs only for the account the fields were hydrated from, so an
+  //    account switch can never write the previous account's values into
+  //    the newly selected account;
+  //  - it saves only after the trader actually edits a field (or, for an
+  //    already-configured guard, when the MT5 snapshot moves) — merely
+  //    opening the tab must not arm the guard with defaults.
   useEffect(() => {
-    if (!hydrated || !accountId) return;
+    if (!accountId || hydratedAccountId !== accountId) return;
+    const fields = { sizeMode, accountSize, dailyPct, maxPct, drawdownType, dayStartOverride, peakEquity, startingBalanceOverride };
+    const fieldsJson = JSON.stringify(fields);
+    const fieldsChanged = fieldsJson !== hydratedFieldsRef.current;
+    const balance = mt5Snapshot?.balance ?? null;
+    const equity = mt5Snapshot?.equity ?? null;
+    const snapshotChanged = balance !== savedSnapshotRef.current.balance || equity !== savedSnapshotRef.current.equity;
+    if (!fieldsChanged && !(snapshotChanged && hadSavedFundedRef.current)) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     setSaveState("saving");
     saveTimer.current = setTimeout(() => {
@@ -225,10 +257,13 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
         dayStartOverride,
         peakEquity,
         startingBalanceOverride,
-        mt5Balance: mt5Snapshot?.balance ?? null,
-        mt5Equity: mt5Snapshot?.equity ?? null,
+        mt5Balance: balance,
+        mt5Equity: equity,
         snapshotAt: mt5Snapshot ? new Date().toISOString() : null,
       };
+      hydratedFieldsRef.current = fieldsJson;
+      savedSnapshotRef.current = { balance, equity };
+      hadSavedFundedRef.current = true;
       setGuardConfig.mutate({
         accountId,
         guardConfig: {
@@ -241,7 +276,7 @@ export function FundedGuardPanel({ accountId }: { accountId?: number }) {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated, accountId, sizeMode, accountSize, dailyPct, maxPct, drawdownType, dayStartOverride, peakEquity, startingBalanceOverride, mt5Snapshot?.balance, mt5Snapshot?.equity]);
+  }, [hydratedAccountId, accountId, sizeMode, accountSize, dailyPct, maxPct, drawdownType, dayStartOverride, peakEquity, startingBalanceOverride, mt5Snapshot?.balance, mt5Snapshot?.equity]);
 
   const LevelIcon =
     evaluation?.level === "breached" ? ShieldAlert

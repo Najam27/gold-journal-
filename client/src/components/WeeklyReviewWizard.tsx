@@ -59,7 +59,10 @@ export function WeeklyReviewWizard({ accountId }: { accountId: number }) {
   }, [trades, plans, baseOffset, weekShift]);
 
   const { summary } = week;
-  const saved = trpc.weeklyReviews.list.useQuery({ accountId, limit: 12 });
+  // Gated like the journal read above: accountId 0 is a caller-side
+  // placeholder before an account resolves, and querying with it only
+  // produces a guaranteed server rejection.
+  const saved = trpc.weeklyReviews.list.useQuery({ accountId, limit: 12 }, { enabled: Boolean(accountId) });
   // Never page into the future: the current week (offset 0) is the newest viewable.
   const canGoNewer = baseOffset + weekShift < 0;
 
