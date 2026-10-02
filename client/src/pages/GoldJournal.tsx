@@ -97,23 +97,15 @@ function readFileAsDataUrl(file: File) {
     reader.readAsDataURL(file);
   });
 }
-import { PlanExecutionEditor } from "@/components/PlanExecutionEditor";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { TradeLogWithViewer } from "@/components/TradeLogWithViewer";
 import { TradeDialogWithCustomOptions } from "@/components/TradeDialogWithCustomOptions";
 import { QuickTradeDialog } from "@/components/QuickTradeDialog";
 import { StreakPanel } from "@/components/StreakPanel";
 import { GuardBanner } from "@/components/GuardBanner";
-import { PnlCalendarWithWeeks } from "@/components/PnlCalendarWithWeeks";
-import { FlexibleGoalsView } from "@/components/FlexibleGoalsView";
-import { MentorView } from "@/components/MentorView";
-import { TraderDevelopmentPanel } from "@/components/TraderDevelopmentPanel";
 import { SessionRecovery } from "@/components/SessionRecovery";
-import { Mt5LiveView } from "@/components/Mt5LiveView";
 import { UserAiProviderSettings } from "@/components/UserAiProviderSettings";
 import { Field, RiskMetric } from "@/components/journalPrimitives";
-import { RiskCalculatorPanel } from "@/components/RiskCalculatorPanel";
-import { MissedTradesView } from "@/components/MissedTradesView";
 import { GoldCanvas } from "@/components/three/GoldCanvas";
 import { useGsapTimeline } from "@/lib/motion/gsap";
 import { gsap } from "gsap";
@@ -167,6 +159,32 @@ const AnalysisDashboardLazy = React.lazy(async () => ({
 }));
 const WeeklyReviewWizardLazy = React.lazy(async () => ({
   default: (await import("@/components/WeeklyReviewWizard")).WeeklyReviewWizard,
+}));
+// Heavy views load on first visit instead of weighing down the first paint:
+// the Trade Log opens fast and the rest stream in behind it.
+const PlanExecutionEditorLazy = React.lazy(async () => ({
+  default: (await import("@/components/PlanExecutionEditor")).PlanExecutionEditor,
+}));
+const PnlCalendarWithWeeksLazy = React.lazy(async () => ({
+  default: (await import("@/components/PnlCalendarWithWeeks")).PnlCalendarWithWeeks,
+}));
+const FlexibleGoalsViewLazy = React.lazy(async () => ({
+  default: (await import("@/components/FlexibleGoalsView")).FlexibleGoalsView,
+}));
+const MentorViewLazy = React.lazy(async () => ({
+  default: (await import("@/components/MentorView")).MentorView,
+}));
+const TraderDevelopmentPanelLazy = React.lazy(async () => ({
+  default: (await import("@/components/TraderDevelopmentPanel")).TraderDevelopmentPanel,
+}));
+const Mt5LiveViewLazy = React.lazy(async () => ({
+  default: (await import("@/components/Mt5LiveView")).Mt5LiveView,
+}));
+const RiskCalculatorPanelLazy = React.lazy(async () => ({
+  default: (await import("@/components/RiskCalculatorPanel")).RiskCalculatorPanel,
+}));
+const MissedTradesViewLazy = React.lazy(async () => ({
+  default: (await import("@/components/MissedTradesView")).MissedTradesView,
 }));
 type View =
   | "trades"
@@ -578,7 +596,10 @@ export default function GoldJournal() {
   // sub-second cadence, so it polls slowly and only while a view shows the
   // derived data. MT5 Live owns its own fast workspace/history polls.
   const journalRefetchInterval = (() => {
-    if (view === "trades" || view === "mt5") return 20_000;
+    // A 20s full-payload refetch re-rendered the whole workspace four times a
+    // minute and made the app feel sticky; the paginated Trade Log list keeps
+    // its own faster cadence, so the composite read can breathe.
+    if (view === "trades" || view === "mt5") return 60_000;
     if (view === "goals" || view === "psychology" || view === "calendar") return 120_000;
     return false;
   })();
@@ -792,14 +813,17 @@ export default function GoldJournal() {
     profileReady,
   ]);
   useEffect(() => {
-    if (
-      previousAuthUserId.current !== undefined &&
-      previousAuthUserId.current !== authUserId
-    ) {
+    const previous = previousAuthUserId.current;
+    previousAuthUserId.current = authUserId;
+    // Only a change between two signed-in users (or a sign-out) may clear the
+    // remembered account. The null -> user transition at boot is the same user
+    // returning, NOT a switch: clearing there deleted the stored choice on
+    // every reload and dumped the app on the newest account instead of the
+    // one the user left open.
+    if (previous && previous !== authUserId) {
       setAccountId(undefined);
       setSelectedAccountId(undefined);
     }
-    previousAuthUserId.current = authUserId;
   }, [authUserId]);
   // The journal payload is the SERVER payload. There is no local snapshot to
   // merge into it and no local queue to overlay: if a trade is not in the
@@ -1026,7 +1050,11 @@ export default function GoldJournal() {
         reward: source.reward ?? "",
         pnl: source.pnl ?? "",
         patienceScore: source.patienceScore ? String(source.patienceScore) : "",
-        mt5Ticket: source.mt5Ticket ?? "",
+        // Duplicating a journal trade must NOT carry its MT5 ticket over: the
+        // server refuses to journal one ticket twice, so every duplicate of
+        // an MT5 trade failed to save. The MT5 Live "journal now" prefill has
+        // no journal id yet and keeps its ticket — that link is the point.
+        mt5Ticket: source.id ? "" : (source.mt5Ticket ?? ""),
       });
     setEditing(undefined);
     setTradeForm(next);
@@ -1430,11 +1458,11 @@ export default function GoldJournal() {
     );
   if (authGate === "login") return <LoginScreen />;
   const TradeLog = TradeLogWithViewer; // server-backed Trade Log
-  const MissedView = MissedTradesView;
-  const CalendarView = PnlCalendarWithWeeks;
+  const MissedView = MissedTradesViewLazy;
+  const CalendarView = PnlCalendarWithWeeksLazy;
   const TradeDialog = TradeDialogWithCustomOptions;
-  const PlanView = PlanExecutionEditor;
-  const GoalsView = FlexibleGoalsView;
+  const PlanView = PlanExecutionEditorLazy;
+  const GoalsView = FlexibleGoalsViewLazy;
   const optionsPanel = (
     <>
       <OptionsView
@@ -1667,11 +1695,13 @@ export default function GoldJournal() {
               </>
             )}
             {view === "missed" && (
+              <React.Suspense fallback={<Loading />}>
               <MissedView
                 rows={data?.skippedTrades ?? []}
                 account={account}
                 refresh={refresh}
               />
+              </React.Suspense>
             )}
             {view === "analysis" && (
               <div className="view-hero-3d">
@@ -1687,6 +1717,7 @@ export default function GoldJournal() {
               </React.Suspense>
             )}
             {view === "goals" && (
+              <React.Suspense fallback={<Loading />}>
               <GoalsView
                 account={account}
                 goals={data?.goals ?? []}
@@ -1731,6 +1762,7 @@ export default function GoldJournal() {
                   refresh();
                 }}
               />
+              </React.Suspense>
             )}
             {view === "psychology" && (
               <section className="psychology-workspace">
@@ -1742,7 +1774,8 @@ export default function GoldJournal() {
                   maxTradesPerDay={(behaviorConfig as any)?.maxTradesPerDay ?? null}
                   computedAdherencePct={(development as any)?.planAdherence ?? null}
                 />
-                <TraderDevelopmentPanel
+                <React.Suspense fallback={<Loading />}>
+                <TraderDevelopmentPanelLazy
                   report={development}
                   trades={trades as any[]}
                   identityStatement={(data as any)?.traderProfile?.identityStatement ?? ""}
@@ -1757,20 +1790,24 @@ export default function GoldJournal() {
                     }
                   }}
                 />
+                </React.Suspense>
               </section>
             )}
             {view === "calendar" && (
+              <React.Suspense fallback={<Loading />}>
               <CalendarView
                 trades={trades}
                 plans={data?.dailyPlans ?? []}
                 behaviorConfig={behaviorConfig}
                 onEdit={openEdit}
               />
+              </React.Suspense>
             )}
             {view === "plan" && (
               // The plan desk reviews the session it planned, so it receives
               // today's trades and the saved behavioural configuration, plus a
               // route into the option manager that owns the trading rules.
+              <React.Suspense fallback={<Loading />}>
               <PlanView
                 account={account}
                 plans={data?.dailyPlans ?? []}
@@ -1779,21 +1816,25 @@ export default function GoldJournal() {
                 onManageRules={() => setView("options")}
                 onSaved={refresh}
               />
+              </React.Suspense>
             )}
             {view === "mentor" && (
               <div className="view-hero-3d ai-surface-pad">
                 <Premium3DBackground tone="violet" className="view-hero-3d-canvas" />
-                <MentorView
-                  trades={trades}
-                  stats={stats}
-                  account={account}
-                  user={user}
-                  behaviorConfig={behaviorConfig}
-                />
+                <React.Suspense fallback={<Loading />}>
+                  <MentorViewLazy
+                    trades={trades}
+                    stats={stats}
+                    account={account}
+                    user={user}
+                    behaviorConfig={behaviorConfig}
+                  />
+                </React.Suspense>
               </div>
             )}
             {view === "mt5" && (
-              <Mt5LiveView
+              <React.Suspense fallback={<Loading />}>
+              <Mt5LiveViewLazy
                 account={account}
                 accounts={
                   ownedAccounts.length ? ownedAccounts : (data?.accounts ?? [])
@@ -1812,8 +1853,13 @@ export default function GoldJournal() {
                 }
                 onSwitchAccount={selectAccount}
               />
+              </React.Suspense>
             )}
-            {view === "risk" && <RiskCalculatorPanel />}
+            {view === "risk" && (
+              <React.Suspense fallback={<Loading />}>
+                <RiskCalculatorPanelLazy />
+              </React.Suspense>
+            )}
           </div>
         )}
       </main>

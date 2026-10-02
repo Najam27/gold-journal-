@@ -11,10 +11,10 @@ describe("Gold Journal sidebar routes", () => {
   it("keeps MT5 Live and Risk Calculator as distinct navigation destinations", () => {
     expect(source).toContain('{ id: "mt5", label: "MT5 Live"');
     expect(source).toContain('{ id: "risk", label: "Risk Calculator"');
-    expect(source).toMatch(/view === "mt5" &&\s*\(\s*<Mt5LiveView/);
-    expect(source).toMatch(/view === "risk" &&\s*<RiskCalculatorPanel/);
-    expect(source).not.toMatch(/view === "mt5" &&\s*<RiskCalculatorPanel/);
-    expect(source).not.toMatch(/view === "risk" &&\s*\(\s*<Mt5LiveView/);
+    expect(source).toMatch(/view === "mt5" &&\s*\(\s*<React\.Suspense[\s\S]{0,200}?<Mt5LiveViewLazy/);
+    expect(source).toMatch(/view === "risk" &&\s*\(\s*<React\.Suspense[\s\S]{0,200}?<RiskCalculatorPanelLazy/);
+    expect(source).not.toMatch(/view === "mt5" &&\s*\(\s*<React\.Suspense[\s\S]{0,200}?<RiskCalculatorPanelLazy/);
+    expect(source).not.toMatch(/view === "risk" &&\s*\(\s*<React\.Suspense[\s\S]{0,200}?<Mt5LiveViewLazy/);
   });
 
   it("gives trader-development psychology its own destination instead of nesting it in Goals", () => {

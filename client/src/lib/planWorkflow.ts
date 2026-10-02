@@ -281,6 +281,28 @@ export function draftFromSavedPlan(plan: Record<string, unknown> | null | undefi
 }
 
 /**
+ * True when a draft carries anything beyond the five-field quick plan, so the
+ * editor can open its "More planning details" section instead of hiding saved
+ * work behind a collapsed toggle.
+ */
+export function hasAdvancedPlanningContent(draft: PlanDraft): boolean {
+  return Boolean(
+    draft.sessionFocus.length ||
+    draft.eventRisk.trim() ||
+    draft.longScenario.trim() ||
+    draft.shortScenario.trim() ||
+    draft.noTradeCondition.trim() ||
+    draft.sizingPlan.trim() ||
+    draft.marketContext.trim() ||
+    draft.invalidationLevel.trim() ||
+    draft.planNotes.trim() ||
+    draft.psychologyRisk.trim() ||
+    draft.confidenceLevel != null ||
+    draft.rulesPlanned.some(rule => rule.checked),
+  );
+}
+
+/**
  * Builds today's editable starting point from an earlier session.
  *
  * The source object is only read. Planning fields carry over, every result and

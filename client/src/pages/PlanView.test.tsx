@@ -213,6 +213,7 @@ describe("PlanExecutionEditor", () => {
 
   it("prepares tomorrow from today's promised focus without copying the review", () => {
     renderEditor({ plans: [todayPlan({ tomorrowFocus: "Wait for confirmation" })] });
+    fireEvent.click(screen.getByRole("tab", { name: /Review/ }));
     fireEvent.click(screen.getByRole("button", { name: /Prepare tomorrow/ }));
     expect((screen.getByLabelText("Plan date") as HTMLInputElement).value).toBe(addPktDays(today, 1));
     expect(screen.getByText(/Psychology check-in reset/)).toBeTruthy();
@@ -241,6 +242,7 @@ describe("PlanExecutionEditor", () => {
       { tradeDate: new Date(), result: "LOSS", pnl: -60, risk: 100, session: "New York", planStatus: "PLANNED", setupQuality: "A", mistake: "Moved SL" },
     ];
     const { container } = renderEditor({ plans: [todayPlan()], trades });
+    fireEvent.click(screen.getByRole("tab", { name: /Review/ }));
     expect(container.textContent).toMatch(/Plan adherence/);
     expect(container.textContent).toMatch(/3 trades/);
     expect(container.textContent).toMatch(/1 unplanned/);
@@ -256,6 +258,7 @@ describe("PlanExecutionEditor", () => {
 
   it("records the behavioural check-in and the post-session review through the behavioural loop", async () => {
     renderEditor({ plans: [todayPlan({ behavioralObjectiveStatus: null, psychologyTriggers: null, postSessionBehavioralReview: null })] });
+    fireEvent.click(screen.getByRole("tab", { name: /Review/ }));
     fireEvent.click(screen.getByRole("button", { name: /Revenge impulse/ }));
     fireEvent.click(screen.getByRole("button", { name: "Save review" }));
     await waitFor(() => expect(mocks.review).toHaveBeenCalledWith(expect.objectContaining({ accountId: 3, psychologyTriggers: ["REVENGE"] })));

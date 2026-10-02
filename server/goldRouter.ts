@@ -502,10 +502,16 @@ export const goldRouter = router({
           // later edit or delete has to address.
           if (existing[0]) return { id: existing[0].id, replayed: true, trade: toSafeTrade(existing[0]) };
         }
+        let linkedPosition: { mfeUsd: unknown; maeUsd: unknown } | undefined;
         if (input.mt5Ticket) {
-          const linked = await db.select({ id: mt5LivePositions.id }).from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, input.accountId), eq(mt5LivePositions.ticket, BigInt(input.mt5Ticket)), eq(mt5LivePositions.status, "CLOSED"))).limit(1);
+          const linked = await db.select({ id: mt5LivePositions.id, mfeUsd: mt5LivePositions.mfeUsd, maeUsd: mt5LivePositions.maeUsd }).from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, input.accountId), eq(mt5LivePositions.ticket, BigInt(input.mt5Ticket)), eq(mt5LivePositions.status, "CLOSED"))).limit(1);
           if (!linked[0]) throw new Error("The selected MT5 ticket is not an unjournaled closed position for this account.");
+          linkedPosition = linked[0];
         }
+        // Excursions auto-detected from the floating P&L sampled while the
+        // position was open fill the trade when the user did not type them.
+        const autoMfe = input.mfe ?? (linkedPosition?.mfeUsd == null ? null : Number(linkedPosition.mfeUsd));
+        const autoMae = input.mae ?? (linkedPosition?.maeUsd == null ? null : Number(linkedPosition.maeUsd));
         const screenshot = resolveScreenshotForWrite(ctx.user.openId, input.accountId, input);
         // The outcome label is always derived from the signed P&L (OPEN is
         // preserved for open positions). A journal that lets WIN disagree with
@@ -520,7 +526,7 @@ export const goldRouter = router({
           tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality, patienceScore: input.patienceScore,
           planFollowScore: input.planFollowScore, quickLogged: input.quickLogged ?? false,
           entryPrice: input.entryPrice?.toFixed(6) ?? null, slPrice: input.slPrice?.toFixed(6) ?? null, tpPrice: input.tpPrice?.toFixed(6) ?? null,
-          mfe: input.mfe?.toFixed(2) ?? null, mae: input.mae?.toFixed(2) ?? null,
+          mfe: autoMfe?.toFixed(2) ?? null, mae: autoMae?.toFixed(2) ?? null,
           risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null, pnl: input.pnl.toFixed(2),
           notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
           planStatus: input.planStatus, planChecklist: input.planChecklist,

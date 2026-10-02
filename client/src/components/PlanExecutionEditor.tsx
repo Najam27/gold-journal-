@@ -28,6 +28,7 @@ import {
   draftAsPlanSource,
   draftFromSavedPlan,
   emptyPlanDraft,
+  hasAdvancedPlanningContent,
   findPreviousPlan,
   dayKey,
   planSessionStatus,
@@ -152,7 +153,12 @@ export function PlanExecutionEditor({ account, plans = [], trades = [], behavior
   useEffect(() => {
     if (loadedRef.current === loadKey) return;
     loadedRef.current = loadKey;
-    setDraft(draftFromSavedPlan(selectedPlan, planDate));
+    const next = draftFromSavedPlan(selectedPlan, planDate);
+    setDraft(next);
+    // A saved plan that carries detailed planning opens with those fields
+    // visible; hiding them behind a collapsed toggle made saved work look
+    // missing.
+    setShowAdvanced(hasAdvancedPlanningContent(next));
     setCopySource(null);
     setNotice(null);
   }, [loadKey, planDate, selectedPlan]);
@@ -257,6 +263,7 @@ export function PlanExecutionEditor({ account, plans = [], trades = [], behavior
     loadedRef.current = `${targetDay}:${existing?.id ?? "new"}`;
     setPlanDate(targetDay);
     setDraft(copied);
+    setShowAdvanced(hasAdvancedPlanningContent(copied));
     setCopySource({ day: sourceDay, draft: copied });
     setNotice({
       tone: "info",

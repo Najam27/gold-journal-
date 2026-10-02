@@ -338,7 +338,7 @@ export async function recordMt5HistoryRejections(connectionId: number, rejected:
 
 type LiveBase = { ticket: bigint; symbol: string; direction: "BUY" | "SELL"; lots: number; openPrice: number; slPrice: number | null; tpPrice: number | null; riskUsd: number; rewardUsd: number; rrRatio: number; openTime: Date };
 
-type SyncedMt5Position = LiveBase & { pnl: number; result: "WIN" | "LOSS" | "BREAK_EVEN" | "OPEN"; tradeTime: Date; closeTime?: Date | null };
+type SyncedMt5Position = LiveBase & { pnl: number; result: "WIN" | "LOSS" | "BREAK_EVEN" | "OPEN"; tradeTime: Date; closeTime?: Date | null; mfeUsd?: number | null; maeUsd?: number | null };
 
 async function syncMt5PositionToTradeLog(userId: number, accountId: number, position: SyncedMt5Position, database?: any) {
   const db = database ?? await requireDb();
@@ -366,8 +366,10 @@ async function syncMt5PositionToTradeLog(userId: number, accountId: number, posi
     entryPrice: position.openPrice.toFixed(6),
     slPrice: position.slPrice?.toFixed(6) ?? null,
     tpPrice: position.tpPrice?.toFixed(6) ?? null,
-    mfe: null,
-    mae: null,
+    // Auto-detected from the floating P&L sampled while the position was
+    // open; a manually edited trade keeps whatever the user saved.
+    mfe: position.mfeUsd != null ? position.mfeUsd.toFixed(2) : null,
+    mae: position.maeUsd != null ? position.maeUsd.toFixed(2) : null,
     risk: position.riskUsd.toFixed(2),
     reward: position.rewardUsd.toFixed(2),
     pnl: position.pnl.toFixed(2),
@@ -384,7 +386,10 @@ async function syncMt5PositionToTradeLog(userId: number, accountId: number, posi
   // On Supabase (PostgreSQL) the conflict target is (accountId, mt5Ticket); the
   // MySQL branch is retained for source-compatible unit harnesses only.
   const query = db.insert(trades).values(record) as any;
-  const set = { tradeDate: record.tradeDate, session: record.session, direction: record.direction, result: record.result, risk: record.risk, reward: record.reward, pnl: record.pnl, openTime: record.openTime, closeTime: record.closeTime, entryPrice: record.entryPrice, slPrice: record.slPrice, tpPrice: record.tpPrice };
+  // While the position is still open its excursions keep moving, so the
+  // journal row tracks them; once closed, the terminal values stay and a
+  // manual edit is never overwritten by a later sync.
+  const set = { tradeDate: record.tradeDate, session: record.session, direction: record.direction, result: record.result, risk: record.risk, reward: record.reward, pnl: record.pnl, openTime: record.openTime, closeTime: record.closeTime, entryPrice: record.entryPrice, slPrice: record.slPrice, tpPrice: record.tpPrice, ...(record.result === "OPEN" ? { mfe: record.mfe, mae: record.mae } : {}) };
   if (typeof query.onConflictDoUpdate === "function") await query.onConflictDoUpdate({ target: [trades.accountId, trades.mt5Ticket], set });
   else await query.onDuplicateKeyUpdate({ set });
 }
@@ -444,6 +449,8 @@ export async function syncStoredMt5PositionsToTradeLog(userId: number, accountId
       result: position.status === "OPEN" ? "OPEN" : ((position.result as "WIN" | "LOSS" | "BREAK_EVEN" | null) ?? "BREAK_EVEN"),
       tradeTime: position.status === "OPEN" ? position.openTime : (position.closeTime ?? position.openTime),
       closeTime: position.status === "OPEN" ? null : position.closeTime,
+      mfeUsd: position.mfeUsd == null ? null : Number(position.mfeUsd),
+      maeUsd: position.maeUsd == null ? null : Number(position.maeUsd),
     });
     synchronized += 1;
   }
@@ -467,7 +474,36 @@ export async function upsertMt5OpenPositionBatch(userId: number, accountId: numb
     session: pktSession(value.openTime), tradeTime: value.openTime.toISOString(), pnl: value.floatingPnl.toFixed(2),
   }));
   if (!payloads.length) return 0;
-  return syncMt5OpenBatchAtomic(userId, accountId, payloads);
+  const synchronized = await syncMt5OpenBatchAtomic(userId, accountId, payloads);
+  // Excursion tracking is best-effort: the position sync already committed,
+  // so a failed fold must never fail the ingest — the EA would retry a sync
+  // that actually succeeded.
+  await foldPositionExcursions(db, accountId, payloads).catch(() => undefined);
+  return synchronized;
+}
+
+/**
+ * Folds each open-position floating P&L sample into the position's stored
+ * excursions (highest unrealized gain / worst unrealized loss observed while
+ * open), so a later journaled trade carries its real MFE/MAE instead of the
+ * trader typing them from memory. One read for the batch, then a write only
+ * for positions whose extremes actually moved.
+ */
+async function foldPositionExcursions(db: Awaited<ReturnType<typeof requireDb>>, accountId: number, payloads: Array<{ ticket: string; floatingPnl: string }>) {
+  const tickets = payloads.map(payload => payload.ticket);
+  const chunks = chunkMt5TicketFilters(tickets);
+  const storedRows = await Promise.all(chunks.map(chunk => db.select({ ticket: mt5LivePositions.ticket, mfeUsd: mt5LivePositions.mfeUsd, maeUsd: mt5LivePositions.maeUsd }).from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, accountId), or(...chunk.map(ticket => eq(mt5LivePositions.ticket, BigInt(ticket))))))));
+  const stored = new Map(storedRows.flat().filter(row => row?.ticket != null).map(row => [row.ticket.toString(), row]));
+  await Promise.all(payloads.map(async payload => {
+    const row = stored.get(payload.ticket);
+    if (!row) return;
+    const sample = Number(payload.floatingPnl);
+    if (!Number.isFinite(sample)) return;
+    const mfe = row.mfeUsd == null ? sample : Math.max(Number(row.mfeUsd), sample);
+    const mae = row.maeUsd == null ? sample : Math.min(Number(row.maeUsd), sample);
+    if (row.mfeUsd != null && Number(row.mfeUsd) === mfe && row.maeUsd != null && Number(row.maeUsd) === mae) return;
+    await db.update(mt5LivePositions).set({ mfeUsd: mfe.toFixed(2), maeUsd: mae.toFixed(2) }).where(and(eq(mt5LivePositions.accountId, accountId), eq(mt5LivePositions.ticket, BigInt(payload.ticket))));
+  }));
 }
 
 export async function upsertMt5ClosedPosition(userId: number, accountId: number, value: LiveBase & { closePrice: number; realizedPnl: number; result: "WIN" | "LOSS" | "BREAK_EVEN"; closeTime: Date }) {

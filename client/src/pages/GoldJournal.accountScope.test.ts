@@ -216,7 +216,7 @@ describe("Gold Journal account switching", () => {
     // journal.get is a nine-query composite read; polling it every 2.5 s was the
     // main cause of the sluggish dashboard.
     expect(source).toMatch(/journal\.get\.useQuery\(queryInput, \{[\s\S]*?refetchInterval: journalRefetchInterval/);
-    expect(source).toMatch(/if \(view === "trades" \|\| view === "mt5"\) return 20_000;/);
+    expect(source).toMatch(/if \(view === "trades" \|\| view === "mt5"\) return 60_000;/);
     expect(source).toMatch(/mt5\.workspace\.useQuery[\s\S]*?refetchInterval: view === "mt5" \? 2_500 : view === "trades" \? 10_000 : false/);
     expect(source).toMatch(/trpc\.trades\.list\.useQuery\(tradeListInput!, \{[\s\S]*?refetchInterval: view === "trades" \? 10_000 : false/);
     expect(source).toContain("staleTime: 5_000");
