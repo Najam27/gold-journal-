@@ -39,7 +39,27 @@ describe("Gold Journal sidebar routes", () => {
 
   it("keeps Psychology reachable from the phone bar as well as the sidebar", () => {
     expect(source).toContain('const mobileNavIds: View[] = ["trades", "analysis", "goals", "psychology", "calendar", "mt5"];');
-    expect(source).toMatch(/mobileNavIds\s*\.map\(id => navItems\.find/);
+    expect(source).toMatch(/ids\s*\.map\(id => source\.find/);
     expect(source).not.toContain("navItems.slice(0, 5)");
+  });
+
+  it("gives Testing its own sidebar workspace, separate from Live", () => {
+    // Testing nav is a distinct list: 3 destinations, none shared with Live's
+    // MT5/Psychology/Goals/etc.
+    expect(source).toContain('{ id: "trades", label: "Testing Trade Log"');
+    expect(source).toContain('{ id: "analysis", label: "Testing Analysis"');
+    expect(source).toContain('{ id: "calendar", label: "Testing Calendar"');
+    expect(source).toContain('const testingMobileNavIds: View[] = ["trades", "analysis", "calendar"];');
+    // The sidebar picks its items from the mode.
+    expect(source).toMatch(/const items = isTesting \? testingNavItems : navItems;/);
+    // The sidebar carries the primary mode switcher.
+    expect(source).toContain('className="sidebar-mode-switch"');
+    expect(source).toContain('onClick={() => onTradeEnv("LIVE")}');
+    expect(source).toContain('onClick={() => onTradeEnv("TESTING")}');
+    // Testing gets its own brand and visual identity.
+    expect(source).toContain('<strong>{isTesting ? "Testing Lab" : "Gold Journal"}</strong>');
+    expect(source).toContain('${isTesting ? "is-testing" : ""}');
+    // A mode switch always lands on the Trade Log (safe in both workspaces).
+    expect(source).toMatch(/setTradeEnv = \(env: TradeEnvironment\) => \{[\s\S]{0,400}?setView\("trades"\)/);
   });
 });

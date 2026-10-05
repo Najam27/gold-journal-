@@ -271,9 +271,21 @@ const navItems: { id: View; label: string; icon: typeof BookOpen }[] = [
   { id: "risk", label: "Risk Calculator", icon: CircleDollarSign },
   { id: "options", label: "Options", icon: Settings2 },
 ];
+/**
+ * Testing Mode is a completely separate workspace: its own sidebar, its own
+ * navigation, its own views. Live and Testing never share a nav item — the
+ * sidebar itself changes when the mode changes, so there is no way to be
+ * "stuck" in one mode's navigation.
+ */
+const testingNavItems: { id: View; label: string; icon: typeof BookOpen }[] = [
+  { id: "trades", label: "Testing Trade Log", icon: BookOpen },
+  { id: "analysis", label: "Testing Analysis", icon: BarChart3 },
+  { id: "calendar", label: "Testing Calendar", icon: CalendarDays },
+];
 // The phone bottom bar keeps the six destinations a trader opens mid-session.
 // Every other view stays reachable from the sidebar drawer.
 const mobileNavIds: View[] = ["trades", "analysis", "goals", "psychology", "calendar", "mt5"];
+const testingMobileNavIds: View[] = ["trades", "analysis", "calendar"];
 export const JOURNAL_RETRY_EVENT = "gold-journal:retry";
 const NAV_GROUP_LABELS: Record<string, string> = { trades: "Journal", missed: "Journal", analysis: "Journal", review: "Journal", calendar: "Journal", goals: "Discipline", psychology: "Discipline", plan: "Discipline", mentor: "Intelligence", mt5: "Intelligence", risk: "Intelligence", options: "Workspace" };
 const isJournalView = (value: unknown): value is View =>
@@ -577,8 +589,14 @@ export default function GoldJournal() {
     }
   });
   const setTradeEnv = (env: TradeEnvironment) => {
+    if (env === tradeEnv) return;
     setTradeEnvState(env);
     setTradePage(1);
+    // A mode switch is a workspace switch: land on the Trade Log, which exists
+    // in both modes. This also guarantees you can never be stranded on a
+    // Live-only view (MT5, Psychology, …) while in Testing.
+    setView("trades");
+    setMobileNav(false);
     try {
       localStorage.setItem("gj:tradeEnv", env);
     } catch {
@@ -1605,6 +1623,8 @@ export default function GoldJournal() {
         onLogout={logout}
         onInstall={requestInstall}
         onAccount={selectAccount}
+        tradeEnv={tradeEnv}
+        onTradeEnv={setTradeEnv}
       />
       <main className="gj-main">
         <MobileTopbar
@@ -1962,7 +1982,7 @@ export default function GoldJournal() {
           </div>
         )}
       </main>
-      <MobileNav active={view} onView={setView} />
+      <MobileNav active={view} onView={setView} tradeEnv={tradeEnv} />
       <AccountRenameControl />
       <OptionListManager />
       <BulkPdfExporter />
@@ -2046,8 +2066,13 @@ function AppSidebar({
   onLogout,
   onInstall,
   onAccount,
+  tradeEnv,
+  onTradeEnv,
 }: any) {
   const broker = mt5Summary;
+  const isTesting = tradeEnv === "TESTING";
+  // Testing is its own workspace: own brand, own nav, own destinations.
+  const items = isTesting ? testingNavItems : navItems;
   const hasBrokerBalance = broker?.balance != null;
   /**
    * Drawer geometry is asserted inline.
@@ -2076,15 +2101,16 @@ function AppSidebar({
   return (
     <>
       <aside
-        className={`gj-sidebar ${open ? "is-open" : ""} ${collapsed ? "is-collapsed" : ""}`}
+        className={`gj-sidebar ${open ? "is-open" : ""} ${collapsed ? "is-collapsed" : ""} ${isTesting ? "is-testing" : ""}`}
         data-nav={open ? "open" : "closed"}
+        data-env={tradeEnv}
         style={drawerStyle}
       >
         <div className="sidebar-brand">
           <GoldMark />
           <div className="brand-copy">
-            <strong>Gold Journal</strong>
-            <span>TRADE WITH INTENT</span>
+            <strong>{isTesting ? "Testing Lab" : "Gold Journal"}</strong>
+            <span>{isTesting ? "FORWARD TESTING" : "TRADE WITH INTENT"}</span>
           </div>
           <button className="collapse-button desktop-only" onClick={onCollapse}>
             {collapsed ? (
@@ -2103,6 +2129,30 @@ function AppSidebar({
             <X size={17} />
           </button>
         </div>
+        <div className="sidebar-mode-switch">
+          <p>{isTesting ? "TESTING MODE" : "JOURNAL MODE"}</p>
+          <div className="mode-switch-buttons" role="group" aria-label="Journal mode">
+            <button
+              type="button"
+              className={tradeEnv === "LIVE" ? "active" : ""}
+              aria-pressed={tradeEnv === "LIVE"}
+              onClick={() => onTradeEnv("LIVE")}
+            >
+              Live
+            </button>
+            <button
+              type="button"
+              className={tradeEnv === "TESTING" ? "active" : ""}
+              aria-pressed={tradeEnv === "TESTING"}
+              onClick={() => onTradeEnv("TESTING")}
+            >
+              Testing
+            </button>
+          </div>
+          {isTesting && (
+            <span className="mode-switch-hint">Pips · manual trades · no MT5</span>
+          )}
+        </div>
         <div className="account-switcher">
           <p>ACTIVE ACCOUNT</p>
           <select
@@ -2118,7 +2168,7 @@ function AppSidebar({
           <ChevronDown size={15} />
         </div>
         <nav className="sidebar-nav">
-          {navItems.map(item => {
+          {items.map(item => {
             const Icon = item.icon;
             return (
               <button
@@ -2243,15 +2293,20 @@ function PageHeader({ view, online, onNew, account, accounts, onAccount, tradeEn
 function MobileNav({
   active,
   onView,
+  tradeEnv,
 }: {
   active: View;
   onView: (view: View) => void;
+  tradeEnv?: TradeEnvironment;
 }) {
-  const items = mobileNavIds
-    .map(id => navItems.find(item => item.id === id))
+  const isTesting = tradeEnv === "TESTING";
+  const ids = isTesting ? testingMobileNavIds : mobileNavIds;
+  const source = isTesting ? testingNavItems : navItems;
+  const items = ids
+    .map(id => source.find(item => item.id === id))
     .filter((item): item is (typeof navItems)[number] => Boolean(item));
   return (
-    <nav className="mobile-bottom-nav">
+    <nav className={`mobile-bottom-nav${isTesting ? " is-testing" : ""}`}>
       {items.map(item => {
         const Icon = item.icon;
         return (
@@ -2261,7 +2316,7 @@ function MobileNav({
             onClick={() => onView(item.id)}
           >
             <Icon size={18} />
-            <span>{item.label.replace(" Trades", "")}</span>
+            <span>{item.label.replace(" Trades", "").replace("Testing ", "")}</span>
           </button>
         );
       })}

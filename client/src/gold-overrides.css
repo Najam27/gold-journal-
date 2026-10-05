@@ -101,3 +101,34 @@
 .trade-dialog .upload-box.evidence-existing img { width: 96px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid var(--gj-line); }
 .trade-dialog .upload-box.evidence-removed { border-color: color-mix(in srgb, #e0554f 55%, var(--gj-line)); }
 .trade-dialog .upload-box .evidence-actions { display: flex; gap: 8px; margin-left: auto; align-items: center; }
+
+/* --- LIVE | TESTING mode switching -------------------------------------------------
+   The header switch was shipping without styles; the sidebar carries the primary
+   mode switcher; the Testing workspace gets its own amber identity so the two
+   modes are unmistakable at a glance. */
+.trade-env-switch { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--gj-line); border-radius: 999px; background: var(--gj-panel-2); }
+.trade-env-switch button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border: 0; border-radius: 999px; background: transparent; color: var(--gj-dim); font-size: 11px; font-weight: 800; letter-spacing: .08em; cursor: pointer; transition: all 160ms var(--ease-out); }
+.trade-env-switch button:hover { color: var(--gj-text); }
+.trade-env-switch button.active[data-env="LIVE"] { background: linear-gradient(135deg, var(--gj-gold), color-mix(in srgb, var(--gj-gold) 70%, white)); color: #1a1206; box-shadow: 0 2px 8px color-mix(in srgb, var(--gj-gold) 40%, transparent); }
+.trade-env-switch button.active[data-env="TESTING"] { background: linear-gradient(135deg, #f59e0b, #d97706); color: #1a1206; box-shadow: 0 2px 8px rgba(245,158,11,.4); }
+.trade-env-switch--compact button { padding: 5px 10px; font-size: 10px; }
+.trade-env-banner { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; padding: 10px 14px; border: 1px solid color-mix(in srgb, #f59e0b 45%, var(--gj-line)); border-radius: 10px; background: color-mix(in srgb, #f59e0b 10%, var(--gj-panel-2)); color: var(--gj-text); font-size: 12px; }
+.trade-env-banner svg { flex: 0 0 auto; color: #f59e0b; }
+/* Sidebar mode switcher: the primary, always-visible LIVE | TESTING control. */
+.sidebar-mode-switch { margin: 4px 12px 8px; padding: 10px 12px; border: 1px solid var(--gj-line); border-radius: 12px; background: var(--gj-panel-2); }
+.sidebar-mode-switch > p { margin: 0 0 8px; color: var(--gj-dim); font-size: 9px; font-weight: 800; letter-spacing: .1em; }
+.mode-switch-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; border-radius: 9px; background: var(--gj-control); }
+.mode-switch-buttons button { padding: 8px 4px; border: 0; border-radius: 7px; background: transparent; color: var(--gj-dim); font-size: 12px; font-weight: 800; letter-spacing: .04em; cursor: pointer; transition: all 160ms var(--ease-out); }
+.mode-switch-buttons button:hover { color: var(--gj-text); }
+.mode-switch-buttons button.active { color: #1a1206; }
+.mode-switch-buttons button.active:first-child { background: linear-gradient(135deg, var(--gj-gold), color-mix(in srgb, var(--gj-gold) 70%, white)); box-shadow: 0 2px 8px color-mix(in srgb, var(--gj-gold) 40%, transparent); }
+.mode-switch-buttons button.active:last-child { background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 2px 8px rgba(245,158,11,.4); }
+.mode-switch-hint { display: block; margin-top: 7px; color: var(--gj-dim); font-size: 10px; text-align: center; }
+/* Testing workspace identity: amber accent replaces gold throughout the sidebar. */
+.gj-sidebar.is-testing { border-right: 1px solid color-mix(in srgb, #f59e0b 30%, var(--gj-line)); }
+.gj-sidebar.is-testing .sidebar-brand strong { color: #f59e0b; }
+.gj-sidebar.is-testing .sidebar-nav button.active { background: color-mix(in srgb, #f59e0b 16%, var(--gj-panel-2)); border-color: color-mix(in srgb, #f59e0b 50%, var(--gj-line)); color: #f59e0b; }
+.gj-sidebar.is-testing .sidebar-mode-switch { border-color: color-mix(in srgb, #f59e0b 40%, var(--gj-line)); background: color-mix(in srgb, #f59e0b 7%, var(--gj-panel-2)); }
+.gj-sidebar.is-testing .sidebar-mode-switch > p { color: #f59e0b; }
+.mobile-bottom-nav.is-testing { border-top: 1px solid color-mix(in srgb, #f59e0b 35%, var(--gj-line)); }
+.mobile-bottom-nav.is-testing button.active { color: #f59e0b; }
