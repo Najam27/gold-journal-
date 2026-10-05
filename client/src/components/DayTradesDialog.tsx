@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TradeDetailDialog } from "@/components/TradeDetailDialog";
 import { formatActualR, formatMoney, toNumber } from "@/lib/gold";
+import { formatPips, tradePips } from "@shared/pipMath";
+import { LIVE_MODE, type TradeModeConfig } from "@/lib/tradeModeConfig";
 import type { DayTradeSummary } from "@/lib/performanceSummary";
 import { PKT_TIME_ZONE, pktDateToTimestamp } from "@shared/pktDate";
 import { buildDayBehaviorReview, TRADE_CLASSIFICATION_LABELS, type BehaviorConfig } from "@/lib/psychology";
@@ -40,10 +42,18 @@ function tradeTone(result: string, pnl: number) {
   return pnl > 0 ? "positive" : pnl < 0 ? "negative" : "neutral";
 }
 
-export function DayTradesDialog({ day, summary, plans, behaviorConfig, onOpenChange, onEdit }: { day: string | null; summary: DayTradeSummary<any> | null; plans?: any[]; behaviorConfig?: BehaviorConfig; onOpenChange: (open: boolean) => void; onEdit?: (trade: any) => void }) {
+export function DayTradesDialog({ mode = LIVE_MODE, day, summary, plans, behaviorConfig, onOpenChange, onEdit }: { mode?: TradeModeConfig; day: string | null; summary: DayTradeSummary<any> | null; plans?: any[]; behaviorConfig?: BehaviorConfig; onOpenChange: (open: boolean) => void; onEdit?: (trade: any) => void }) {
   const [viewedTrade, setViewedTrade] = useState<any>(null);
   const open = Boolean(day && summary && summary.count > 0);
   useEffect(() => { if (!open) setViewedTrade(null); }, [open]);
+  // Testing Mode renders results in pips. The summary numbers are unit-
+  // agnostic ($ Live, pips Testing); only the formatting branches.
+  const isPips = mode.pnlUnit === "pips";
+  const unitMoney = (value: number | string | null | undefined) =>
+    isPips ? formatPips(toNumber(value)) : formatMoney(value);
+  // A trade row's result in Testing is pips derived from entry/exit.
+  const rowPips = (trade: DayTrade): number | null =>
+    tradePips({ direction: trade?.direction, entryPrice: trade?.entryPrice as number | string | null, exitPrice: (trade as any)?.exitPrice as number | string | null });
   // Chronological order keeps a day readable even when the journal arrives newest-first.
   const rows = useMemo(() => [...(summary?.trades ?? [])].sort((a: DayTrade, b: DayTrade) => new Date(a.tradeDate).getTime() - new Date(b.tradeDate).getTime()), [summary]);
   // Read-only behavioural review of the same day: execution, psychology, and classification.
@@ -64,7 +74,7 @@ export function DayTradesDialog({ day, summary, plans, behaviorConfig, onOpenCha
           <DialogDescription>{count} trade{count === 1 ? "" : "s"} recorded on this Pakistan-time trading day · {PKT_TIME_ZONE}</DialogDescription>
         </DialogHeader>
         <section className={`day-dialog-total ${tone}`}>
-          <div><span>Daily P&amp;L</span><strong className={`data-text ${tone}`}>{formatMoney(pnl)}</strong></div>
+          <div><span>{isPips ? "Daily pips" : "Daily P&L"}</span><strong className={`data-text ${tone}`}>{unitMoney(pnl)}</strong></div>
           <div><span>Trades</span><strong className="data-text">{count}</strong></div>
           <div><span>Wins</span><strong className="data-text positive">{wins}</strong></div>
           <div><span>Losses</span><strong className="data-text negative">{losses}</strong></div>
@@ -75,9 +85,9 @@ export function DayTradesDialog({ day, summary, plans, behaviorConfig, onOpenCha
         <section className="day-dialog-metrics">
           {riskTrades > 0 && <span>Total risk <b className="data-text">{formatMoney(totalRisk)}</b></span>}
           {rewardTrades > 0 && <span>Total reward <b className="data-text">{formatMoney(totalReward)}</b></span>}
-          {averageR !== null && <span>Average R <b className="data-text">1 : {averageR.toFixed(2)}</b></span>}
-          <span>Average trade <b className={`data-text ${averagePnl >= 0 ? "positive" : "negative"}`}>{formatMoney(averagePnl)}</b></span>
-          {openCount > 0 && <span>Unrealized <b className={`data-text ${openPnl >= 0 ? "positive" : "negative"}`}>{formatMoney(openPnl)}</b></span>}
+          {averageR !== null && !isPips && <span>Average R <b className="data-text">1 : {averageR.toFixed(2)}</b></span>}
+          <span>{isPips ? "Average pips" : "Average trade"} <b className={`data-text ${averagePnl >= 0 ? "positive" : "negative"}`}>{unitMoney(averagePnl)}</b></span>
+          {openCount > 0 && <span>Unrealized <b className={`data-text ${openPnl >= 0 ? "positive" : "negative"}`}>{unitMoney(openPnl)}</b></span>}
         </section>
         {review && <section className="day-behavior">
           <div className="day-behavior-grid">
@@ -91,18 +101,20 @@ export function DayTradesDialog({ day, summary, plans, behaviorConfig, onOpenCha
                 <li><span>Pre-trade gate</span><b>{review.gateAverage == null ? "Not evaluated" : `${review.gateAverage}%`}</b></li>
               </ul>
             </div>
-            <div className="day-behavior-card">
-              <header><span>PSYCHOLOGY</span><Brain size={14} /></header>
-              <ul>
-                <li><span>Dominant emotion</span><b>{review.dominantEmotion ?? "Not recorded"}</b></li>
-                <li><span>Pre-session state</span><b>{review.emotionalState ?? "Not recorded"}</b></li>
-                <li><span>Behavioural objective</span><b>{review.behavioralFocus ?? "Not set"}</b></li>
-                <li><span>FOMO</span><b>{review.tags.includes("FOMO") ? "Tagged" : "None tagged"}</b></li>
-                <li><span>Revenge</span><b>{review.tags.includes("REVENGE") ? "Tagged" : "None tagged"}</b></li>
-                <li><span>Overconfidence</span><b>{review.tags.includes("OVERCONFIDENCE") ? "Tagged" : "None tagged"}</b></li>
-                <li><span>Patience average</span><b>{patienceAverage == null ? "Not rated" : `${patienceAverage.toFixed(1)} / 5`}</b></li>
-              </ul>
-            </div>
+            {mode.showPsychology && (
+              <div className="day-behavior-card">
+                <header><span>PSYCHOLOGY</span><Brain size={14} /></header>
+                <ul>
+                  <li><span>Dominant emotion</span><b>{review.dominantEmotion ?? "Not recorded"}</b></li>
+                  <li><span>Pre-session state</span><b>{review.emotionalState ?? "Not recorded"}</b></li>
+                  <li><span>Behavioural objective</span><b>{review.behavioralFocus ?? "Not set"}</b></li>
+                  <li><span>FOMO</span><b>{review.tags.includes("FOMO") ? "Tagged" : "None tagged"}</b></li>
+                  <li><span>Revenge</span><b>{review.tags.includes("REVENGE") ? "Tagged" : "None tagged"}</b></li>
+                  <li><span>Overconfidence</span><b>{review.tags.includes("OVERCONFIDENCE") ? "Tagged" : "None tagged"}</b></li>
+                  <li><span>Patience average</span><b>{patienceAverage == null ? "Not rated" : `${patienceAverage.toFixed(1)} / 5`}</b></li>
+                </ul>
+              </div>
+            )}
             <div className="day-behavior-card">
               <header><span>TRADE CLASSIFICATION</span><ClipboardCheck size={14} /></header>
               <ul>
@@ -118,7 +130,9 @@ export function DayTradesDialog({ day, summary, plans, behaviorConfig, onOpenCha
           <ul className="day-trade-list">
             {rows.map((trade: DayTrade, index: number) => {
               const result = String(trade.result || "OPEN");
-              const tradePnl = toNumber(trade.pnl);
+              // Testing rows render derived pips; Live rows render the $ P&L.
+              const pips = isPips ? rowPips(trade) : null;
+              const tradePnl = isPips ? (pips ?? 0) : toNumber(trade.pnl);
               const clock = formatClock(trade.tradeDate);
               const symbol = trade.symbol ? String(trade.symbol) : "";
               const ticket = trade.mt5Ticket ? String(trade.mt5Ticket) : "";
@@ -127,7 +141,7 @@ export function DayTradesDialog({ day, summary, plans, behaviorConfig, onOpenCha
               const risk = toNumber(trade.risk);
               const subLabel = result === "OPEN" ? "unrealized" : risk > 0 ? `risk ${formatMoney(risk)}` : "";
               return <li key={String(trade.id ?? index)} className="day-trade-row">
-                <button type="button" className="day-trade-main" aria-label={`View ${result.replace("_", " ")} trade at ${clock || "an unrecorded time"}: ${formatMoney(tradePnl)}${result === "OPEN" ? " unrealized" : ""}`} onClick={() => setViewedTrade(trade)}>
+                <button type="button" className="day-trade-main" aria-label={`View ${result.replace("_", " ")} trade at ${clock || "an unrecorded time"}: ${isPips ? formatPips(pips) : formatMoney(tradePnl)}${result === "OPEN" ? " unrealized" : ""}`} onClick={() => setViewedTrade(trade)}>
                   <span className="day-trade-lead">
                     <span className={`side-badge ${String(trade.direction || "").toLowerCase()}`}>{trade.direction || "—"}</span>
                     <span className={`result-badge ${result.toLowerCase()}`}>{result.replace("_", " ")}</span>
@@ -138,9 +152,9 @@ export function DayTradesDialog({ day, summary, plans, behaviorConfig, onOpenCha
                     {trade.localPending && <small className="day-trade-flag">Pending sync</small>}
                   </span>
                   <span className={`day-trade-pnl data-text ${tradeTone(result, tradePnl)}`}>
-                    <b>{formatMoney(tradePnl)}</b>
+                    <b>{isPips ? formatPips(pips) : formatMoney(tradePnl)}</b>
                     {subLabel && <em>{subLabel}</em>}
-                    {risk > 0 && <em>{formatActualR(trade.risk, trade.pnl)}</em>}
+                    {risk > 0 && !isPips && <em>{formatActualR(trade.risk, trade.pnl)}</em>}
                   </span>
                 </button>
                 {onEdit && <Button variant="outline" size="sm" className="day-trade-edit" aria-label={`Edit ${result.replace("_", " ")} trade`} onClick={() => onEdit(trade)}><Pencil size={14} /> Edit</Button>}
@@ -151,6 +165,6 @@ export function DayTradesDialog({ day, summary, plans, behaviorConfig, onOpenCha
         <p className="day-dialog-note"><Rows3 size={13} /> Read-only drill-down of the trades already loaded in this browser. Local, unsynced trades stay listed until they sync.</p>
       </DialogContent>
     </Dialog>
-    <TradeDetailDialog trade={viewedTrade} open={Boolean(viewedTrade)} onOpenChange={(next: boolean) => !next && setViewedTrade(null)} />
+    <TradeDetailDialog mode={mode} trade={viewedTrade} open={Boolean(viewedTrade)} onOpenChange={(next: boolean) => !next && setViewedTrade(null)} />
   </>;
 }

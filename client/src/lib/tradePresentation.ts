@@ -36,6 +36,8 @@
 import { MISTAKE_BY_TAG, PRE_TRADE_GATE_ITEMS, TRADE_CLASSIFICATION_LABELS, TRADE_CLASSIFICATION_SUMMARY, classifyTradeProcess, detectBehavioralTags, type TradeClassification } from "@/lib/psychology";
 import { tagsForCategory, violationTags, type MistakeCategory, type TradeProcessAssessment } from "@shared/psychologyEngine";
 import { formatActualR, formatDate, formatMoney, formatRr, toNumber } from "@/lib/gold";
+import { formatPips, tradePips } from "@shared/pipMath";
+import { LIVE_MODE, type TradeModeConfig } from "@/lib/tradeModeConfig";
 
 /** Rendered in place of a field that exists but carries no recorded value. */
 export const PRESENTATION_MISSING = "—";
@@ -124,7 +126,7 @@ export type TradePresentation = {
   additionalFields: TradePresentationField[];
 };
 
-export type TradePresentationOptions = { runningBalance?: number | null };
+export type TradePresentationOptions = { runningBalance?: number | null; mode?: TradeModeConfig };
 
 /* ------------------------------------------------------------------ *
  * Value helpers
@@ -382,6 +384,9 @@ export const TRADE_PRESENTATION_FIELD_SPECS: FieldSpec[] = [
   { key: "entryPrice", label: "Entry price", section: "risk", keys: ["entryPrice"], value: trade => price(trade.entryPrice), hideWhenMissing: true },
   { key: "slPrice", label: "Stop-loss price", section: "risk", keys: ["slPrice"], value: trade => price(trade.slPrice), hideWhenMissing: true },
   { key: "tpPrice", label: "Take-profit price", section: "risk", keys: ["tpPrice"], value: trade => price(trade.tpPrice), hideWhenMissing: true },
+  // Exit price is only ever recorded on Testing trades (pips are derived from
+  // entry → exit). Live rows store null, so this never appears for Live.
+  { key: "exitPrice", label: "Exit price", section: "risk", keys: ["exitPrice"], value: trade => price(trade.exitPrice), hideWhenMissing: true },
 
   /* 5 — Plan & discipline */
   { key: "planStatus", label: "Plan status", section: "discipline", keys: ["planStatus"], value: trade => presentationText(trade.planStatus) },
@@ -518,22 +523,38 @@ export function additionalTradeFields(trade: PresentationTrade): TradePresentati
  * model View Trade, the Share Trade Card, and the PDF report all render.
  */
 export function buildTradePresentation(trade: PresentationTrade, options: TradePresentationOptions = {}): TradePresentation {
+  const mode = options.mode ?? LIVE_MODE;
   const process = classifyTradeProcess(trade as Parameters<typeof classifyTradeProcess>[0]);
   const classification = classificationFor(process);
   const context: PresentationContext = { runningBalance: options.runningBalance ?? null, process, classification };
-  const sections: TradePresentationSection[] = TRADE_PRESENTATION_SECTION_ORDER.map(id => ({
+  // Testing Mode has no Psychology/Emotions section; Live keeps it. The
+  // section order constant stays untouched — this only filters the built list.
+  const sectionIds = mode.showPsychology
+    ? TRADE_PRESENTATION_SECTION_ORDER
+    : TRADE_PRESENTATION_SECTION_ORDER.filter(id => id !== "psychology");
+  const isPips = mode.pnlUnit === "pips";
+  const derivedPips = isPips ? tradePips(trade as { direction?: string | null; entryPrice?: number | string | null; exitPrice?: number | string | null }) : null;
+  const sections: TradePresentationSection[] = sectionIds.map(id => ({
     id,
     title: TRADE_SECTION_THEME[id].title,
     accent: TRADE_SECTION_THEME[id].accent,
-    fields: TRADE_PRESENTATION_FIELD_SPECS.filter(spec => spec.section === id).map(spec => ({
-      key: spec.key,
-      label: spec.label,
-      value: spec.value(trade, context),
-      wide: spec.wide,
-      tone: spec.tone,
-      kpi: spec.kpi,
-      inHeader: spec.inHeader,
-    })).filter(field => {
+    fields: TRADE_PRESENTATION_FIELD_SPECS.filter(spec => spec.section === id).map(spec => {
+      let value = spec.value(trade, context);
+      let label = spec.label;
+      // In Testing Mode the result is pips (derived from entry/exit), and an
+      // R multiple cannot be formed from $-risk vs pip-return.
+      if (isPips && spec.key === "pnl") { value = formatPips(derivedPips); label = "Actual pips"; }
+      if (isPips && spec.key === "actualR") { value = PRESENTATION_MISSING; }
+      return {
+        key: spec.key,
+        label,
+        value,
+        wide: spec.wide,
+        tone: spec.tone,
+        kpi: spec.kpi,
+        inHeader: spec.inHeader,
+      };
+    }).filter(field => {
       const spec = TRADE_PRESENTATION_FIELD_SPECS.find(s => s.key === field.key);
       return !(spec?.hideWhenMissing && field.value === PRESENTATION_MISSING);
     }),
@@ -558,8 +579,8 @@ export function buildTradePresentation(trade: PresentationTrade, options: TradeP
       session,
       direction,
       result: resultLabel,
-      pnl: money(trade.pnl),
-      pnlValue: toNumber(trade.pnl),
+      pnl: mode.pnlUnit === "pips" ? formatPips(derivedPips) : money(trade.pnl),
+      pnlValue: mode.pnlUnit === "pips" ? (derivedPips ?? 0) : toNumber(trade.pnl),
       line: [tradeDate, symbol, session, direction, resultLabel].filter(value => value !== PRESENTATION_MISSING).join(" · ").toUpperCase(),
     },
     kpis,

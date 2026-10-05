@@ -13,6 +13,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatMoney } from "@/lib/gold";
+import { formatPips } from "@shared/pipMath";
+import { LIVE_MODE, type TradeModeConfig } from "@/lib/tradeModeConfig";
 import { openJournalView } from "@/lib/journalViewNavigation";
 import { trpc } from "@/lib/trpc";
 import { AI_PROVIDER_META } from "@shared/aiCore";
@@ -26,19 +28,20 @@ import type {
 } from "@shared/analysisEngine";
 import { buildPlaybook, type PlaybookCard } from "@shared/playbook";
 
-type Props = { accountId?: number; trades?: unknown[] };
-const money = (value: number | null) =>
-  value == null ? "—" : formatMoney(value);
+type Props = { accountId?: number; trades?: unknown[]; mode?: TradeModeConfig };
 const number = (value: number | null, digits = 2) =>
   value == null ? "—" : value.toFixed(digits);
 
 function MetricTable({
   title,
   rows,
+  formatUnit,
   empty = "Complete more context fields to evaluate this dimension.",
 }: {
   title: string;
   rows: MetricRow[];
+  // Unit-aware money formatter (pips in Testing Mode, $ Live).
+  formatUnit: (value: number | null) => string;
   empty?: string;
 }) {
   return (
@@ -97,7 +100,7 @@ function MetricTable({
                     data-label="Expectancy"
                     className={`data-text ${row.expectancy >= 0 ? "positive" : "negative"}`}
                   >
-                    <span className="analysis-cell-value">{money(row.expectancy)}</span>
+                    <span className="analysis-cell-value">{formatUnit(row.expectancy)}</span>
                   </td>
                   <td className="data-text" data-label="PF">
                     <span className="analysis-cell-value">
@@ -108,7 +111,7 @@ function MetricTable({
                   </td>
                   <td className="data-text" data-label="Avg R"><span className="analysis-cell-value">{number(row.averageR, 2)}</span></td>
                   <td className="data-text negative" data-label="Drawdown">
-                    <span className="analysis-cell-value">{money(-row.maxDrawdown)}</span>
+                    <span className="analysis-cell-value">{formatUnit(-row.maxDrawdown)}</span>
                   </td>
                   <td className="data-text" data-label="Score"><span className="analysis-cell-value">{row.edgeScore}/100</span></td>
                 </tr>
@@ -191,7 +194,7 @@ function PlaybookSection({ analysis }: { analysis: AnalysisResult }) {
 }
 
 
-function EdgeCard({ label, row }: { label: string; row: MetricRow | null }) {
+function EdgeCard({ label, row, formatUnit }: { label: string; row: MetricRow | null; formatUnit: (value: number | null) => string }) {
   return (
     <article className="edge-callout strong">
       <Sparkles size={18} />
@@ -200,7 +203,7 @@ function EdgeCard({ label, row }: { label: string; row: MetricRow | null }) {
         <strong>{row?.label ?? "Not enough evidence"}</strong>
         <p>
           {row
-            ? `${row.sample} trades · ${row.evidenceTier} · ${row.expectancy >= 0 ? "+" : ""}${money(row.expectancy)} expectancy · ${row.edgeScore}/100`
+            ? `${row.sample} trades · ${row.evidenceTier} · ${row.expectancy >= 0 ? "+" : ""}${formatUnit(row.expectancy)} expectancy · ${row.edgeScore}/100`
             : "Use the filters and log more closed trades before interpreting this context."}
         </p>
       </div>
@@ -323,7 +326,7 @@ function AiReport({ result }: { result: any }) {
   );
 }
 
-export function AnalysisDashboard({ accountId }: Props) {
+export function AnalysisDashboard({ accountId, mode = LIVE_MODE }: Props) {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [session, setSession] = useState("");
@@ -335,6 +338,11 @@ export function AnalysisDashboard({ accountId }: Props) {
   const [compareEnabled, setCompareEnabled] = useState(false);
   const [previousStart, setPreviousStart] = useState("");
   const [previousEnd, setPreviousEnd] = useState("");
+  // Testing Mode: analysis runs on Testing trades only, and every monetary
+  // figure is pips. The engine is unit-agnostic; only the formatting changes.
+  const isPips = mode.pnlUnit === "pips";
+  const unitMoney = (value: number | null) =>
+    value == null ? "—" : isPips ? formatPips(value) : formatMoney(value);
   const filters = useMemo<AnalysisFilters>(
     () => ({
       startDate: startDate || null,
@@ -345,8 +353,11 @@ export function AnalysisDashboard({ accountId }: Props) {
       setup: setup || null,
       direction: direction ? (direction as "BUY" | "SELL") : null,
       result: result ? (result as AnalysisFilters["result"]) : null,
+      // The environment discriminator scopes the analysis server-side. It is
+      // part of the filter key, so switching modes refetches.
+      environment: mode.environment,
     }),
-    [startDate, endDate, session, timeframe, level, setup, direction, result]
+    [startDate, endDate, session, timeframe, level, setup, direction, result, mode.environment]
   );
   const query = trpc.analysis.get.useQuery(
     { accountId: accountId ?? 0, filters },
@@ -663,7 +674,7 @@ export function AnalysisDashboard({ accountId }: Props) {
             </span>
             <span>
               Expectancy delta{" "}
-              <b>{money(comparisonQuery.data.delta.overview.expectancy)}</b>
+              <b>{unitMoney(comparisonQuery.data.delta.overview.expectancy)}</b>
             </span>
             <span>
               Profit factor delta{" "}
@@ -679,7 +690,7 @@ export function AnalysisDashboard({ accountId }: Props) {
             </span>
             <span>
               Drawdown delta{" "}
-              <b>{money(comparisonQuery.data.delta.overview.maxDrawdown)}</b>
+              <b>{unitMoney(comparisonQuery.data.delta.overview.maxDrawdown)}</b>
             </span>
           </div>
         </section>
@@ -698,7 +709,7 @@ export function AnalysisDashboard({ accountId }: Props) {
         <div className="stat-card stat-green">
           <p>EXPECTANCY</p>
           <strong className="data-text">
-            {money(analysis.overview.expectancy)}
+            {unitMoney(analysis.overview.expectancy)}
           </strong>
           <span>
             {number(analysis.overview.expectancyR, 3)}R per closed trade
@@ -719,7 +730,7 @@ export function AnalysisDashboard({ accountId }: Props) {
         <div className="stat-card stat-red">
           <p>MAX DRAWDOWN</p>
           <strong className="data-text">
-            {money(-analysis.overview.maxDrawdown)}
+            {unitMoney(-analysis.overview.maxDrawdown)}
           </strong>
           <span>{analysis.overview.drawdownCount} drawdown periods</span>
         </div>
@@ -746,45 +757,51 @@ export function AnalysisDashboard({ accountId }: Props) {
         </div>
       </section>
       <section className="edge-callouts">
-        <EdgeCard label="TOP EDGE" row={analysis.edgeCards.top} />
+        <EdgeCard label="TOP EDGE" row={analysis.edgeCards.top} formatUnit={unitMoney} />
         <EdgeCard
           label="WEAKEST QUALIFIED CONTEXT"
           row={analysis.edgeCards.weak}
+          formatUnit={unitMoney}
         />
         <EdgeCard
           label="MOST CONSISTENT"
           row={analysis.edgeCards.mostConsistent}
+          formatUnit={unitMoney}
         />
-        <EdgeCard label="BEST R-MULTIPLE" row={analysis.edgeCards.bestR} />
+        <EdgeCard label="BEST R-MULTIPLE" row={analysis.edgeCards.bestR} formatUnit={unitMoney} />
       </section>
       <PlaybookSection analysis={analysis} />
-      <MetricTable title="SESSION ANALYSIS" rows={analysis.sessions} />
-      <MetricTable title="TIMEFRAME ANALYSIS" rows={analysis.timeframes} />
-      <MetricTable title="LEVEL ANALYSIS" rows={analysis.levels} />
+      <MetricTable title="SESSION ANALYSIS" rows={analysis.sessions} formatUnit={unitMoney} />
+      <MetricTable title="TIMEFRAME ANALYSIS" rows={analysis.timeframes} formatUnit={unitMoney} />
+      <MetricTable title="LEVEL ANALYSIS" rows={analysis.levels} formatUnit={unitMoney} />
       <MetricTable
         title="SETUP / STRATEGY ANALYSIS"
         rows={analysis.setups}
+        formatUnit={unitMoney}
         empty="No setup value is stored on the selected trades. The engine will not guess a strategy from notes."
       />
       <div className="edge-grid edge-grid-combos">
         <MetricTable
           title="SESSION × TIMEFRAME"
           rows={analysis.sessionTimeframes}
+          formatUnit={unitMoney}
           empty="No session × timeframe pair has 2+ closed trades yet."
         />
         <MetricTable
           title="LEVEL × SESSION"
           rows={analysis.levelSessions}
+          formatUnit={unitMoney}
           empty="No level × session pair has 2+ closed trades yet. Fill both the level and session fields on your trades to populate this."
         />
         <MetricTable
           title="LEVEL × TIMEFRAME"
           rows={analysis.levelTimeframes}
+          formatUnit={unitMoney}
           empty="No level × timeframe pair has 2+ closed trades yet."
         />
-        <MetricTable title="DIRECTION" rows={analysis.directions} />
-        <MetricTable title="DAY / UTC" rows={analysis.days} />
-        <MetricTable title="HOUR / UTC" rows={analysis.hours} />
+        <MetricTable title="DIRECTION" rows={analysis.directions} formatUnit={unitMoney} />
+        <MetricTable title="DAY / UTC" rows={analysis.days} formatUnit={unitMoney} />
+        <MetricTable title="HOUR / UTC" rows={analysis.hours} formatUnit={unitMoney} />
       </div>
       <section className="panel">
         <div className="panel-title">
@@ -799,7 +816,7 @@ export function AnalysisDashboard({ accountId }: Props) {
             <span>
               Winner average P&L{" "}
               <b className="positive">
-                {money(analysis.winLoss.winners.averagePnl)}
+                {unitMoney(analysis.winLoss.winners.averagePnl)}
               </b>
             </span>
             <span>
@@ -809,7 +826,7 @@ export function AnalysisDashboard({ accountId }: Props) {
             <span>
               Loser average P&L{" "}
               <b className="negative">
-                {money(analysis.winLoss.losers.averagePnl)}
+                {unitMoney(analysis.winLoss.losers.averagePnl)}
               </b>
             </span>
             <span>
@@ -878,7 +895,7 @@ export function AnalysisDashboard({ accountId }: Props) {
               Risk coverage <b>{analysis.risk.available} trades</b>
             </span>
             <span>
-              Average risk <b>{money(analysis.risk.average)}</b>
+              Average risk <b>{unitMoney(analysis.risk.average)}</b>
             </span>
             <span>
               Risk consistency{" "}
@@ -1148,7 +1165,7 @@ export function AnalysisDashboard({ accountId }: Props) {
                 {" "}of the available move on average (median {analysis.exitEfficiency.medianCapturedPct != null ? `${analysis.exitEfficiency.medianCapturedPct.toFixed(0)}%` : "—"})
               </span>
               <span>
-                Left on the table <b>{analysis.exitEfficiency.totalLeftOnTable != null ? money(analysis.exitEfficiency.totalLeftOnTable) : "—"}</b>
+                Left on the table <b>{analysis.exitEfficiency.totalLeftOnTable != null ? unitMoney(analysis.exitEfficiency.totalLeftOnTable) : "—"}</b>
                 {" "}across {analysis.exitEfficiency.sample} trade{analysis.exitEfficiency.sample === 1 ? "" : "s"} with excursion data
               </span>
               {analysis.exitEfficiency.averageHeatPct != null && (
@@ -1214,7 +1231,7 @@ export function AnalysisDashboard({ accountId }: Props) {
               Last {row.window}{" "}
               <b>
                 {row.sample} trades · {row.winRate.toFixed(1)}% ·{" "}
-                {money(row.expectancy)} expectancy
+                {unitMoney(row.expectancy)} expectancy
               </b>
             </span>
           ))}

@@ -32,6 +32,8 @@ import { TradeDetailDialog } from "@/components/TradeDetailDialog";
 import { formatActualR, formatDate, formatMoney, formatRr, results, toNumber } from "@/lib/gold";
 import { buildRunningBalances } from "@/lib/tradeLedger";
 import { PNL_RESULT_EPSILON } from "@shared/tradeOutcome";
+import { formatPips, tradePips } from "@shared/pipMath";
+import { LIVE_MODE, type TradeModeConfig } from "@/lib/tradeModeConfig";
 import { copyTradeCardPng, createTradeCardPng, downloadTradeCardPng, shareTradeCardPng } from "@/lib/tradeCardPng";
 import { toast } from "sonner";
 
@@ -98,9 +100,14 @@ function TradeTableSkeleton() {
   );
 }
 
-function BaseTradeLogWithViewer({ stats, trades, allTrades, pagination, listLoading, listError, onRetry, account, dangerGoals, mt5LivePositions = [], mt5Summary, mt5Syncing = false, hasMt5Connection = false, search, resultFilter, setSearch, setResultFilter, onPage, onNew, onQuickLog, onDuplicate, onEdit, onDelete, onCash, onCsv, onExcel, onPdf, onClear }: any) {
+function BaseTradeLogWithViewer({ mode = LIVE_MODE, stats, trades, allTrades, pagination, listLoading, listError, onRetry, account, dangerGoals, mt5LivePositions = [], mt5Summary, mt5Syncing = false, hasMt5Connection = false, search, resultFilter, setSearch, setResultFilter, onPage, onNew, onQuickLog, onDuplicate, onEdit, onDelete, onCash, onCsv, onExcel, onPdf, onClear }: any & { mode?: TradeModeConfig }) {
   const [viewedTrade, setViewedTrade] = useState<any>();
   const [exportingTradeId, setExportingTradeId] = useState<number | string | null>(null);
+  // Testing Mode renders results in pips. Every money-format call below
+  // branches on this flag; Live behavior is untouched (isPips === false).
+  const isPips = mode.pnlUnit === "pips";
+  // Pips are kept to one decimal; the break-even band scales with the unit.
+  const pipsEpsilon = 0.05;
   const openingBalance = stats.balance - allTrades.reduce((sum: number, trade: any) => sum + toNumber(trade.pnl), 0);
   const balanceById = new Map(buildRunningBalances(allTrades, openingBalance).map(row => [row.id, row.runningBalance]));
   const page = pagination?.page ?? 1;
@@ -113,10 +120,12 @@ function BaseTradeLogWithViewer({ stats, trades, allTrades, pagination, listLoad
   const mt5Live = String(mt5Summary?.syncHealth?.state ?? "").toUpperCase() === "CONNECTED";
   const brokerValueDetail = mt5Live ? (mt5Syncing ? "Synchronizing Trade Log…" : "Live broker value") : "Last broker snapshot · MT5 not connected";
   const balanceForTrade = (trade: any) => hasMt5Connection ? linkedBrokerBalance : (balanceById.get(trade.id) || 0);
+  // Pips for a trade row (Testing): derived from entry/exit, never hand-typed.
+  const tradeRowPips = (trade: any): number | null => tradePips({ direction: trade?.direction, entryPrice: trade?.entryPrice, exitPrice: trade?.exitPrice });
   const exportTrade = async (trade: any, action: "download" | "share") => {
     setExportingTradeId(trade.id);
     try {
-      const image = await createTradeCardPng(trade);
+      const image = await createTradeCardPng(trade, mode);
       if (action === "download") { downloadTradeCardPng(image.blob, image.filename); toast.success("Trade card PNG downloaded."); return; }
       const copied = await copyTradeCardPng(image.blob);
       if (copied) { toast.success("Trade card image copied. Paste it anywhere you want to share it."); return; }
@@ -135,7 +144,7 @@ function BaseTradeLogWithViewer({ stats, trades, allTrades, pagination, listLoad
         <p>Every record is private to your account and updates across connected devices.</p>
       </div>
       <div className="header-actions">
-        {!hasMt5Connection && <>
+        {!hasMt5Connection && !isPips && <>
           <Button variant="outline" onClick={() => onCash("DEPOSIT")}><CircleDollarSign size={15} /> Deposit</Button>
           <Button variant="outline" onClick={() => onCash("WITHDRAW")}><Wallet size={15} /> Withdraw</Button>
         </>}
@@ -150,9 +159,9 @@ function BaseTradeLogWithViewer({ stats, trades, allTrades, pagination, listLoad
         <StatCard label="MT5 balance" icon={Banknote} value={<AnimatedNumber value={toNumber(mt5Summary.balance)} format={formatMoney} />} detail={mt5Summary.currency || "Broker account"} />
         <StatCard label="MT5 equity" icon={Gauge} value={<AnimatedNumber value={toNumber(mt5Summary.equity)} format={formatMoney} />} detail="Balance + floating P&L" tone="neutral" />
         <StatCard label="MT5 floating P&L" icon={toNumber(mt5Summary.floatingPnl) >= 0 ? TrendingUp : TrendingDown} value={<AnimatedNumber value={toNumber(mt5Summary.floatingPnl)} format={formatMoney} />} detail={brokerValueDetail} tone={toNumber(mt5Summary.floatingPnl) >= 0 ? "green" : "red"} />
-      </> : <StatCard label="Journal balance" icon={Wallet} value={<AnimatedNumber value={stats.balance} format={formatMoney} />} detail="Starting balance + movements + P&L" />}
+      </> : !isPips && <StatCard label="Journal balance" icon={Wallet} value={<AnimatedNumber value={stats.balance} format={formatMoney} />} detail="Starting balance + movements + P&L" />}
       <StatCard label="Win rate" icon={Target} value={`${stats.winRate.toFixed(1)}%`} detail={`${stats.wins} wins · ${stats.losses} losses`} tone={stats.winRate >= 50 ? "green" : "neutral"} />
-      <StatCard label="Total P&L" icon={BarChart3} value={<AnimatedNumber value={stats.pnl} format={formatMoney} />} detail="Closed and open MT5 positions" tone={stats.pnl >= 0 ? "green" : "red"} />
+      <StatCard label={isPips ? "Total pips" : "Total P&L"} icon={BarChart3} value={isPips ? formatPips(stats.pnl) : <AnimatedNumber value={stats.pnl} format={formatMoney} />} detail={isPips ? "Net pips, entry → exit" : "Closed and open MT5 positions"} tone={stats.pnl >= 0 ? "green" : "red"} />
       <StatCard label="Total trades" icon={Layers} value={String(stats.total)} detail={hasMt5Connection ? "MT5 + journal history" : "Current account history"} tone="cyan" />
     </section>
     {hasMt5Connection && mt5LivePositions.length > 0 && (
@@ -219,16 +228,19 @@ function BaseTradeLogWithViewer({ stats, trades, allTrades, pagination, listLoad
                   <th scope="col">#</th><th scope="col">Date</th><th scope="col">Session</th><th scope="col">Side</th>
                   <th scope="col">Bias</th><th scope="col">Level</th><th scope="col">Setup</th><th scope="col">Execution</th>
                   <th scope="col">Planned risk</th><th scope="col">Planned R:R</th><th scope="col">Result</th>
-                  <th scope="col">Actual P&amp;L</th><th scope="col">Actual R:R</th><th scope="col"><span className="sr-only">Actions</span></th>
+                  <th scope="col">{mode.pnlColumnLabel === "P&L" ? <>Actual P&L</> : "Actual pips"}</th><th scope="col">Actual R:R</th><th scope="col"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>                  {trades.map((trade: any, index: number) => {
                   const result = String(trade.result || "OPEN");
-                  // The P&L tone follows the canonical break-even band (±$0.005):
-                  // a flat trade is neutral, never an up arrow.
-                  const pnlValue = toNumber(trade.pnl);
-                  const pnlUp = pnlValue > PNL_RESULT_EPSILON;
-                  const pnlDown = pnlValue < -PNL_RESULT_EPSILON;
+                  // The P&L tone follows the canonical break-even band: a flat
+                  // trade is neutral, never an up arrow. In Testing the band
+                  // is in pips (0.05); Live keeps its $ band (0.005).
+                  const rowPips = isPips ? tradeRowPips(trade) : null;
+                  const pnlValue = isPips ? (rowPips ?? 0) : toNumber(trade.pnl);
+                  const epsilon = isPips ? pipsEpsilon : PNL_RESULT_EPSILON;
+                  const pnlUp = pnlValue > epsilon;
+                  const pnlDown = pnlValue < -epsilon;
                   const pnlTone = pnlUp ? "positive" : pnlDown ? "negative" : "neutral";
                   // A row the backend has not acknowledged yet. It is rendered
                   // from LOCAL state and is labelled as such, never presented as
@@ -256,9 +268,9 @@ function BaseTradeLogWithViewer({ stats, trades, allTrades, pagination, listLoad
                       <td><span className={`result-badge ${result.toLowerCase()}`}>{result.replace("_", " ")}</span></td>
                       <td className={`data-text pnl ${pnlTone}`}>
                         {pnlUp ? <TrendingUp size={12} aria-hidden="true" /> : pnlDown ? <TrendingDown size={12} aria-hidden="true" /> : null}
-                        <AnimatedNumber value={toNumber(trade.pnl)} format={formatMoney} />
+                        {isPips ? formatPips(rowPips) : <AnimatedNumber value={toNumber(trade.pnl)} format={formatMoney} />}
                       </td>
-                      <td className={`data-text ${pnlTone}`}>{formatActualR(trade.risk, trade.pnl)}</td>
+                      <td className={`data-text ${pnlTone}`}>{isPips ? "—" : formatActualR(trade.risk, trade.pnl)}</td>
                       <td>
                         <div className="row-actions">
                           <button title="View trade" aria-label={`View trade from ${formatDate(trade.tradeDate)}`} onClick={() => setViewedTrade(trade)}><Eye size={16} /></button>
@@ -286,13 +298,13 @@ function BaseTradeLogWithViewer({ stats, trades, allTrades, pagination, listLoad
         </>
       ) : (
         <EmptyState
-          title={search || resultFilter !== "ALL" ? "No trades match this filter." : "Your trade log is ready."}
-          copy={search || resultFilter !== "ALL" ? "Clear or adjust the filters to see another part of your journal." : "MT5 history and live positions will be logged automatically once the terminal sends them."}
-          action={!search && resultFilter === "ALL" ? <Button onClick={onNew}><Plus size={16} /> Log first trade</Button> : undefined}
+          title={search || resultFilter !== "ALL" ? "No trades match this filter." : isPips ? "Your testing log is ready." : "Your trade log is ready."}
+          copy={search || resultFilter !== "ALL" ? "Clear or adjust the filters to see another part of your journal." : isPips ? "Record forward-testing trades manually — results are tracked in pips." : "MT5 history and live positions will be logged automatically once the terminal sends them."}
+          action={!search && resultFilter === "ALL" ? <Button onClick={onNew}><Plus size={16} /> {isPips ? "Log first testing trade" : "Log first trade"}</Button> : undefined}
         />
       )}
     </section>
-    <TradeDetailDialog trade={viewedTrade} balance={balanceForTrade(viewedTrade || {})} balanceLabel={hasMt5Connection ? "Current MT5 balance" : "Running balance"} open={Boolean(viewedTrade)} onOpenChange={(open: boolean) => !open && setViewedTrade(undefined)} />
+    <TradeDetailDialog mode={mode} trade={viewedTrade} balance={isPips ? undefined : balanceForTrade(viewedTrade || {})} balanceLabel={isPips ? "Testing — no running balance" : hasMt5Connection ? "Current MT5 balance" : "Running balance"} open={Boolean(viewedTrade)} onOpenChange={(open: boolean) => !open && setViewedTrade(undefined)} />
   </>;
 }
 

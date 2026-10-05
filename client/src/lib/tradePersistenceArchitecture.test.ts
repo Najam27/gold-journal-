@@ -55,7 +55,7 @@ describe("trade persistence architecture", () => {
     expect(page).toMatch(/trpc\.trades\.list\.useQuery\(/);
     expect(page).toMatch(/await createTrade\.mutateAsync\(tradePayload as any\)/);
     expect(page).toMatch(/await updateTrade\.mutateAsync\(/);
-    expect(page).toMatch(/await deleteTrade\.mutateAsync\(\{ tradeId \}\)/);
+    expect(page).toMatch(/await deleteTrade\.mutateAsync\(\{ tradeId, environment: tradeEnv \}\)/);
     expect(page).toMatch(/await refreshCurrentAccount\(utils\)/);
   });
 
@@ -87,10 +87,17 @@ describe("trade persistence architecture", () => {
 
   it("never reads trades back out of browser storage", () => {
     const page = read("client/src/pages/GoldJournal.tsx");
-    // The page may remember UI chrome (the sidebar rail), never journal data.
+    // The page may remember UI chrome (the sidebar rail) and the LIVE|TESTING
+    // mode selection — never journal data. gj:tradeEnv holds only "LIVE" or
+    // "TESTING", not trades.
     expect(page).toMatch(/window\.localStorage\.getItem\("gj:sidebar-rail"\)/);
+    expect(page).toMatch(/localStorage\.getItem\("gj:tradeEnv"\)/);
     expect(page).not.toMatch(/indexedDB/i);
-    expect(page).not.toMatch(/localStorage\.(get|set)Item\([^)]*(trade|journal)/i);
+    // Every localStorage key mentioning trade/journal must be the mode flag.
+    const storageUses = page.match(/localStorage\.(get|set)Item\((`[^`]*`|"[^"]*"|'[^']*')/gi) ?? [];
+    const tradeish = storageUses.filter(use => /trade|journal/i.test(use));
+    const disallowed = tradeish.filter(use => !/gj:tradeEnv/i.test(use));
+    expect(disallowed).toEqual([]);
   });
 
   it("keeps the legitimate local storage that is not a trade store", () => {
@@ -112,7 +119,7 @@ describe("trade persistence architecture", () => {
     const router = read("server/goldRouter.ts");
     // Ownership is proven before every trade write.
     expect(router).toMatch(/create: protectedProcedure[\s\S]*?await getOwnedAccount\(ctx\.user\.id, input\.accountId\)/);
-    expect(router).toMatch(/update: protectedProcedure[\s\S]*?resolveOwnedTradeForMutation\(ctx\.user\.id, input\)/);
+    expect(router).toMatch(/update: protectedProcedure[\s\S]*?resolveOwnedTradeForMutation\(ctx\.user\.id, input, env\)/);
     expect(router).toMatch(/delete: protectedProcedure[\s\S]*?eq\(trades\.userId, ctx\.user\.id\)/);
     // Server-side idempotency for a retried save is retained (the unique
     // (userId, accountId, clientMutationId) index is not dropped).

@@ -9,6 +9,7 @@ import {
   type TradePresentationField,
   type TradeTone,
 } from "@/lib/tradePresentation";
+import { LIVE_MODE, type TradeModeConfig } from "@/lib/tradeModeConfig";
 
 /**
  * The journal's single trade viewer.
@@ -59,7 +60,7 @@ function Section({ title, accent, children }: { title: string; accent: string; c
  * fields are shown once in the header for the same reason. Nothing is lost: every
  * omitted field is on screen in the strip above.
  */
-export function TradePresentationView({ model, heading = "Trade card", balanceLabel }: { model: TradePresentation; heading?: string; balanceLabel?: string }) {
+export function TradePresentationView({ model, heading = "Trade card", balanceLabel, mode = LIVE_MODE }: { model: TradePresentation; heading?: string; balanceLabel?: string; mode?: TradeModeConfig }) {
   const kpiKeys = new Set(model.kpis.map(kpi => kpi.key));
   const fieldsOf = (id: string) => (model.sections.find(section => section.id === id)?.fields ?? [])
     .filter(field => !field.inHeader && !kpiKeys.has(field.key))
@@ -131,16 +132,18 @@ export function TradePresentationView({ model, heading = "Trade card", balanceLa
         <div className="tp-fields">{fieldsOf("mistakes").map(field => <Field field={field} key={field.key} />)}</div>
       </Section>
 
-      <Section title="8 · Psychology" accent={model.sections.find(section => section.id === "psychology")?.accent ?? "#A34FC0"}>
-        <div className="tp-blocks">
-          {fieldsOf("psychology").map(field => (
-            <div className="tp-block" key={field.key}>
-              <span>{field.label}</span>
-              <strong>{field.value === PRESENTATION_MISSING ? "No entry recorded." : field.value}</strong>
-            </div>
-          ))}
-        </div>
-      </Section>
+      {mode.showPsychology && (
+        <Section title="8 · Psychology" accent={model.sections.find(section => section.id === "psychology")?.accent ?? "#A34FC0"}>
+          <div className="tp-blocks">
+            {fieldsOf("psychology").map(field => (
+              <div className="tp-block" key={field.key}>
+                <span>{field.label}</span>
+                <strong>{field.value === PRESENTATION_MISSING ? "No entry recorded." : field.value}</strong>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
 
       <Section title="9 · Journal notes" accent={model.sections.find(section => section.id === "journal")?.accent ?? "#5C6672"}>
         <div className="tp-note">
@@ -167,8 +170,8 @@ export function TradePresentationView({ model, heading = "Trade card", balanceLa
 }
 
 /** The Trade Log / day-drill-down entry point for the canonical trade card. */
-export function TradeDetailDialog({ trade, balance, balanceLabel, open, onOpenChange }: any) {
-  const model = useMemo(() => (trade ? buildTradePresentation(trade, { runningBalance: balance ?? null }) : null), [trade, balance]);
+export function TradeDetailDialog({ mode = LIVE_MODE, trade, balance, balanceLabel, open, onOpenChange }: any) {
+  const model = useMemo(() => (trade ? buildTradePresentation(trade, { runningBalance: balance ?? null, mode }) : null), [trade, balance, mode]);
   if (!trade || !model) return null;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -177,7 +180,7 @@ export function TradeDetailDialog({ trade, balance, balanceLabel, open, onOpenCh
           <DialogTitle>Trade card</DialogTitle>
           <DialogDescription>{model.identity.line || balanceLabel}</DialogDescription>
         </DialogHeader>
-        <TradePresentationView model={model} balanceLabel={balanceLabel} />
+        <TradePresentationView model={model} balanceLabel={balanceLabel} mode={mode} />
       </DialogContent>
     </Dialog>
   );

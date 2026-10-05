@@ -223,8 +223,9 @@ describe("trade data page", () => {
   it("prints every canonical field label and value, with nothing dropped", async () => {
     const doc = await render([{ trade: enrichedTrade({ hasScreenshot: false }), runningBalance: 1070.9 }]);
     const model = buildTradePresentation(enrichedTrade(), { runningBalance: 1070.9 });
-    // "Quick log" is conditional (hideWhenMissing) — only rendered for quick-logged trades.
-    const labels = TRADE_PRESENTATION_LABELS.filter(label => !["Trade date", "Symbol", "Session", "Direction", "Result", "Quick log"].includes(label));
+    // "Quick log" and "Exit price" are conditional (hideWhenMissing) — only
+    // rendered for quick-logged trades / trades with an exit price.
+    const labels = TRADE_PRESENTATION_LABELS.filter(label => !["Trade date", "Symbol", "Session", "Direction", "Result", "Quick log", "Exit price"].includes(label));
     labels.forEach(label => expect(doc.written(), `missing label ${label}`).toContain(label.toUpperCase()));
     for (const section of model.sections) {
       for (const field of section.fields) {

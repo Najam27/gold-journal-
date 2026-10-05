@@ -20,6 +20,7 @@ import {
   type TradeTone,
 } from "./tradePresentation";
 import { formatDate } from "./gold";
+import { LIVE_MODE, type TradeModeConfig } from "./tradeModeConfig";
 
 type TradeCard = Record<string, unknown> & { tradeDate?: Date | string | number; direction?: string; result?: string; screenshotUrl?: string | null };
 
@@ -52,8 +53,8 @@ function safeFilename(value: unknown) {
  * Kept for the share pipeline's contract test: it is derived from the canonical
  * model, never hand-listed.
  */
-export function publicTradeCardFields(trade: TradeCard) {
-  const model = buildTradePresentation(trade);
+export function publicTradeCardFields(trade: TradeCard, mode: TradeModeConfig = LIVE_MODE) {
+  const model = buildTradePresentation(trade, { mode });
   return model.sections.flatMap(section => section.fields.map(field => [field.label, field.value] as const));
 }
 
@@ -106,8 +107,8 @@ function section(model: TradePresentation, id: string) {
   return wrapper;
 }
 
-async function createCardNode(trade: TradeCard) {
-  const model = buildTradePresentation(trade);
+async function createCardNode(trade: TradeCard, mode: TradeModeConfig = LIVE_MODE) {
+  const model = buildTradePresentation(trade, { mode });
   const card = document.createElement("article");
   Object.assign(card.style, { width: "1080px", boxSizing: "border-box", padding: "40px", color: CARD_TEXT, background: CARD_BACKGROUND, fontFamily: "Inter, Arial, sans-serif", lineHeight: "1.35" });
 
@@ -116,7 +117,7 @@ async function createCardNode(trade: TradeCard) {
   header.append(
     textElement("div", "GOLD JOURNAL · PRIVATE TRADE CARD", { color: CARD_GOLD, fontSize: "13px", fontWeight: "800", letterSpacing: "1.8px" }),
     textElement("h1", model.identity.line || PRESENTATION_MISSING, { margin: "10px 0 0", fontSize: "30px", lineHeight: "1.15" }),
-    textElement("div", `${model.identity.pnl}  ·  actual`, {
+    textElement("div", `${model.identity.pnl}  ·  ${mode.pnlUnit === "pips" ? "actual pips" : "actual"}`, {
       marginTop: "12px", padding: "10px 14px", borderRadius: "10px", fontSize: "22px", fontWeight: "800",
       color: model.identity.pnlValue >= 0 ? TONE_COLORS.positive : TONE_COLORS.negative,
       background: model.identity.pnlValue >= 0 ? "#143d32" : "#4a2527",
@@ -177,29 +178,32 @@ async function createCardNode(trade: TradeCard) {
   const mistakes = section(model, "mistakes");
   if (mistakes) card.append(mistakes);
 
-  const psychology = document.createElement("section");
-  const psychologyFields = model.sections.find(entry => entry.id === "psychology")?.fields ?? [];
-  Object.assign(psychology.style, { marginTop: "14px", border: `1px solid ${CARD_LINE}`, borderRadius: "10px", overflow: "hidden" });
-  psychology.append(band(TRADE_SECTION_THEME.psychology.title, TRADE_SECTION_THEME.psychology.accent));
-  const psychologyBody = document.createElement("div");
-  Object.assign(psychologyBody.style, { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "1px", background: CARD_LINE });
-  for (const [label, value] of [
-    // Labels and values both come from the canonical model, so the shared image
-    // can never drift from the viewer.
-    [psychologyFields[0]?.label, model.psychology.before],
-    [psychologyFields[1]?.label, model.psychology.during],
-    [psychologyFields[2]?.label, model.psychology.after],
-  ] as const) {
-    const cell = document.createElement("div");
-    Object.assign(cell.style, { padding: "11px 12px", background: CARD_PANEL });
-    cell.append(
-      textElement("div", (label ?? TRADE_SECTION_THEME.psychology.title).toUpperCase(), { color: CARD_MUTED, fontSize: "10px", fontWeight: "800", letterSpacing: "0.9px" }),
-      textElement("div", value.trim() === "" ? PRESENTATION_MISSING : value, { marginTop: "6px", fontSize: "13px", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }),
-    );
-    psychologyBody.append(cell);
+  // Testing Mode has no Psychology/Emotions anywhere, including the card.
+  if (mode.showPsychology) {
+    const psychology = document.createElement("section");
+    const psychologyFields = model.sections.find(entry => entry.id === "psychology")?.fields ?? [];
+    Object.assign(psychology.style, { marginTop: "14px", border: `1px solid ${CARD_LINE}`, borderRadius: "10px", overflow: "hidden" });
+    psychology.append(band(TRADE_SECTION_THEME.psychology.title, TRADE_SECTION_THEME.psychology.accent));
+    const psychologyBody = document.createElement("div");
+    Object.assign(psychologyBody.style, { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "1px", background: CARD_LINE });
+    for (const [label, value] of [
+      // Labels and values both come from the canonical model, so the shared image
+      // can never drift from the viewer.
+      [psychologyFields[0]?.label, model.psychology.before],
+      [psychologyFields[1]?.label, model.psychology.during],
+      [psychologyFields[2]?.label, model.psychology.after],
+    ] as const) {
+      const cell = document.createElement("div");
+      Object.assign(cell.style, { padding: "11px 12px", background: CARD_PANEL });
+      cell.append(
+        textElement("div", (label ?? TRADE_SECTION_THEME.psychology.title).toUpperCase(), { color: CARD_MUTED, fontSize: "10px", fontWeight: "800", letterSpacing: "0.9px" }),
+        textElement("div", value.trim() === "" ? PRESENTATION_MISSING : value, { marginTop: "6px", fontSize: "13px", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }),
+      );
+      psychologyBody.append(cell);
+    }
+    psychology.append(psychologyBody);
+    card.append(psychology);
   }
-  psychology.append(psychologyBody);
-  card.append(psychology);
 
   const journal = document.createElement("section");
   Object.assign(journal.style, { marginTop: "14px", border: `1px solid ${CARD_LINE}`, borderRadius: "10px", overflow: "hidden" });
@@ -233,10 +237,10 @@ async function createCardNode(trade: TradeCard) {
   return card;
 }
 
-export async function createTradeCardPng(trade: TradeCard) {
+export async function createTradeCardPng(trade: TradeCard, mode: TradeModeConfig = LIVE_MODE) {
   if (typeof document === "undefined") throw new Error("Trade-card images can only be created in a browser.");
   const host = document.createElement("div"); Object.assign(host.style, { position: "fixed", left: "-12000px", top: "0", zIndex: "-1", pointerEvents: "none" });
-  const card = await createCardNode(trade); host.append(card); document.body.append(host);
+  const card = await createCardNode(trade, mode); host.append(card); document.body.append(host);
   try {
     const { default: html2canvas } = await import("html2canvas");
     const canvas = await html2canvas(card, { backgroundColor: CARD_BACKGROUND, scale: 2, useCORS: true, logging: false });

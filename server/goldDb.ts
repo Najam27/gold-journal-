@@ -22,8 +22,8 @@ const CASH_NET_FALLBACK = { value: 0, source: "fallback" as const };
 export function resolveDerivedCashNet(result: PromiseSettledResult<number>) { return result.status === "fulfilled" ? { value: result.value, source: "rpc" as const } : CASH_NET_FALLBACK; }
 export function resolveDerivedTradeSummary(result: PromiseSettledResult<TradeSummary>) { return result.status === "fulfilled" ? result.value : TRADE_SUMMARY_FALLBACK; }
 
-async function getAccountTradeSummary(userId: number, accountId: number) {
-  const { data, error } = await getSupabaseAdmin().rpc("gj_account_trade_summary", { target_user_id: userId, target_account_id: accountId });
+async function getAccountTradeSummary(userId: number, accountId: number, environment: "LIVE" | "TESTING" = "LIVE") {
+  const { data, error } = await getSupabaseAdmin().rpc("gj_account_trade_summary", { target_user_id: userId, target_account_id: accountId, target_environment: environment });
   if (error) throw new Error(`Supabase account trade summary is unavailable: ${error.message}`);
   const row = Array.isArray(data) ? data[0] : data;
   const number = (value: unknown) => { const parsed = Number(value ?? 0); return Number.isFinite(parsed) ? parsed : 0; };
@@ -61,16 +61,20 @@ export async function getOwnedAccount(userId: number, accountId?: number) {
  *
  * `resolvedAccount` is the row the router already resolved and authorized, so a
  * composite read no longer repeats `ensureAccount` plus the ownership select.
+ *
+ * Every trade read is scoped to one `environment` (default LIVE): Live and
+ * Testing trades can never appear in the same composite read. Cash, goals,
+ * plans, and skipped trades are account-level concepts and stay account-scoped.
  */
-export async function getJournal(userId: number, accountId?: number, resolvedAccount?: Awaited<ReturnType<typeof getOwnedAccount>> | null) {
+export async function getJournal(userId: number, accountId?: number, resolvedAccount?: Awaited<ReturnType<typeof getOwnedAccount>> | null, environment: "LIVE" | "TESTING" = "LIVE") {
   const trace = createPerfTrace("journal.get", { userId, accountId });
   const db = await trace.stage("connect", () => requireDb());
   const activeAccount = resolvedAccount?.id ? resolvedAccount : await trace.stage("account lookup", () => getOwnedAccount(userId, accountId));
   const goalWindowStart = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000);
   const [accountList, tradeList, goalTradeList, movementList, goalList, skippedList, planList, profileList] = await Promise.all([
     trace.stage("accounts", () => db.select().from(accounts).where(eq(accounts.userId, userId)).orderBy(desc(accounts.createdAt)).limit(1_000)),
-    trace.stage("trades", () => db.select().from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, activeAccount.id))).orderBy(desc(trades.tradeDate)).limit(500)),
-    trace.stage("goal trades", () => db.select().from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, activeAccount.id), gte(trades.tradeDate, goalWindowStart))).orderBy(desc(trades.tradeDate)).limit(10_000)),
+    trace.stage("trades", () => db.select().from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, activeAccount.id), eq(trades.environment, environment))).orderBy(desc(trades.tradeDate)).limit(500)),
+    trace.stage("goal trades", () => db.select().from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, activeAccount.id), eq(trades.environment, environment), gte(trades.tradeDate, goalWindowStart))).orderBy(desc(trades.tradeDate)).limit(10_000)),
     trace.stage("cash", () => db.select().from(cashMovements).where(and(eq(cashMovements.userId, userId), eq(cashMovements.accountId, activeAccount.id))).orderBy(desc(cashMovements.movementDate)).limit(200)),
     trace.stage("goals", () => db.select().from(goals).where(and(eq(goals.userId, userId), eq(goals.accountId, activeAccount.id), eq(goals.isCustom, true))).orderBy(goals.period, goals.createdAt).limit(200)),
     trace.stage("skipped", () => db.select().from(skippedTrades).where(and(eq(skippedTrades.userId, userId), eq(skippedTrades.accountId, activeAccount.id))).orderBy(desc(skippedTrades.tradeDate)).limit(500)),
@@ -80,7 +84,7 @@ export async function getJournal(userId: number, accountId?: number, resolvedAcc
   const profileRow = profileList[0] as { identityStatement?: string | null; disciplineWeights?: unknown; behaviorConfig?: unknown } | undefined;
   const [cashResult, tradeSummaryResult] = await Promise.allSettled([
     trace.stage("rpc cash net", () => getAccountCashNet(userId, activeAccount.id)),
-    trace.stage("rpc trade summary", () => getAccountTradeSummary(userId, activeAccount.id)),
+    trace.stage("rpc trade summary", () => getAccountTradeSummary(userId, activeAccount.id, environment)),
   ]);
   const cashNet = resolveDerivedCashNet(cashResult);
   const cashNetValue = cashNet.source === "rpc" ? cashNet.value : movementList.reduce((total, movement) => total + (movement.type === "DEPOSIT" ? Number(movement.amount ?? 0) : -Number(movement.amount ?? 0)), 0);

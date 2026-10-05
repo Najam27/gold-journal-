@@ -11,6 +11,7 @@ vi.mock("@/components/ui/textarea", () => ({ Textarea: (props: any) => <textarea
 vi.mock("@/components/ui/dialog", () => ({ Dialog: ({ children }: any) => <>{children}</>, DialogContent: ({ children }: any) => <div>{children}</div>, DialogDescription: ({ children }: any) => <p>{children}</p>, DialogHeader: ({ children }: any) => <header>{children}</header>, DialogTitle: ({ children }: any) => <h2>{children}</h2> }));
 
 import { TradeDialogWithCustomOptions } from "./TradeDialogWithCustomOptions";
+import { TESTING_MODE } from "@/lib/tradeModeConfig";
 
 describe("TradeDialogWithCustomOptions", () => {
   beforeEach(() => { mocks.add.mockReset(); mocks.invalidate.mockReset(); mocks.add.mockResolvedValue({ success: true }); });
@@ -97,5 +98,22 @@ describe("TradeDialogWithCustomOptions", () => {
     expect(screen.getByRole("option", { name: "Select result" })).toHaveProperty("disabled", true);
     fireEvent.change(direction, { target: { value: "SELL" } });
     expect(setForm).toHaveBeenCalledWith(expect.objectContaining({ direction: "SELL" }));
+  });
+
+  it("shows the Emotions section in Live but hides it in Testing Mode", () => {
+    const form = { tradeDate: "2026-10-05", session: "London", direction: "BUY", result: "WIN", level: "", timeframe: "", setupQuality: "", executionType: "", marketCondition: "", biasAlignment: "", confirmationType: "", slPlacement: "", tpPlacement: "", mistake: "", holdQuality: "", patienceScore: "", planFollowScore: "", risk: "50", reward: "100", pnl: "35", entryPrice: "2650", exitPrice: "", slPrice: "", tpPrice: "", notes: "", emotionBefore: "", emotionDuring: "", emotionAfter: "" };
+    const props = { open: true, setOpen: vi.fn(), setForm: vi.fn(), editing: undefined, onSave: vi.fn(), pending: false, screenshot: undefined, setScreenshot: vi.fn(), progress: 0 };
+    // Live (default): Emotions visible, editable $ P&L.
+    const { unmount } = render(<TradeDialogWithCustomOptions {...props} form={form} />);
+    expect(screen.getByText("Emotions")).toBeTruthy();
+    expect(screen.getByText("Before trade")).toBeTruthy();
+    unmount();
+    // Testing: no Emotions, pips are derived and read-only.
+    render(<TradeDialogWithCustomOptions {...props} form={form} mode={TESTING_MODE} />);
+    expect(screen.queryByText("Emotions")).toBeNull();
+    expect(screen.queryByText("Before trade")).toBeNull();
+    expect(screen.getByText("Actual pips (auto)")).toBeTruthy();
+    expect(screen.getByText("Exit price")).toBeTruthy();
+    expect(screen.queryByText("Actual P&L $")).toBeNull();
   });
 });

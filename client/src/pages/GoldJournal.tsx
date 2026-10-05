@@ -102,6 +102,11 @@ function readFileAsDataUrl(file: File) {
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { TradeLogWithViewer } from "@/components/TradeLogWithViewer";
 import { TradeDialogWithCustomOptions } from "@/components/TradeDialogWithCustomOptions";
+import TradeEnvironmentSwitch from "@/components/TradeEnvironmentSwitch";
+import { LIVE_MODE, modeFor } from "@/lib/tradeModeConfig";
+import { journalPipStats } from "@/lib/pipStats";
+import { isTradeEnvironment, type TradeEnvironment } from "@shared/tradeEnvironment";
+import { tradePips } from "@shared/pipMath";
 import { QuickTradeDialog } from "@/components/QuickTradeDialog";
 import { StreakPanel } from "@/components/StreakPanel";
 import { GuardBanner } from "@/components/GuardBanner";
@@ -227,6 +232,8 @@ type TradeForm = {
   entryPrice: string;
   slPrice: string;
   tpPrice: string;
+  /** Exit price (Testing Mode; pips are derived from entry/exit). "" = not recorded. */
+  exitPrice: string;
   risk: string;
   reward: string;
   pnl: string;
@@ -312,6 +319,7 @@ export function defaultTrade(): TradeForm {
     entryPrice: "",
     slPrice: "",
     tpPrice: "",
+    exitPrice: "",
     risk: "",
     reward: "",
     pnl: "",
@@ -556,6 +564,28 @@ export default function GoldJournal() {
   const [search, setSearch] = useState("");
   const [resultFilter, setResultFilter] = useState("ALL");
   const [tradePage, setTradePage] = useState(1);
+  // Testing Mode: the top-level LIVE | TESTING switch. The same Trade Log
+  // reads and writes only the selected environment, server-side. Persisted
+  // like the last-viewed account; page counts differ per environment, so a
+  // switch always resets to page 1 (never an empty page).
+  const [tradeEnv, setTradeEnvState] = useState<TradeEnvironment>(() => {
+    try {
+      const stored = localStorage.getItem("gj:tradeEnv");
+      return isTradeEnvironment(stored) ? stored : "LIVE";
+    } catch {
+      return "LIVE";
+    }
+  });
+  const setTradeEnv = (env: TradeEnvironment) => {
+    setTradeEnvState(env);
+    setTradePage(1);
+    try {
+      localStorage.setItem("gj:tradeEnv", env);
+    } catch {
+      // Private mode: the switch still works for this session.
+    }
+  };
+  const tradeMode = modeFor(tradeEnv);
   // Typing must not fire a filtered server read on every keystroke: the input
   // stays instant and the trade-list query follows a short pause.
   const debouncedSearch = useDebouncedValue(search, 250);
@@ -586,7 +616,7 @@ export default function GoldJournal() {
   const ownedAccounts = accountListQuery.data ?? [];
   const accountSelectionResolved =
     accountListQuery.isSuccess || Boolean(accountBootstrap.data?.id);
-  const queryInput = useMemo(() => ({ accountId }), [accountId]);
+  const queryInput = useMemo(() => ({ accountId, environment: tradeEnv }), [accountId, tradeEnv]);
   // Which read the visible view needs first. Everything else is secondary and
   // waits for it, so switching accounts loads one thing, not eight.
   const criticalView = view === "trades" ? "trades" : view === "mt5" ? "mt5" : "journal";
@@ -651,9 +681,10 @@ export default function GoldJournal() {
               resultFilter === "ALL"
                 ? undefined
                 : (resultFilter as "WIN" | "LOSS" | "BREAK_EVEN" | "OPEN"),
+            environment: tradeEnv,
           }
         : undefined,
-    [accountId, debouncedSearch, tradePage, resultFilter]
+    [accountId, debouncedSearch, tradePage, resultFilter, tradeEnv]
   );
   const tradeListQuery = trpc.trades.list.useQuery(tradeListInput!, {
     enabled: Boolean(
@@ -1062,6 +1093,9 @@ export default function GoldJournal() {
         risk: source.risk ?? "",
         reward: source.reward ?? "",
         pnl: source.pnl ?? "",
+        // A duplicate is a new trade: like pnl, the exit leg (and therefore
+        // the derived pips) must not be carried over from the source trade.
+        exitPrice: "",
         patienceScore: source.patienceScore ? String(source.patienceScore) : "",
         // Duplicating a journal trade must NOT carry its MT5 ticket over: the
         // server refuses to journal one ticket twice, so every duplicate of
@@ -1104,6 +1138,7 @@ export default function GoldJournal() {
       entryPrice: trade.entryPrice ?? "",
       slPrice: trade.slPrice ?? "",
       tpPrice: trade.tpPrice ?? "",
+      exitPrice: trade.exitPrice ?? "",
       risk: trade.risk ?? "",
       reward: trade.reward ?? "",
       pnl: trade.pnl ?? "",
@@ -1182,6 +1217,9 @@ export default function GoldJournal() {
       session: tradeForm.session,
       direction: tradeForm.direction,
       result: tradeForm.result,
+      // Testing Mode discriminator: the row is written to the selected
+      // environment server-side. Updates never write this (see router).
+      environment: tradeEnv,
       level: tradeForm.level,
       timeframe: tradeForm.timeframe,
       setupQuality: tradeForm.setupQuality,
@@ -1203,11 +1241,17 @@ export default function GoldJournal() {
       entryPrice: tradeForm.entryPrice === "" ? null : Number(tradeForm.entryPrice),
       slPrice: tradeForm.slPrice === "" ? null : Number(tradeForm.slPrice),
       tpPrice: tradeForm.tpPrice === "" ? null : Number(tradeForm.tpPrice),
+      exitPrice: tradeForm.exitPrice === "" ? null : Number(tradeForm.exitPrice),
       mfe: tradeForm.mfe === "" ? null : Number(tradeForm.mfe),
       mae: tradeForm.mae === "" ? null : Number(tradeForm.mae),
       risk: tradeForm.risk === "" ? null : Number(tradeForm.risk),
       reward: tradeForm.reward === "" ? null : Number(tradeForm.reward),
-      pnl: Number(tradeForm.pnl || 0),
+      // In Testing Mode the P&L field is pips, derived from entry/exit —
+      // never hand-typed. The stored `pnl` number is unit-agnostic ($ Live,
+      // pips Testing); `deriveTradeResult` works on both.
+      pnl: tradeEnv === "TESTING"
+        ? (tradePips({ direction: tradeForm.direction, entryPrice: tradeForm.entryPrice === "" ? null : Number(tradeForm.entryPrice), exitPrice: tradeForm.exitPrice === "" ? null : Number(tradeForm.exitPrice) }) ?? 0)
+        : Number(tradeForm.pnl || 0),
       notes: tradeForm.notes,
       emotionBefore: tradeForm.emotionBefore,
       emotionDuring: tradeForm.emotionDuring,
@@ -1380,6 +1424,9 @@ export default function GoldJournal() {
         session: payload.session,
         direction: payload.direction,
         result: "OPEN",
+        // Quick-logged rows land in the current environment — never rely on
+        // the server default for writes.
+        environment: tradeEnv,
         pnl: 0,
         quickLogged: true,
         patienceScore: null,
@@ -1402,19 +1449,26 @@ export default function GoldJournal() {
       setQuickSaving(false);
     }
   };
-  const exportRows = trades.map((trade: any, index: number) => ({
-    "#": index + 1,
-    Date: formatDate(trade.tradeDate),
-    Session: trade.session,
-    Side: trade.direction,
-    Level: trade.level,
-    Result: trade.result,
-    Risk: toNumber(trade.risk),
-    Reward: toNumber(trade.reward),
-    "R:R": formatRr(trade.risk, trade.reward),
-    "P&L": toNumber(trade.pnl),
-    Notes: sanitize(trade.notes),
-  }));
+  const exportRows = trades.map((trade: any, index: number) => {
+    const isTestingRow = tradeEnv === "TESTING";
+    return {
+      "#": index + 1,
+      Date: formatDate(trade.tradeDate),
+      Session: trade.session,
+      Side: trade.direction,
+      Level: trade.level,
+      Result: trade.result,
+      Risk: toNumber(trade.risk),
+      Reward: toNumber(trade.reward),
+      "R:R": formatRr(trade.risk, trade.reward),
+      // Testing rows export the derived pips under a "Pips" column; Live
+      // keeps the $ "P&L" column exactly as before.
+      ...(isTestingRow
+        ? { Pips: tradePips({ direction: trade.direction, entryPrice: trade.entryPrice, exitPrice: trade.exitPrice }) ?? 0, "Exit price": trade.exitPrice ?? "" }
+        : { "P&L": toNumber(trade.pnl) }),
+      Notes: sanitize(trade.notes),
+    };
+  });
   const exportCsv = () => {
     const headers = Object.keys(exportRows[0] ?? { Date: "" });
     const rows = exportRows.map((row: Record<string, string | number>) =>
@@ -1565,6 +1619,8 @@ export default function GoldJournal() {
           account={account}
           accounts={ownedAccounts.length ? ownedAccounts : (data?.accounts ?? [])}
           onAccount={selectAccount}
+          tradeEnv={tradeEnv}
+          onTradeEnv={setTradeEnv}
         />
         {data?.tradeSummaryError && (
           <div className="derived-status" role="status">
@@ -1648,12 +1704,27 @@ export default function GoldJournal() {
             )}
             {view === "trades" && (
               <>
-                <GuardBanner
-                  guardConfig={(account as any)?.guardConfig ?? null}
-                  trades={trades as any[]}
-                  startingBalance={toNumber(account?.startingBalance)}
-                />
+                <div className="trade-env-switch-row mobile-only">
+                  <TradeEnvironmentSwitch value={tradeEnv} onChange={setTradeEnv} compact />
+                  {tradeEnv === "TESTING" && (
+                    <span className="trade-env-hint">Testing Mode — trades are manual, results in pips</span>
+                  )}
+                </div>
+                {tradeMode.allowMt5 && (
+                  <GuardBanner
+                    guardConfig={(account as any)?.guardConfig ?? null}
+                    trades={trades as any[]}
+                    startingBalance={toNumber(account?.startingBalance)}
+                  />
+                )}
+                {tradeEnv === "TESTING" && view === "trades" && (
+                  <div className="trade-env-banner" role="status">
+                    <strong>Testing Mode</strong>
+                    <span>Forward-testing trades only — results in pips, manual entries, no MT5.</span>
+                  </div>
+                )}
                 <TradeLog
+                mode={tradeMode}
                 stats={stats}
                 trades={pagedTrades}
                 allTrades={trades}
@@ -1665,11 +1736,11 @@ export default function GoldJournal() {
                 onRetry={() => void tradeListQuery.refetch()}
                 account={account}
                 dangerGoals={dangerGoals}
-                mt5LivePositions={mt5Workspace.data?.openPositions ?? []}
-                mt5Summary={activeMt5Connection}
-                mt5Syncing={mt5Workspace.isFetching}
+                mt5LivePositions={tradeMode.allowMt5 ? (mt5Workspace.data?.openPositions ?? []) : []}
+                mt5Summary={tradeMode.allowMt5 ? activeMt5Connection : undefined}
+                mt5Syncing={tradeMode.allowMt5 && mt5Workspace.isFetching}
                 hasMt5Connection={
-                  (mt5Workspace.data?.connections?.length ?? 0) > 0
+                  tradeMode.allowMt5 && (mt5Workspace.data?.connections?.length ?? 0) > 0
                 }
                 search={search}
                 resultFilter={resultFilter}
@@ -1699,7 +1770,7 @@ export default function GoldJournal() {
                   // failure keeps the row visible instead of pretending it went
                   // away.
                   try {
-                    await deleteTrade.mutateAsync({ tradeId });
+                    await deleteTrade.mutateAsync({ tradeId, environment: tradeEnv });
                     await refreshCurrentAccount(utils);
                     toast.success("Trade deleted.");
                   } catch (error: unknown) {
@@ -1716,13 +1787,16 @@ export default function GoldJournal() {
                   if (
                     !account ||
                     !window.confirm(
-                      "Permanently delete every trade in the active account?"
+                      tradeEnv === "TESTING"
+                        ? "Permanently delete every testing trade in the active account? Live trades are untouched."
+                        : "Permanently delete every trade in the active account?"
                     )
                   )
                     return;
                   await clearAll.mutateAsync({
                     accountId: account.id,
                     confirmed: true,
+                    environment: tradeEnv,
                   });
                   refresh();
                 }}
@@ -1742,7 +1816,7 @@ export default function GoldJournal() {
               <div className="view-hero-3d">
                 <Premium3DBackground tone="blue" className="view-hero-3d-canvas" />
                 <React.Suspense fallback={<Loading />}>
-                  <AnalysisDashboardLazy accountId={account?.id} />
+                  <AnalysisDashboardLazy accountId={account?.id} mode={tradeMode} />
                 </React.Suspense>
               </div>
             )}
@@ -1831,6 +1905,7 @@ export default function GoldJournal() {
             {view === "calendar" && (
               <React.Suspense fallback={<Loading />}>
               <CalendarView
+                mode={tradeMode}
                 trades={trades}
                 plans={data?.dailyPlans ?? []}
                 behaviorConfig={behaviorConfig}
@@ -1892,6 +1967,7 @@ export default function GoldJournal() {
       <OptionListManager />
       <BulkPdfExporter />
       <TradeDialog
+        mode={tradeMode}
         open={tradeDialog}
         setOpen={setTradeDialog}
         form={tradeForm}
@@ -2138,7 +2214,7 @@ function AccountSwitcher({ account, accounts, onAccount }: any) {
     </label>
   );
 }
-function PageHeader({ view, online, onNew, account, accounts, onAccount }: any) {
+function PageHeader({ view, online, onNew, account, accounts, onAccount, tradeEnv, onTradeEnv }: any) {
   const title =
     navItems.find(item => item.id === view)?.label || "Gold Journal";
   return (
@@ -2149,6 +2225,7 @@ function PageHeader({ view, online, onNew, account, accounts, onAccount }: any) 
       </div>
       <div className="pagebar-actions">
         <AccountSwitcher account={account} accounts={accounts} onAccount={onAccount} />
+        <TradeEnvironmentSwitch value={tradeEnv} onChange={onTradeEnv} />
         <span className="sync-chip">
           <Cloud size={14} /> {online ? "Live cloud sync" : "Offline"}
         </span>

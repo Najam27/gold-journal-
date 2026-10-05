@@ -66,6 +66,7 @@ import {
 } from "./tradePresentation";
 import { buildPeriodAnalysis, type AnalysisBlock, type AnalysisPage, type AnalysisTable, type PeriodAnalysis } from "./tradePdfAnalysis";
 import type { BulkPdfSummary } from "./bulkPdf";
+import { LIVE_MODE, type TradeModeConfig } from "./tradeModeConfig";
 
 /** The page geometry, palette, and layout primitives are the report's public surface. */
 export * from "./tradePdfLayout";
@@ -1094,6 +1095,8 @@ export type TradeLogPdfOptions = {
   accountName: string;
   rangeLabel: string;
   mode: "ALL_TIME" | "RANGE";
+  /** Live renders $ and psychology; Testing renders pips without psychology. */
+  tradeMode?: TradeModeConfig;
   summary: BulkPdfSummary;
   trades: TradeLogPdfTrade[];
   fetchImage?: (url: string) => Promise<PdfImage>;
@@ -1141,14 +1144,15 @@ export async function renderTradeLogPdf(doc: PdfDoc, options: TradeLogPdfOptions
     return { pages: total, trades: 0, layout: validateLayout(ctx) };
   }
   const fetchImage = createPdfImageCache(options.fetchImage ?? fetchPdfImage);
+  const tradeMode = options.tradeMode ?? LIVE_MODE;
   for (let index = 0; index < options.trades.length; index += 1) {
     const row = options.trades[index];
-    const model = buildTradePresentation(row.trade, { runningBalance: row.runningBalance ?? null });
+    const model = buildTradePresentation(row.trade, { runningBalance: row.runningBalance ?? null, mode: tradeMode });
     const position = `Trade ${String(index + 1).padStart(2, "0")} / ${String(options.trades.length).padStart(2, "0")}`;
     renderTradeDataPage(ctx, model, index, options.trades.length);
     await renderScreenshotPage(ctx, { model, position, fetchImage });
   }
-  const analysis = options.analysis ?? buildPeriodAnalysis(options.trades.map(row => row.trade), { accountName: options.accountName, rangeLabel: options.rangeLabel });
+  const analysis = options.analysis ?? buildPeriodAnalysis(options.trades.map(row => row.trade), { accountName: options.accountName, rangeLabel: options.rangeLabel, tradeMode: options.tradeMode });
   for (const page of analysis.pages) renderAnalysisPage(ctx, page, options.rangeLabel, options.mode, analysis.total);
   const total = doc.getNumberOfPages();
   renderFooters(doc, options, total);

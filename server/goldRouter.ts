@@ -27,6 +27,8 @@ import { compareAnalysis } from "@shared/analysisEngine";
 import { getPktDateKey, isPktDateKey, pktDateToTimestamp } from "@shared/pktDate";
 import { normalizeTradeOptionValue } from "@shared/tradeOptionCategories";
 import { deriveTradeResult } from "@shared/tradeOutcome";
+import { normalizeTradeEnvironment } from "@shared/tradeEnvironment";
+import { tradePips } from "@shared/pipMath";
 import {
   OPTION_COLUMNS,
   ensureDefaultTradeOptions,
@@ -97,7 +99,7 @@ const pktDateInput = z.string().refine(isPktDateKey, "Use a valid PKT calendar d
 // Analysis filters echo values the trader already stored on a trade row, so they
 // must accept exactly the same text a trade can hold. Bounding them would make a
 // trade with a long Level/Setup un-filterable in analysis.
-const analysisFiltersInput = z.object({ startDate: pktDateInput.nullable().optional(), endDate: pktDateInput.nullable().optional(), session: z.string().trim().nullable().optional(), timeframe: z.string().trim().nullable().optional(), level: z.string().trim().nullable().optional(), setup: z.string().trim().nullable().optional(), direction: z.enum(["BUY", "SELL"]).nullable().optional(), result: z.enum(["WIN", "LOSS", "BREAK_EVEN", "OPEN"]).nullable().optional() }).default({});
+const analysisFiltersInput = z.object({ startDate: pktDateInput.nullable().optional(), endDate: pktDateInput.nullable().optional(), session: z.string().trim().nullable().optional(), timeframe: z.string().trim().nullable().optional(), level: z.string().trim().nullable().optional(), setup: z.string().trim().nullable().optional(), direction: z.enum(["BUY", "SELL"]).nullable().optional(), result: z.enum(["WIN", "LOSS", "BREAK_EVEN", "OPEN"]).nullable().optional(), environment: z.enum(["LIVE", "TESTING"]).nullable().optional() }).default({});
 const isFuturePktTimestamp = (timestamp: number, now = new Date()) => getPktDateKey(timestamp) > getPktDateKey(now);
 const canonicalPktPlanDate = (timestamp: number) => new Date(pktDateToTimestamp(getPktDateKey(timestamp)));
 const analysisInput = z.object({ accountId: z.number().int().positive(), filters: analysisFiltersInput });
@@ -127,6 +129,10 @@ const tradeInput = z.object({
   session: z.string().trim().min(1),
   direction: z.enum(["BUY", "SELL"]),
   result: z.enum(["WIN", "LOSS", "BREAK_EVEN", "OPEN"]),
+  // Testing Mode discriminator. Defaults to LIVE so every historical write
+  // path keeps producing Live rows; update/delete inputs strip it so the
+  // discriminator is immutable after create.
+  environment: z.enum(["LIVE", "TESTING"]).optional().default("LIVE"),
   level: freeText,
   timeframe: freeText,
   setupQuality: freeText,
@@ -150,6 +156,9 @@ const tradeInput = z.object({
   entryPrice: money(0).nullable().optional().default(null),
   slPrice: money(0).nullable().optional().default(null),
   tpPrice: money(0).nullable().optional().default(null),
+  // Exit price: the exit leg pips are derived from in Testing Mode. Live
+  // trades keep their dollar P&L and leave this null.
+  exitPrice: money(0).nullable().optional().default(null),
   // Excursion fields ($) for the exit-efficiency analysis. Null = not recorded.
   mfe: money(0).nullable().optional().default(null),
   mae: money(0).nullable().optional().default(null),
@@ -216,14 +225,26 @@ function resolveScreenshotForWrite(
  * forever, which blocked every later queued write for the account. When the id
  * is not a real row, the mutation's originating create id is used to find the
  * row that create produced.
+ *
+ * The `environment` scopes both lookup branches: an update/delete naming a
+ * trade id from the wrong environment resolves to nothing ("trade
+ * unavailable") instead of touching the wrong row. The environment column is
+ * never written by updates — the discriminator is immutable after create.
  */
-async function resolveOwnedTradeForMutation(userId: number, input: { tradeId: number; originMutationId?: string | null }) {
-  if (Number.isInteger(input.tradeId) && input.tradeId > 0) return ownsTrade(userId, input.tradeId);
+async function resolveOwnedTradeForMutation(userId: number, input: { tradeId: number; originMutationId?: string | null }, environment: "LIVE" | "TESTING") {
+  if (Number.isInteger(input.tradeId) && input.tradeId > 0) return ownsTradeInEnvironment(userId, input.tradeId, environment);
   if (!input.originMutationId) throw new Error("This change targets a trade that has not reached the server yet.");
   const db = await dbOrThrow();
-  const found = await db.select().from(trades).where(and(eq(trades.userId, userId), eq(trades.clientMutationId, input.originMutationId))).limit(1);
+  const found = await db.select().from(trades).where(and(eq(trades.userId, userId), eq(trades.clientMutationId, input.originMutationId), eq(trades.environment, environment))).limit(1);
   if (!found[0]) throw new Error("This change targets a trade that has not reached the server yet.");
   return found[0];
+}
+
+async function ownsTradeInEnvironment(userId: number, tradeId: number, environment: "LIVE" | "TESTING") {
+  const db = await dbOrThrow();
+  const result = await db.select().from(trades).where(and(eq(trades.id, tradeId), eq(trades.userId, userId), eq(trades.environment, environment))).limit(1);
+  if (!result[0]) throw new Error("That trade is unavailable.");
+  return result[0];
 }
 
 async function ownGoal(userId: number, goalId: number) {
@@ -323,17 +344,17 @@ async function purgeAccountScreenshots(userId: number, accountId: number) {
   }
 }
 
-async function clearAccountJournalData(userId: number, accountId: number) {
+async function clearAccountJournalData(userId: number, accountId: number, environment: "LIVE" | "TESTING" = "LIVE") {
   await getOwnedAccount(userId, accountId);
   // Evidence first, while the keys are still on the rows being deleted.
   await purgeAccountScreenshots(userId, accountId);
-  await clearAccountJournalDataAtomic(userId, accountId, new Date());
+  await clearAccountJournalDataAtomic(userId, accountId, new Date(), environment);
 }
 
 export const goldRouter = router({
   journal: router({
     bootstrap: protectedProcedure.query(async ({ ctx }) => toSafeAccountListItem(await ensureAccount(ctx.user.id))),
-    get: protectedProcedure.input(z.object({ accountId: z.number().int().positive().optional() })).query(async ({ ctx, input }) => {
+    get: protectedProcedure.input(z.object({ accountId: z.number().int().positive().optional(), environment: z.enum(["LIVE", "TESTING"]).optional().default("LIVE") })).query(async ({ ctx, input }) => {
       // READ-ONLY by design. This procedure previously ran the MT5 -> Trade Log
       // reconciliation (a write path with one Supabase round-trip per stored MT5
       // position) before its first read, which is what made account switches and
@@ -341,7 +362,7 @@ export const goldRouter = router({
       // reconciliation now runs through mt5.syncTradeLog, independently.
       const trace = createPerfTrace("journal.get.request", { userId: ctx.user.id, accountId: input.accountId });
       const account = await trace.stage("account authorization", () => getOwnedAccount(ctx.user.id, input.accountId));
-      const journal = await getJournal(ctx.user.id, account.id, account);
+      const journal = await getJournal(ctx.user.id, account.id, account, normalizeTradeEnvironment(input.environment));
       trace.done();
       return journal;
     }),
@@ -493,12 +514,16 @@ export const goldRouter = router({
     }),
   }),
   trades: router({
-    list: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(50).default(12), search: z.string().trim().max(100).optional().default(""), result: z.enum(["WIN", "LOSS", "BREAK_EVEN", "OPEN"]).optional() })).query(async ({ ctx, input }) => {
+    list: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(50).default(12), search: z.string().trim().max(100).optional().default(""), result: z.enum(["WIN", "LOSS", "BREAK_EVEN", "OPEN"]).optional(), environment: z.enum(["LIVE", "TESTING"]).optional().default("LIVE") })).query(async ({ ctx, input }) => {
       // Pure read: the Trade Log must render from the paginated trade list alone,
       // without waiting for MT5 reconciliation, analysis, or notifications.
       const account = await getOwnedAccount(ctx.user.id, input.accountId);
       const db = await dbOrThrow();
-      let where = and(eq(trades.userId, ctx.user.id), eq(trades.accountId, account.id));
+      // Environment isolation: a list call can only ever see one environment.
+      // The zod default keeps every historical caller (which sends nothing)
+      // on exactly its old result set.
+      const env = normalizeTradeEnvironment(input.environment);
+      let where = and(eq(trades.userId, ctx.user.id), eq(trades.accountId, account.id), eq(trades.environment, env));
       if (input.result) where = and(where, eq(trades.result, input.result));
       if (input.search) {
         // Escape the LIKE wildcards so a literal "%" or "_" in the trader's
@@ -523,8 +548,12 @@ export const goldRouter = router({
         if (isFuturePktTimestamp(input.tradeDate)) throw new TRPCError({ code: "BAD_REQUEST", message: "Future trade dates are not allowed." });
         await getOwnedAccount(ctx.user.id, input.accountId);
         const db = await dbOrThrow();
+        // Testing trades are manually recorded. MT5 is Live-only, so a Testing
+        // write can never carry an MT5 ticket.
+        const env = normalizeTradeEnvironment(input.environment);
+        if (env === "TESTING" && input.mt5Ticket) throw new TRPCError({ code: "BAD_REQUEST", message: "Testing trades are manual-only and cannot carry an MT5 ticket." });
         if (input.clientMutationId) {
-          const existing = await db.select().from(trades).where(and(eq(trades.userId, ctx.user.id), eq(trades.accountId, input.accountId), eq(trades.clientMutationId, input.clientMutationId))).limit(1);
+          const existing = await db.select().from(trades).where(and(eq(trades.userId, ctx.user.id), eq(trades.accountId, input.accountId), eq(trades.clientMutationId, input.clientMutationId), eq(trades.environment, env))).limit(1);
           // Replay of a mutation that is already stored. The canonical row is
           // returned (not just its id) so a browser holding an optimistic
           // placeholder can adopt the real database identity, which is what a
@@ -551,19 +580,27 @@ export const goldRouter = router({
         // preserved for open positions). A journal that lets WIN disagree with
         // a negative P&L silently corrupts every win-rate vs expectancy
         // comparison downstream, so the server is the source of truth here.
-        const derivedResult = deriveTradeResult(input.pnl, input.result);
+        // Testing Mode: the stored `pnl` number is pips, derived server-side
+        // from entry/exit — never taken from the client's preview. The stored
+        // unit is unit-agnostic ($ when Live, pips when Testing).
+        const testingPips = env === "TESTING"
+          ? tradePips({ direction: input.direction, entryPrice: input.entryPrice, exitPrice: input.exitPrice })
+          : null;
+        const storedPnl = testingPips ?? input.pnl;
+        const derivedResult = deriveTradeResult(storedPnl, input.result);
         let inserted: { id: number }[];
         try {
           inserted = await db.insert(trades).values({
             userId: ctx.user.id, accountId: input.accountId, tradeDate: new Date(input.tradeDate), session: input.session,
-            direction: input.direction, result: derivedResult, level: input.level, timeframe: input.timeframe,
+            direction: input.direction, result: derivedResult, environment: env, level: input.level, timeframe: input.timeframe,
             setupQuality: input.setupQuality, executionType: input.executionType, marketCondition: input.marketCondition,
             biasAlignment: input.biasAlignment, confirmationType: input.confirmationType, slPlacement: input.slPlacement,
             tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality, patienceScore: input.patienceScore,
             planFollowScore: input.planFollowScore, quickLogged: input.quickLogged ?? false,
             entryPrice: input.entryPrice?.toFixed(6) ?? null, slPrice: input.slPrice?.toFixed(6) ?? null, tpPrice: input.tpPrice?.toFixed(6) ?? null,
+            exitPrice: input.exitPrice?.toFixed(6) ?? null,
             mfe: autoMfe?.toFixed(2) ?? null, mae: autoMae?.toFixed(2) ?? null,
-            risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null, pnl: input.pnl.toFixed(2),
+            risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null, pnl: storedPnl.toFixed(2),
             notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
             planStatus: input.planStatus, planChecklist: input.planChecklist,
             // The trade row and its evidence are committed by this one write, so a
@@ -577,7 +614,7 @@ export const goldRouter = router({
           // the data correct, so answer with the stored row, not a 500.
           if (!isUniqueViolation(error)) throw error;
           if (input.clientMutationId) {
-            const winner = await db.select().from(trades).where(and(eq(trades.userId, ctx.user.id), eq(trades.accountId, input.accountId), eq(trades.clientMutationId, input.clientMutationId))).limit(1);
+            const winner = await db.select().from(trades).where(and(eq(trades.userId, ctx.user.id), eq(trades.accountId, input.accountId), eq(trades.clientMutationId, input.clientMutationId), eq(trades.environment, env))).limit(1);
             if (winner[0]) return { id: winner[0].id, replayed: true, trade: toSafeTrade(winner[0]) };
           }
           if (input.mt5Ticket) throw new Error("That MT5 ticket is already linked to another journal trade.");
@@ -597,8 +634,13 @@ export const goldRouter = router({
       originMutationId: clientMutationIdInput,
     })).mutation(async ({ ctx, input }) => {
       return withPersistenceDiagnostics({ stage: "trade.update", userId: ctx.user.id, accountId: input.accountId, mutationId: input.clientMutationId, tradeId: input.tradeId }, async () => {
-        const current = await resolveOwnedTradeForMutation(ctx.user.id, input);
+        // The environment input only scopes the lookup; it is never written,
+        // so a trade cannot be moved between Live and Testing by an update.
+        const env = normalizeTradeEnvironment(input.environment);
+        const current = await resolveOwnedTradeForMutation(ctx.user.id, input, env);
         if (current.accountId !== input.accountId) throw new Error("A trade cannot be moved between journal accounts.");
+        // Testing trades are manual-only: MT5 stays Live-only on updates too.
+        if (env === "TESTING" && input.mt5Ticket) throw new TRPCError({ code: "BAD_REQUEST", message: "Testing trades are manual-only and cannot carry an MT5 ticket." });
         const nextTicket = input.mt5Ticket ? BigInt(input.mt5Ticket) : current.mt5Ticket;
         if (input.mt5Ticket && input.mt5Ticket !== current.mt5Ticket?.toString()) {
           const db = await dbOrThrow();
@@ -610,7 +652,12 @@ export const goldRouter = router({
         const screenshot = resolveScreenshotForWrite(ctx.user.openId, current.accountId, input);
         const db = await dbOrThrow();
         // Same derivation as create: the stored outcome must agree with the P&L.
-        const derivedResult = deriveTradeResult(input.pnl, input.result);
+        // Testing rows store server-derived pips, never the client's preview.
+        const updateTestingPips = env === "TESTING"
+          ? tradePips({ direction: input.direction, entryPrice: input.entryPrice, exitPrice: input.exitPrice })
+          : null;
+        const updateStoredPnl = updateTestingPips ?? input.pnl;
+        const derivedResult = deriveTradeResult(updateStoredPnl, input.result);
         await db.update(trades).set({
           tradeDate: new Date(input.tradeDate), session: input.session, direction: input.direction, result: derivedResult,
           level: input.level, timeframe: input.timeframe, setupQuality: input.setupQuality, executionType: input.executionType,
@@ -618,11 +665,14 @@ export const goldRouter = router({
           slPlacement: input.slPlacement, tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality,
           patienceScore: input.patienceScore, planFollowScore: input.planFollowScore, quickLogged: input.quickLogged ?? false,
           entryPrice: input.entryPrice?.toFixed(6) ?? null, slPrice: input.slPrice?.toFixed(6) ?? null, tpPrice: input.tpPrice?.toFixed(6) ?? null,
+          exitPrice: input.exitPrice?.toFixed(6) ?? null,
           mfe: input.mfe?.toFixed(2) ?? null, mae: input.mae?.toFixed(2) ?? null,
           risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null,
-          pnl: input.pnl.toFixed(2), notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
+          pnl: updateStoredPnl.toFixed(2), notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
           planStatus: input.planStatus, planChecklist: input.planChecklist,
           mt5Ticket: nextTicket,
+          // `environment` is deliberately absent from this SET: the
+          // discriminator is immutable after create.
           // Omitted entirely when the caller said nothing about the screenshot,
           // so an ordinary field edit can never silently drop the evidence.
           ...(screenshot.key === undefined ? {} : { screenshotKey: screenshot.key, screenshotName: screenshot.name }),
@@ -639,14 +689,18 @@ export const goldRouter = router({
       tradeId: z.number().int(),
       originMutationId: clientMutationIdInput,
       clientMutationId: clientMutationIdInput,
+      environment: z.enum(["LIVE", "TESTING"]).optional().default("LIVE"),
     })).mutation(async ({ ctx, input }) => {
       return withPersistenceDiagnostics({ stage: "trade.delete", userId: ctx.user.id, mutationId: input.clientMutationId, tradeId: input.tradeId }, async () => {
         const db = await dbOrThrow();
+        // Environment isolation: a delete can only ever remove a row from its
+        // own environment. The default keeps historical callers on Live.
+        const env = normalizeTradeEnvironment(input.environment);
         let found: { id: number; accountId: number; screenshotKey: string | null } | undefined;
         if (Number.isInteger(input.tradeId) && input.tradeId > 0) {
-          found = (await db.select().from(trades).where(and(eq(trades.id, input.tradeId), eq(trades.userId, ctx.user.id))).limit(1))[0];
+          found = (await db.select().from(trades).where(and(eq(trades.id, input.tradeId), eq(trades.userId, ctx.user.id), eq(trades.environment, env))).limit(1))[0];
         } else if (input.originMutationId) {
-          found = (await db.select().from(trades).where(and(eq(trades.userId, ctx.user.id), eq(trades.clientMutationId, input.originMutationId))).limit(1))[0];
+          found = (await db.select().from(trades).where(and(eq(trades.userId, ctx.user.id), eq(trades.clientMutationId, input.originMutationId), eq(trades.environment, env))).limit(1))[0];
         }
         if (!found) {
           // Idempotent replay. A queued delete whose response was lost (or whose
@@ -665,8 +719,8 @@ export const goldRouter = router({
         return { success: true, deleted: true, replayed: false };
       });
     }),
-    clearAll: protectedProcedure.input(accountIdInput.extend({ confirmed: z.literal(true) })).mutation(async ({ ctx, input }) => {
-      await clearAccountJournalData(ctx.user.id, input.accountId);
+    clearAll: protectedProcedure.input(accountIdInput.extend({ confirmed: z.literal(true), environment: z.enum(["LIVE", "TESTING"]).optional().default("LIVE") })).mutation(async ({ ctx, input }) => {
+      await clearAccountJournalData(ctx.user.id, input.accountId, normalizeTradeEnvironment(input.environment));
       return { success: true };
     }),
     uploadScreenshot: protectedProcedure.input(z.object({ tradeId: z.number().int().positive(), fileName: z.string().trim().min(1).max(255), mimeType: screenshotMimeInput, base64: screenshotBase64Input })).mutation(async ({ ctx, input }) => {

@@ -1,6 +1,8 @@
 import { and, asc, eq, gt, gte, lt, or } from "./supabaseQuery";
 import { trades } from "../drizzle/schema";
 import { buildAnalysis, type AnalysisFilters, type AnalysisResult, type AnalysisTrade } from "@shared/analysisEngine";
+import { tradePips } from "@shared/pipMath";
+import { normalizeTradeEnvironment } from "@shared/tradeEnvironment";
 import { selectRepresentativeTrades, type CompactTrade } from "@shared/aiPayload";
 import { getDb } from "./db";
 import { getOwnedAccount } from "./goldDb";
@@ -44,12 +46,19 @@ const analysisSelection = {
   closeTime: trades.closeTime,
   mfe: trades.mfe,
   mae: trades.mae,
+  // Needed for Testing-mode pip mapping (pips are derived, never stored).
+  environment: trades.environment,
+  entryPrice: trades.entryPrice,
+  exitPrice: trades.exitPrice,
 };
 
 async function requireDb() { const db = await getDb(); if (!db) throw new Error("Supabase database is unavailable. Please retry shortly."); return db; }
 
 function analysisWhere(userId: number, accountId: number, filters: AnalysisFilters) {
-  const parts = [eq(trades.userId, userId), eq(trades.accountId, accountId)];
+  // Environment isolation: analytics can only ever see one environment. An
+  // absent filter means LIVE, so every historical caller keeps its old
+  // result set exactly.
+  const parts = [eq(trades.userId, userId), eq(trades.accountId, accountId), eq(trades.environment, normalizeTradeEnvironment(filters.environment))];
   if (filters.startDate) parts.push(gte(trades.tradeDate, new Date(pktDateToTimestamp(filters.startDate, 0))));
   if (filters.endDate) parts.push(lt(trades.tradeDate, new Date(pktDateToTimestamp(filters.endDate, 0) + 86_400_000)));
   if (filters.session) parts.push(eq(trades.session, filters.session));
@@ -91,8 +100,15 @@ export async function getAccountAnalysis(userId: number, accountId: number, filt
     lastTradeId = Number(last.id);
   }
   if (rows.length >= ANALYSIS_MAX_TRADES) truncated = true;
-  const analysis = buildAnalysis(rows, filters);
-  return { ...analysis, truncated, sourceTradeCount: rows.length, representativeTrades: selectRepresentativeTrades(rows, ANALYSIS_REPRESENTATIVE_TRADES) };
+  // Testing-mode pip mapping. `buildAnalysis`/`metricRow` are unit-agnostic —
+  // they read `pnl` — so Testing analytics is the same engine with pips
+  // mapped into the field before it runs. Live rows pass through untouched.
+  const isTesting = normalizeTradeEnvironment(filters.environment) === "TESTING";
+  const analysisRows: AnalysisTrade[] = isTesting
+    ? rows.map((row) => ({ ...row, pnl: tradePips(row as { direction?: string | null; entryPrice?: number | string | null; exitPrice?: number | string | null }) }))
+    : rows;
+  const analysis = buildAnalysis(analysisRows, filters);
+  return { ...analysis, truncated, sourceTradeCount: rows.length, representativeTrades: selectRepresentativeTrades(analysisRows, ANALYSIS_REPRESENTATIVE_TRADES) };
 }
 
 export const analysisLimits = { pageSize: ANALYSIS_PAGE_SIZE, maxTrades: ANALYSIS_MAX_TRADES } as const;

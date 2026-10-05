@@ -43,6 +43,9 @@ export type AnalysisFilters = {
   setup?: string | null;
   direction?: "BUY" | "SELL" | null;
   result?: "WIN" | "LOSS" | "BREAK_EVEN" | "OPEN" | null;
+  // Testing Mode discriminator. Defaults to LIVE everywhere so existing
+  // callers see exactly their old result set.
+  environment?: "LIVE" | "TESTING" | null;
 };
 
 export type EvidenceTier = "OBSERVED BEST CONTEXT" | "POTENTIAL EDGE" | "DEVELOPING EDGE" | "REPEATABLE EDGE" | "VALIDATED EDGE";

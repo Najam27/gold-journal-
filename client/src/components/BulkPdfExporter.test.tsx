@@ -91,7 +91,7 @@ describe("BulkPdfExporter", () => {
     fireEvent.click(screen.getByRole("button", { name: /Download PDF report/i }));
     await waitFor(() => expect(pdfInstances.length).toBe(1));
 
-    expect(fetchPage).toHaveBeenCalledWith({ accountId: 3, page: 1, pageSize: 50, search: "" });
+    expect(fetchPage).toHaveBeenCalledWith({ accountId: 3, environment: "LIVE", page: 1, pageSize: 50, search: "" });
     const doc = pdfInstances[0];
     await waitFor(() => expect(doc.savedAs).toContain("Funded-Gold"));
     const written = doc.texts.join("\n");

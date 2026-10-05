@@ -10,6 +10,7 @@ vi.mock("@/components/ui/dialog", () => ({ Dialog: ({ children }: any) => <>{chi
 vi.mock("@/lib/tradeCardPng", () => ({ createTradeCardPng: imageMocks.create, copyTradeCardPng: imageMocks.copy, downloadTradeCardPng: imageMocks.download, shareTradeCardPng: imageMocks.share }));
 
 import { TradeLogWithViewer } from "./TradeLogWithViewer";
+import { TESTING_MODE } from "@/lib/tradeModeConfig";
 
 afterEach(() => cleanup());
 beforeEach(() => Object.values(imageMocks).forEach(mock => mock.mockReset()));
@@ -86,5 +87,24 @@ describe("TradeLogWithViewer", () => {
     await vi.waitFor(() => expect(imageMocks.copy).toHaveBeenCalled());
     expect(imageMocks.share).not.toHaveBeenCalled();
     expect(imageMocks.download).not.toHaveBeenCalled();
+  });
+
+  it("renders Testing Mode in pips with no psychology and no MT5", () => {
+    // 2650 → 2652 on a BUY = +20 pips (the spec's example).
+    const trade = { id: 30, tradeDate: new Date("2026-10-05T09:00:00Z"), session: "London", direction: "BUY", result: "WIN", level: "", timeframe: "", setupQuality: "", confirmationType: "", executionType: "", marketCondition: "", biasAlignment: "", slPlacement: "", tpPlacement: "", mistake: "", holdQuality: "", risk: "50", reward: "100", pnl: "20", entryPrice: "2650", exitPrice: "2652", emotionBefore: "Calm", emotionDuring: "Patient", emotionAfter: "Satisfied", notes: "" };
+    render(<TradeLogWithViewer mode={TESTING_MODE} stats={{ balance: 0, winRate: 100, wins: 1, losses: 0, pnl: 20, total: 1 }} trades={[trade]} allTrades={[trade]} pagination={{ page: 1, pageSize: 12, total: 1, pageCount: 1 }} listLoading={false} account={{ name: "Primary" }} dangerGoals={[]} search="" resultFilter="ALL" setSearch={vi.fn()} setResultFilter={vi.fn()} onPage={vi.fn()} onNew={vi.fn()} onDuplicate={vi.fn()} onEdit={vi.fn()} onDelete={vi.fn()} onCash={vi.fn()} onCsv={vi.fn()} onExcel={vi.fn()} onPdf={vi.fn()} onClear={vi.fn()} />);
+    // Pips, not dollars.
+    expect(screen.getByText("Total pips")).toBeTruthy();
+    expect(screen.queryByText("Total P&L")).toBeNull();
+    expect(screen.getByText("Actual pips")).toBeTruthy();
+    expect(screen.getAllByText("+20 pips").length).toBeGreaterThanOrEqual(2);
+    // No MT5 surface in Testing.
+    expect(screen.queryByText("MT5 balance")).toBeNull();
+    expect(screen.queryByText("MT5 LIVE POSITIONS")).toBeNull();
+    // The trade card hides Psychology in Testing.
+    fireEvent.click(screen.getByLabelText(/View trade from/i));
+    expect(screen.getByText("Trade card")).toBeTruthy();
+    expect(screen.queryByText("8 · Psychology")).toBeNull();
+    expect(screen.queryByText("Calm")).toBeNull();
   });
 });

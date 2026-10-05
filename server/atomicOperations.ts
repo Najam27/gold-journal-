@@ -10,11 +10,12 @@ function throwRpcError(operation: string, error: SupabaseRpcError) {
   throw wrapped;
 }
 
-export async function clearAccountJournalDataAtomic(userId: number, accountId: number, resetAt: Date) {
+export async function clearAccountJournalDataAtomic(userId: number, accountId: number, resetAt: Date, environment: "LIVE" | "TESTING" = "LIVE") {
   const { data, error } = await getSupabaseAdmin().rpc("gj_clear_account_journal_data", {
     target_user_id: userId,
     target_account_id: accountId,
     target_reset_at: resetAt.toISOString(),
+    target_environment: environment,
   });
   if (error) throwRpcError("clear account journal data", error);
   return data === true;

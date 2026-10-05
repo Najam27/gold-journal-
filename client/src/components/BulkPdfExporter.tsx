@@ -5,6 +5,8 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { getSelectedAccountId, subscribeSelectedAccount } from "@/lib/accountSelection";
 import { fetchAllTradePages, selectBulkPdfTrades, summarizeBulkPdfTrades } from "@/lib/bulkPdf";
 import { formatMoney, getPktDateInput, toNumber } from "@/lib/gold";
+import { formatPips } from "@shared/pipMath";
+import { currentTradeMode } from "@/lib/tradeModeConfig";
 import { buildRunningBalances } from "@/lib/tradeLedger";
 import { renderTradeLogPdf } from "@/lib/tradePdfReport";
 import { trpc } from "@/lib/trpc";
@@ -32,7 +34,11 @@ export function BulkPdfExporter() {
   const utils = trpc.useUtils();
   const [open, setOpen] = useState(false);
   const [accountId, setAccountId] = useState<number | undefined>(() => getSelectedAccountId());
-  const journal = trpc.journal.get.useQuery({ accountId }, { enabled: Boolean(privateReady && accountId), retry: false, refetchOnWindowFocus: false });
+  // The PDF exports the currently selected environment (LIVE | TESTING). The
+  // exporter reads the same persisted selection as the page header switch.
+  const tradeMode = currentTradeMode();
+  const isPips = tradeMode.pnlUnit === "pips";
+  const journal = trpc.journal.get.useQuery({ accountId, environment: tradeMode.environment }, { enabled: Boolean(privateReady && accountId), retry: false, refetchOnWindowFocus: false });
   const [allTime, setAllTime] = useState(true);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -57,12 +63,13 @@ export function BulkPdfExporter() {
       accountId: account.id,
       accountName: account.name,
       openingBalance: toNumber(account.startingBalance) + toNumber(journal.data?.cashNet),
+      environment: tradeMode.environment,
       allTime,
       from,
       to,
     };
     try {
-      const reportTrades: any[] = await fetchAllTradePages(page => utils.trades.list.fetch({ accountId: snapshot.accountId, page, pageSize: 50, search: "" }));
+      const reportTrades: any[] = await fetchAllTradePages(page => utils.trades.list.fetch({ accountId: snapshot.accountId, environment: snapshot.environment, page, pageSize: 50, search: "" }));
       // Running balance is derived over the account's full ledger, so the figure
       // matches the Trade Log; the export range is then selected from that ledger.
       const ledger = buildRunningBalances(reportTrades, snapshot.openingBalance) as any[];
@@ -77,6 +84,7 @@ export function BulkPdfExporter() {
         accountName: snapshot.accountName,
         rangeLabel,
         mode: snapshot.allTime ? "ALL_TIME" : "RANGE",
+        tradeMode,
         summary: reportSummary,
         trades: reportSelected.map((trade: any) => ({ trade, runningBalance: balanceById.get(trade.id) ?? null })),
       });
@@ -87,5 +95,5 @@ export function BulkPdfExporter() {
   };
 
   if (!isAuthenticated) return null;
-  return <Dialog open={open} onOpenChange={setOpen}><DialogContent className="bulk-pdf-dialog"><DialogHeader><DialogTitle>Trade-log PDF report</DialogTitle><DialogDescription>A compact A4 landscape report: one page of complete trade data and one screenshot page per trade, followed by the period analysis. No field, note, emotion, checklist item, or screenshot is dropped, and the report contains only the active account.</DialogDescription></DialogHeader><div className="pdf-range-mode"><button className={allTime ? "active" : ""} onClick={() => setAllTime(true)}>Whole trade log</button><button className={!allTime ? "active" : ""} onClick={setCustom}><CalendarRange size={14} /> Custom date range</button></div>{!allTime && <div className="pdf-date-range"><label>From<Input type="date" value={from} onChange={event => setFrom(event.target.value)} /></label><label>To<Input type="date" value={to} onChange={event => setTo(event.target.value)} /></label></div>}<div className="pdf-selection-summary"><span><b>{selected.length}</b> recent preview trade{selected.length === 1 ? "" : "s"}</span><span>Recent P&L <b className={summary.pnl >= 0 ? "positive" : "negative"}>{formatMoney(summary.pnl)}</b></span></div><div className="pdf-export-includes"><ImageIcon size={15} /><span>The report fetches every page only when you download it. Each trade becomes two pages — a compact complete-data table and its screenshot evidence — and the report ends with four analysis pages that each own one question (performance results, process and discipline, recorded behaviour, review summary). Expect about {selected.length * 2 + 4} pages for the current selection.</span></div><div className="dialog-actions"><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button disabled={busy || !account} onClick={createPdf}><FileDown size={15} />{busy ? "Building report…" : "Download PDF report"}</Button></div></DialogContent></Dialog>;
+  return <Dialog open={open} onOpenChange={setOpen}><DialogContent className="bulk-pdf-dialog"><DialogHeader><DialogTitle>Trade-log PDF report</DialogTitle><DialogDescription>A compact A4 landscape report: one page of complete trade data and one screenshot page per trade, followed by the period analysis. No field, note, emotion, checklist item, or screenshot is dropped, and the report contains only the active account.</DialogDescription></DialogHeader><div className="pdf-range-mode"><button className={allTime ? "active" : ""} onClick={() => setAllTime(true)}>Whole trade log</button><button className={!allTime ? "active" : ""} onClick={setCustom}><CalendarRange size={14} /> Custom date range</button></div>{!allTime && <div className="pdf-date-range"><label>From<Input type="date" value={from} onChange={event => setFrom(event.target.value)} /></label><label>To<Input type="date" value={to} onChange={event => setTo(event.target.value)} /></label></div>}<div className="pdf-selection-summary"><span><b>{selected.length}</b> recent preview trade{selected.length === 1 ? "" : "s"}</span><span>Recent {isPips ? "pips" : "P&L"} <b className={summary.pnl >= 0 ? "positive" : "negative"}>{isPips ? formatPips(summary.pnl) : formatMoney(summary.pnl)}</b></span></div><div className="pdf-export-includes"><ImageIcon size={15} /><span>The report fetches every page only when you download it. Each trade becomes two pages — a compact complete-data table and its screenshot evidence — and the report ends with four analysis pages that each own one question (performance results, process and discipline, recorded behaviour, review summary). Expect about {selected.length * 2 + 4} pages for the current selection.</span></div><div className="dialog-actions"><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button disabled={busy || !account} onClick={createPdf}><FileDown size={15} />{busy ? "Building report…" : "Download PDF report"}</Button></div></DialogContent></Dialog>;
 }

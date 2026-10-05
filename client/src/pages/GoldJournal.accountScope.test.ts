@@ -88,8 +88,9 @@ describe("Gold Journal account switching", () => {
     expect(source).toMatch(/await updateTrade\.mutateAsync\(\{ \.\.\.tradePayload, tradeId: editingId \} as any\)/);
     expect(source).not.toMatch(/kind: editing \? "trade\.update" : "trade\.create"/);
     expect(source).not.toMatch(/kind: "trade\.delete"/);
-    // A delete is a direct backend DELETE of a stored row.
-    expect(source).toMatch(/await deleteTrade\.mutateAsync\(\{ tradeId \}\)/);
+    // A delete is a direct backend DELETE of a stored row, scoped to the
+    // selected environment so a Testing delete can never touch Live.
+    expect(source).toMatch(/await deleteTrade\.mutateAsync\(\{ tradeId, environment: tradeEnv \}\)/);
     // The screenshot is uploaded to private storage FIRST and its stable key
     // travels inside the trade payload, so the row and its evidence are one write.
     expect(source).toMatch(/uploadScreenshotDraft\.mutateAsync\(\{/);

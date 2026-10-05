@@ -21,6 +21,8 @@ import type { MistakeCategory } from "@shared/psychologyEngine";
 import { groupTradesByPktDay, summarizeTradeRows } from "@/lib/performanceSummary";
 import { checklistCompletionRatio, type TradeTone } from "@/lib/tradePresentation";
 import { formatMoney } from "@/lib/gold";
+import { formatPips } from "@shared/pipMath";
+import { LIVE_MODE, type TradeModeConfig } from "./tradeModeConfig";
 
 /** Rendered when a metric cannot be calculated from the selected trades. */
 export const ANALYSIS_MISSING = "—";
@@ -156,7 +158,7 @@ export type PeriodAnalysis = {
   ownership: Record<string, ReportOwner>;
 };
 
-export type PeriodAnalysisOptions = { accountName: string; rangeLabel: string };
+export type PeriodAnalysisOptions = { accountName: string; rangeLabel: string; tradeMode?: TradeModeConfig };
 
 /* ------------------------------------------------------------------ *
  * Formatting helpers (presentation only — never recalculation)
@@ -242,6 +244,12 @@ export function buildPeriodAnalysis(trades: Record<string, unknown>[], options: 
   const overview = analysis.overview;
   const closed = overview.sample;
   const closedTrades = rows.filter(trade => clean((trade as { result?: unknown }).result).toUpperCase() !== "OPEN");
+  // Testing Mode: P&L-derived figures render as pips. Planned-risk figures
+  // stay in $ (risk is recorded in $ in both modes).
+  const tradeMode = options.tradeMode ?? LIVE_MODE;
+  const isPips = tradeMode.pnlUnit === "pips";
+  const unitMoney = (value: number | null | undefined): string =>
+    (value == null || !Number.isFinite(value) ? ANALYSIS_MISSING : isPips ? formatPips(value) : formatMoney(value));
 
   /* ---- period ---- */
   const dayKeys = Array.from(groupTradesByPktDay(trades as never).keys()).sort();
@@ -258,36 +266,36 @@ export function buildPeriodAnalysis(trades: Record<string, unknown>[], options: 
 
   // The six headline figures of the period, presented as cards.
   const kpis: AnalysisMetric[] = [
-    signed("Net P&L", closed ? overview.netPnl : null, value => formatMoney(value)),
+    signed(isPips ? "Net pips" : "Net P&L", closed ? overview.netPnl : null, value => unitMoney(value)),
     { label: "Win rate", value: rate(overview.winRate, closed) },
     { label: "Profit factor", value: factor(overview.profitFactor) },
-    signed("Expectancy", closed ? overview.expectancy : null, value => formatMoney(value)),
+    signed("Expectancy", closed ? overview.expectancy : null, value => unitMoney(value)),
     signed("Total R", overview.totalR, value => `1 : ${value.toFixed(2)}`),
-    { label: "Max drawdown", value: closed >= 2 ? `-${money(analysis.drawdown.maximum).replace("-", "")}` : ANALYSIS_MISSING, tone: "negative" },
+    { label: "Max drawdown", value: closed >= 2 ? `-${unitMoney(analysis.drawdown.maximum).replace("-", "")}` : ANALYSIS_MISSING, tone: "negative" },
   ];
 
   /* ---- performance ---- */
   const performanceMetrics: AnalysisMetric[] = [
-    signed("Net P&L", closed ? overview.netPnl : null, value => formatMoney(value)),
-    { label: "Gross profit", value: money(overview.grossProfit) },
-    { label: "Gross loss", value: money(overview.grossLoss) },
+    signed(isPips ? "Net pips" : "Net P&L", closed ? overview.netPnl : null, value => unitMoney(value)),
+    { label: "Gross profit", value: unitMoney(overview.grossProfit) },
+    { label: "Gross loss", value: unitMoney(overview.grossLoss) },
     { label: "Profit factor", value: factor(overview.profitFactor) },
     { label: "Win rate", value: rate(overview.winRate, closed) },
     { label: "Wins", value: count(overview.wins) },
     { label: "Losses", value: count(overview.losses) },
     { label: "Break-even", value: count(overview.breakEven) },
-    signed("Average win", overview.averageWinner, value => formatMoney(value)),
-    signed("Average loss", overview.averageLoser, value => formatMoney(value)),
-    { label: "Expectancy", value: closed ? money(overview.expectancy) : ANALYSIS_MISSING },
+    signed("Average win", overview.averageWinner, value => unitMoney(value)),
+    signed("Average loss", overview.averageLoser, value => unitMoney(value)),
+    { label: "Expectancy", value: closed ? unitMoney(overview.expectancy) : ANALYSIS_MISSING },
     signed("Average R", overview.averageR, value => `1 : ${value.toFixed(2)}`),
     signed("Total R", overview.totalR, value => `1 : ${value.toFixed(2)}`),
     signed("Median R", overview.medianR, value => `1 : ${value.toFixed(2)}`),
-    signed("Best trade", overview.largestWinner, value => formatMoney(value)),
-    signed("Worst trade", overview.largestLoser, value => formatMoney(value)),
+    signed("Best trade", overview.largestWinner, value => unitMoney(value)),
+    signed("Worst trade", overview.largestLoser, value => unitMoney(value)),
     { label: "Win rate range (95%)", value: closed ? `${overview.winRateInterval[0].toFixed(1)}% – ${overview.winRateInterval[1].toFixed(1)}%` : ANALYSIS_MISSING },
-    { label: "Median trade", value: closed ? money(overview.medianPnl) : ANALYSIS_MISSING },
+    { label: "Median trade", value: closed ? unitMoney(overview.medianPnl) : ANALYSIS_MISSING },
     // Drawdown amounts are results, so the Performance page owns them.
-    { label: "Average drawdown", value: closed >= 2 ? money(analysis.drawdown.average) : ANALYSIS_MISSING },
+    { label: "Average drawdown", value: closed >= 2 ? unitMoney(analysis.drawdown.average) : ANALYSIS_MISSING },
     { label: "Data completeness", value: percent(overview.dataCompleteness, 0) },
   ];
 

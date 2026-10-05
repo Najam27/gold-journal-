@@ -12,7 +12,14 @@ describe("atomic Supabase operation wrappers", () => {
     rpc.mockResolvedValue({ data: true, error: null });
     const resetAt = new Date("2026-08-18T00:00:00.000Z");
     await expect(clearAccountJournalDataAtomic(7, 12, resetAt)).resolves.toBe(true);
-    expect(rpc).toHaveBeenCalledWith("gj_clear_account_journal_data", { target_user_id: 7, target_account_id: 12, target_reset_at: resetAt.toISOString() });
+    expect(rpc).toHaveBeenCalledWith("gj_clear_account_journal_data", { target_user_id: 7, target_account_id: 12, target_reset_at: resetAt.toISOString(), target_environment: "LIVE" });
+  });
+
+  it("forwards the Testing environment to the real database function", async () => {
+    rpc.mockResolvedValue({ data: true, error: null });
+    const resetAt = new Date("2026-08-18T00:00:00.000Z");
+    await expect(clearAccountJournalDataAtomic(7, 12, resetAt, "TESTING")).resolves.toBe(true);
+    expect(rpc).toHaveBeenCalledWith("gj_clear_account_journal_data", { target_user_id: 7, target_account_id: 12, target_reset_at: resetAt.toISOString(), target_environment: "TESTING" });
   });
 
   it("returns the replacement account from atomic removal", async () => {

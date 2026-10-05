@@ -72,7 +72,8 @@ describe("Gold Journal protected server workflows", () => {
     // Reconciliation is now event-driven through mt5.syncTradeLog.
     expect(mocks.syncStoredMt5).not.toHaveBeenCalled();
     // The authorized account row is reused instead of being resolved twice.
-    expect(mocks.getJournal).toHaveBeenCalledWith(7, 12, expect.objectContaining({ id: 12 }));
+    // The fourth argument is the environment discriminator (defaults to LIVE).
+    expect(mocks.getJournal).toHaveBeenCalledWith(7, 12, expect.objectContaining({ id: 12 }), "LIVE");
   });
 
   it("keeps both Trade Log read paths free of MT5 reconciliation writes", () => {
@@ -165,10 +166,14 @@ describe("Gold Journal protected server workflows", () => {
   });
 
   it("rejects a non-owned trade update before writing data", async () => {
-    mocks.ownsTrade.mockRejectedValue(new Error("That trade is unavailable."));
+    // The ownership lookup finds no row in the caller's environment, so the
+    // update is rejected. No write (update/insert/delete) may happen.
+    const write = vi.fn();
+    const select = vi.fn(() => ({ from: vi.fn(() => ({ where: vi.fn(() => ({ limit: vi.fn().mockResolvedValue([]) })) })) }));
+    mocks.getDb.mockResolvedValue({ select, update: write, insert: write, delete: write });
     const caller = goldRouter.createCaller({ user } as any);
     await expect(caller.trades.update({ ...validTrade, tradeId: 11 })).rejects.toThrow("unavailable");
-    expect(mocks.getDb).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
   });
 
   it("records a new account-scoped goal alert once and deduplicates its type plus cycle key", async () => {
