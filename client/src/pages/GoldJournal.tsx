@@ -53,7 +53,6 @@ import { JournalQueryError, SwitchingAccount } from "@/components/QueryError";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { AccountStatusStrip } from "@/components/premium/AccountStatusStrip";
 import { AmbientField } from "@/components/premium/AmbientField";
-import { Premium3DBackground } from "@/components/premium/Premium3DBackground";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useIsDrawerNav } from "@/hooks/useMobile";
 import { purgeLegacyLocalJournalStore } from "@/lib/journal/legacyLocalJournalCleanup";
@@ -101,13 +100,23 @@ function readFileAsDataUrl(file: File) {
 }
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { TradeLogWithViewer } from "@/components/TradeLogWithViewer";
-import { TradeDialogWithCustomOptions } from "@/components/TradeDialogWithCustomOptions";
+// Heavy dialogs load on demand: the Trade Log renders first, the add/edit
+// dialogs stream in when the user opens one.
+const TradeDialogWithCustomOptionsLazy = React.lazy(async () => ({
+  default: (await import("@/components/TradeDialogWithCustomOptions")).TradeDialogWithCustomOptions,
+}));
+const QuickTradeDialogLazy = React.lazy(async () => ({
+  default: (await import("@/components/QuickTradeDialog")).QuickTradeDialog,
+}));
+// Decorative 3D: never blocks the first paint.
+const Premium3DBackgroundLazy = React.lazy(async () => ({
+  default: (await import("@/components/premium/Premium3DBackground")).Premium3DBackground,
+}));
 import TradeEnvironmentSwitch from "@/components/TradeEnvironmentSwitch";
 import { LIVE_MODE, modeFor } from "@/lib/tradeModeConfig";
 import { journalPipStats } from "@/lib/pipStats";
 import { isTradeEnvironment, type TradeEnvironment } from "@shared/tradeEnvironment";
 import { tradePips } from "@shared/pipMath";
-import { QuickTradeDialog } from "@/components/QuickTradeDialog";
 import { StreakPanel } from "@/components/StreakPanel";
 import { GuardBanner } from "@/components/GuardBanner";
 import { SessionRecovery } from "@/components/SessionRecovery";
@@ -151,7 +160,6 @@ import {
   RefreshCcw,
   Settings2,
   ShieldAlert,
-  Target,
   Trash2,
   Wallet,
   Wifi,
@@ -190,12 +198,8 @@ const Mt5LiveViewLazy = React.lazy(async () => ({
 const RiskCalculatorPanelLazy = React.lazy(async () => ({
   default: (await import("@/components/RiskCalculatorPanel")).RiskCalculatorPanel,
 }));
-const MissedTradesViewLazy = React.lazy(async () => ({
-  default: (await import("@/components/MissedTradesView")).MissedTradesView,
-}));
 type View =
   | "trades"
-  | "missed"
   | "analysis"
   | "review"
   | "goals"
@@ -259,7 +263,6 @@ export function getAuthGate(
 
 const navItems: { id: View; label: string; icon: typeof BookOpen }[] = [
   { id: "trades", label: "Trade Log", icon: BookOpen },
-  { id: "missed", label: "Missed Trades", icon: Target },
   { id: "analysis", label: "Analysis", icon: BarChart3 },
   { id: "review", label: "Weekly Review", icon: CalendarCheck2 },
   { id: "goals", label: "Goals", icon: Goal },
@@ -287,7 +290,7 @@ const testingNavItems: { id: View; label: string; icon: typeof BookOpen }[] = [
 const mobileNavIds: View[] = ["trades", "analysis", "goals", "psychology", "calendar", "mt5"];
 const testingMobileNavIds: View[] = ["trades", "analysis", "calendar"];
 export const JOURNAL_RETRY_EVENT = "gold-journal:retry";
-const NAV_GROUP_LABELS: Record<string, string> = { trades: "Journal", missed: "Journal", analysis: "Journal", review: "Journal", calendar: "Journal", goals: "Discipline", psychology: "Discipline", plan: "Discipline", mentor: "Intelligence", mt5: "Intelligence", risk: "Intelligence", options: "Workspace" };
+const NAV_GROUP_LABELS: Record<string, string> = { trades: "Journal", analysis: "Journal", review: "Journal", calendar: "Journal", goals: "Discipline", psychology: "Discipline", plan: "Discipline", mentor: "Intelligence", mt5: "Intelligence", risk: "Intelligence", options: "Workspace" };
 const isJournalView = (value: unknown): value is View =>
   navItems.some(item => item.id === value);
 const defaultRules = [
@@ -607,7 +610,6 @@ export default function GoldJournal() {
   // Typing must not fire a filtered server read on every keystroke: the input
   // stays instant and the trade-list query follows a short pause.
   const debouncedSearch = useDebouncedValue(search, 250);
-  const [missedDialog, setMissedDialog] = useState(false);
   useEffect(() => {
     const navigate = (event: Event) => {
       const next = (event as CustomEvent<{ view?: JournalViewTarget }>).detail
@@ -1552,9 +1554,8 @@ export default function GoldJournal() {
     );
   if (authGate === "login") return <LoginScreen />;
   const TradeLog = TradeLogWithViewer; // server-backed Trade Log
-  const MissedView = MissedTradesViewLazy;
   const CalendarView = PnlCalendarWithWeeksLazy;
-  const TradeDialog = TradeDialogWithCustomOptions;
+  const TradeDialog = TradeDialogWithCustomOptionsLazy;
   const PlanView = PlanExecutionEditorLazy;
   const GoalsView = FlexibleGoalsViewLazy;
   const optionsPanel = (
@@ -1823,18 +1824,11 @@ export default function GoldJournal() {
               />
               </>
             )}
-            {view === "missed" && (
-              <React.Suspense fallback={<Loading />}>
-              <MissedView
-                rows={data?.skippedTrades ?? []}
-                account={account}
-                refresh={refresh}
-              />
-              </React.Suspense>
-            )}
             {view === "analysis" && (
               <div className="view-hero-3d">
-                <Premium3DBackground tone="blue" className="view-hero-3d-canvas" />
+                <React.Suspense fallback={null}>
+                <Premium3DBackgroundLazy tone="blue" className="view-hero-3d-canvas" />
+                </React.Suspense>
                 <React.Suspense fallback={<Loading />}>
                   <AnalysisDashboardLazy accountId={account?.id} mode={tradeMode} />
                 </React.Suspense>
@@ -1950,7 +1944,9 @@ export default function GoldJournal() {
             )}
             {view === "mentor" && (
               <div className="view-hero-3d ai-surface-pad">
-                <Premium3DBackground tone="violet" className="view-hero-3d-canvas" />
+                <React.Suspense fallback={null}>
+                <Premium3DBackgroundLazy tone="violet" className="view-hero-3d-canvas" />
+                </React.Suspense>
                 <React.Suspense fallback={<Loading />}>
                   <MentorViewLazy
                     trades={trades}
@@ -1986,6 +1982,7 @@ export default function GoldJournal() {
       <AccountRenameControl />
       <OptionListManager />
       <BulkPdfExporter />
+      <React.Suspense fallback={null}>
       <TradeDialog
         mode={tradeMode}
         open={tradeDialog}
@@ -2006,12 +2003,15 @@ export default function GoldJournal() {
         dayTrades={(trades as any[]).filter((trade: any) => dateInput(new Date(trade.tradeDate)) === tradeForm.tradeDate)}
         behaviorConfig={behaviorConfig}
       />
-      <QuickTradeDialog
+      </React.Suspense>
+      <React.Suspense fallback={null}>
+      <QuickTradeDialogLazy
         open={quickDialog}
         onOpenChange={setQuickDialog}
         onSave={saveQuickTrade}
         saving={quickSaving}
       />
+      </React.Suspense>
       <CashDialog
         type={cashDialog}
         setType={setCashDialog}
