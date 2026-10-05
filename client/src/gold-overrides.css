@@ -132,3 +132,43 @@
 .gj-sidebar.is-testing .sidebar-mode-switch > p { color: #f59e0b; }
 .mobile-bottom-nav.is-testing { border-top: 1px solid color-mix(in srgb, #f59e0b 35%, var(--gj-line)); }
 .mobile-bottom-nav.is-testing button.active { color: #f59e0b; }
+
+/* --- Compact fixed sidebar -------------------------------------------------------
+   The sidebar is narrower and every section is tightened so the full Live nav
+   (12 items) fits on screen without scrolling. The sidebar itself never
+   scrolls; only the nav list scrolls internally on very short viewports. */
+.gj-shell .gj-sidebar { width: 232px; overflow: hidden; }
+.gj-shell .gj-main { margin-left: 232px; }
+.gj-shell .sidebar-brand { min-height: 58px; padding: 12px 14px; gap: 10px; }
+.gj-shell .sidebar-brand .brand-copy strong { font-size: 14px; }
+.gj-shell .sidebar-brand .brand-copy span { font-size: 8px; }
+.gj-shell .sidebar-mode-switch { margin: 6px 10px; padding: 8px 10px; }
+.gj-shell .sidebar-mode-switch > p { margin: 0 0 6px; font-size: 8px; }
+.gj-shell .mode-switch-buttons button { padding: 6px 4px; font-size: 11px; }
+.gj-shell .mode-switch-hint { display: none; }
+.gj-shell .account-switcher { margin: 6px 10px; padding: 8px 10px; }
+.gj-shell .account-switcher p { margin: 0 0 3px; font-size: 7px; }
+.gj-shell .account-switcher select { font-size: 11px; }
+.gj-shell .sidebar-nav { gap: 2px; padding: 6px 10px; flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+.gj-shell .sidebar-nav::-webkit-scrollbar { display: none; }
+.gj-shell .sidebar-nav button { height: 32px; gap: 10px; padding: 0 10px; font-size: 11px; border-radius: 8px; }
+.gj-shell .sidebar-nav button svg { width: 15px; height: 15px; }
+.gj-shell .sidebar-bottom { padding: 10px; gap: 8px; }
+.gj-shell .sync-row { font-size: 10px; }
+.gj-shell .side-balance { padding: 9px 10px; gap: 2px; }
+.gj-shell .side-balance strong { font-size: 14px; }
+.gj-shell .side-balance span, .gj-shell .side-balance small { font-size: 9px; }
+.gj-shell .install-button { padding: 7px; font-size: 11px; }
+.gj-shell .user-row { padding: 6px 8px; }
+.gj-shell .user-row .avatar { width: 28px; height: 28px; font-size: 11px; }
+.gj-shell .user-copy strong { font-size: 11px; }
+
+/* Compact sidebar: keep the responsive rail/drawer behavior intact. */
+@media (max-width: 1120px) {
+  .gj-shell .gj-sidebar { width: 76px; }
+  .gj-shell .gj-main { margin-left: 76px; }
+}
+@media (max-width: 760px) {
+  .gj-shell .gj-sidebar { width: min(85vw, 308px); }
+  .gj-shell .gj-main { margin-left: 0; }
+}
