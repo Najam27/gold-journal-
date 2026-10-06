@@ -258,18 +258,18 @@ function BaseTradeLogWithViewer({ mode = LIVE_MODE, stats, trades, allTrades, pa
                         )}
                       </td>
                       <td className="data-text">{formatDate(trade.tradeDate)}</td>
-                      <td>{trade.session}</td>
-                      <td><span className={`side-badge ${String(trade.direction || "").toLowerCase()}`}>{trade.direction}</span></td>
+                      <td>{trade.session || "—"}</td>
+                      <td>{trade.direction ? <span className={`side-badge ${String(trade.direction).toLowerCase()}`}>{trade.direction}</span> : "—"}</td>
                       <td><span className="context-pill" title={formatBiasCompact(normalizeBiasTimeframes((trade as any).biasTimeframes)) ?? undefined}>{formatBiasTable(normalizeBiasTimeframes((trade as any).biasTimeframes)) ?? "—"}</span></td>
                       <td>{trade.level || "—"}</td>
                       <td>{trade.setupQuality || "—"}</td>
                       <td>{trade.executionType || "—"}</td>
-                      <td className="data-text">{formatMoney(trade.risk)}</td>
+                      <td className="data-text">{trade.risk == null ? "—" : formatMoney(trade.risk)}</td>
                       <td className="data-text">{formatRr(trade.risk, trade.reward)}</td>
                       <td><span className={`result-badge ${result.toLowerCase()}`}>{result.replace("_", " ")}</span></td>
                       <td className={`data-text pnl ${pnlTone}`}>
                         {pnlUp ? <TrendingUp size={12} aria-hidden="true" /> : pnlDown ? <TrendingDown size={12} aria-hidden="true" /> : null}
-                        {isPips ? formatPips(rowPips) : <AnimatedNumber value={toNumber(trade.pnl)} format={formatMoney} />}
+                        {isPips ? formatPips(rowPips) : trade.pnl == null ? "—" : <AnimatedNumber value={toNumber(trade.pnl)} format={formatMoney} />}
                       </td>
                       <td className={`data-text ${pnlTone}`}>{isPips ? "—" : formatActualR(trade.risk, trade.pnl)}</td>
                       <td>
