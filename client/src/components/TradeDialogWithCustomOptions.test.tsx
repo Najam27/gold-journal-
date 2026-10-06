@@ -22,7 +22,7 @@ describe("TradeDialogWithCustomOptions", () => {
     const setForm = vi.fn();
     const props = { open: true, setOpen: vi.fn(), setForm, editing: undefined, onSave: vi.fn(), pending: false, screenshot: undefined, setScreenshot: vi.fn(), progress: 0 };
     const { rerender } = render(<TradeDialogWithCustomOptions {...props} form={form} />);
-    expect(screen.getByText("Direction vs bias")).toBeTruthy();
+    expect(screen.getByText("Bias")).toBeTruthy();
     expect(screen.getByText("SL placement")).toBeTruthy();
     expect(screen.getByText("TP placement")).toBeTruthy();
     expect(screen.getByText("Mistake / rule-break tags")).toBeTruthy();
@@ -101,7 +101,7 @@ describe("TradeDialogWithCustomOptions", () => {
   });
 
   it("shows the Emotions section in Live but hides it in Testing Mode", () => {
-    const form = { tradeDate: "2026-10-05", session: "London", direction: "BUY", result: "WIN", level: "", timeframe: "", setupQuality: "", executionType: "", marketCondition: "", biasAlignment: "", confirmationType: "", slPlacement: "", tpPlacement: "", mistake: "", holdQuality: "", patienceScore: "", planFollowScore: "", risk: "50", reward: "100", pnl: "35", entryPrice: "2650", exitPrice: "", slPrice: "", tpPrice: "", notes: "", emotionBefore: "", emotionDuring: "", emotionAfter: "" };
+    const form = { tradeDate: "2026-10-05", session: "London", direction: "BUY", result: "WIN", level: "", timeframe: "", setupQuality: "", executionType: "", marketCondition: "", biasAlignment: "", bias: { D1: "", H4: "", H1: "", M15: "", M5: "" }, confirmationType: "", slPlacement: "", tpPlacement: "", mistake: "", holdQuality: "", patienceScore: "", planFollowScore: "", risk: "50", reward: "100", pnl: "35", entryPrice: "2650", exitPrice: "", slPrice: "", tpPrice: "", notes: "", emotionBefore: "", emotionDuring: "", emotionAfter: "" };
     const props = { open: true, setOpen: vi.fn(), setForm: vi.fn(), editing: undefined, onSave: vi.fn(), pending: false, screenshot: undefined, setScreenshot: vi.fn(), progress: 0 };
     // Live (default): Emotions visible, editable $ P&L.
     const { unmount } = render(<TradeDialogWithCustomOptions {...props} form={form} />);

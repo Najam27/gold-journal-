@@ -116,6 +116,7 @@ import TradeEnvironmentSwitch from "@/components/TradeEnvironmentSwitch";
 import { LIVE_MODE, modeFor } from "@/lib/tradeModeConfig";
 import { journalPipStats } from "@/lib/pipStats";
 import { isTradeEnvironment, type TradeEnvironment } from "@shared/tradeEnvironment";
+import { normalizeBiasTimeframes } from "@shared/biasTimeframes";
 import { tradePips } from "@shared/pipMath";
 import { StreakPanel } from "@/components/StreakPanel";
 import { GuardBanner } from "@/components/GuardBanner";
@@ -221,6 +222,8 @@ type TradeForm = {
   executionType: string;
   marketCondition: string;
   biasAlignment: string;
+  /** Multi-timeframe bias: D1/H4/H1/M15/M5, each Bull/Bear/"". Replaces Direction vs bias. */
+  bias: Record<"D1" | "H4" | "H1" | "M15" | "M5", "" | "Bull" | "Bear">;
   confirmationType: string;
   slPlacement: string;
   tpPlacement: string;
@@ -322,6 +325,7 @@ export function defaultTrade(): TradeForm {
     executionType: "",
     marketCondition: "",
     biasAlignment: "",
+    bias: { D1: "", H4: "", H1: "", M15: "", M5: "" },
     confirmationType: "",
     slPlacement: "",
     tpPlacement: "",
@@ -1146,6 +1150,10 @@ export default function GoldJournal() {
       executionType: trade.executionType || "",
       marketCondition: trade.marketCondition || "",
       biasAlignment: trade.biasAlignment || "",
+      bias: (() => {
+        const b = normalizeBiasTimeframes((trade as any).biasTimeframes);
+        return { D1: b.D1 ?? "", H4: b.H4 ?? "", H1: b.H1 ?? "", M15: b.M15 ?? "", M5: b.M5 ?? "" };
+      })(),
       confirmationType: trade.confirmationType || "",
       slPlacement: trade.slPlacement || "",
       tpPlacement: trade.tpPlacement || "",
@@ -1246,6 +1254,16 @@ export default function GoldJournal() {
       executionType: tradeForm.executionType,
       marketCondition: tradeForm.marketCondition,
       biasAlignment: tradeForm.biasAlignment,
+      biasTimeframes: (() => {
+        const b = tradeForm.bias;
+        return {
+          D1: b.D1 === "" ? null : b.D1,
+          H4: b.H4 === "" ? null : b.H4,
+          H1: b.H1 === "" ? null : b.H1,
+          M15: b.M15 === "" ? null : b.M15,
+          M5: b.M5 === "" ? null : b.M5,
+        };
+      })(),
       confirmationType: tradeForm.confirmationType,
       slPlacement: tradeForm.slPlacement,
       tpPlacement: tradeForm.tpPlacement,

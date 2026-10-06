@@ -139,10 +139,10 @@ const trade = (overrides: Record<string, unknown> = {}) => ({ id: 1, accountId: 
 /** A trade carrying every field the canonical presentation model can show. */
 const completeTrade = (overrides: Record<string, unknown> = {}) => trade({
   id: 696, symbol: "XAUUSD", mt5Ticket: "17446150", timeframe: "15m", level: "H4 RBS + FVG", setupQuality: "A+",
-  confirmationType: "Displacement + BOS", marketCondition: "Trending", biasAlignment: "Counter-trend", executionType: "Manual direct",
+  confirmationType: "Displacement + BOS", marketCondition: "Trending", biasAlignment: "Counter-trend", biasTimeframes: { D1: "Bull", H4: "Bear", H1: "Bull", M15: null, M5: "Bear" }, executionType: "Manual direct",
   slPlacement: "Above swing", tpPlacement: "R multiple", holdQuality: "Average", patienceScore: 4, mistake: "Impatience|Closed early|Entered without confirmation",
   risk: "10.00", reward: "93.30", pnl: "70.90", openTime: "2026-08-04T09:00:00.000Z", closeTime: "2026-08-04T09:04:00.000Z",
-  mfe: "80.00", mae: "-6.00", emotionBefore: "Calm", emotionDuring: "Fear", emotionAfter: "Regret",
+  mfe: "80.00", mae: "6.00", emotionBefore: "Calm", emotionDuring: "Fear", emotionAfter: "Regret",
   planStatus: "PLANNED", planChecklist: "setup-exists|matches-plan|stop-defined|risk-in-limit|size-valid|rr-acceptable|session-valid|no-emotional-trigger|not-revenge",
   notes: "Waited for the retest, entered on displacement, managed the position into the weekly level.", ...overrides,
 });
@@ -183,8 +183,8 @@ describe("trade data page", () => {
       { trade: completeTrade({ id: 2, tradeDate: "2026-08-05T09:00:00.000Z", screenshotUrl: "https://files.test/b.png", screenshotName: "b.png", hasScreenshot: true }) },
       { trade: completeTrade({ id: 3, tradeDate: "2026-08-06T09:00:00.000Z", screenshotUrl: "https://files.test/c.png", screenshotName: "c.png", hasScreenshot: true }) },
     ]);
-    expect([doc.pageOf("TRADE 01 / 03"), doc.pageOf("TRADE 02 / 03"), doc.pageOf("TRADE 03 / 03")]).toEqual([1, 3, 5]);
-    expect(doc.pagesWithImage()).toEqual([2, 4, 6]);
+    expect([doc.pageOf("TRADE 01 / 03"), doc.pageOf("TRADE 02 / 03"), doc.pageOf("TRADE 03 / 03")]).toEqual([1, 4, 7]);
+    expect(doc.pagesWithImage()).toEqual([3, 6, 9]);
     expect(doc.violations).toEqual([]);
     expect(doc.overlaps()).toEqual([]);
   });
@@ -283,10 +283,12 @@ describe("trade data page", () => {
     expect(doc.overlaps()).toEqual([]);
   });
 
-  it("keeps an ordinary trade on a single data page", async () => {
+  it("keeps an ordinary trade to two data pages", async () => {
+    // The required Bias (five timeframes) and long-form MAE/MFE labels need
+    // the data across two pages; the screenshot (when present) follows after.
     const doc = await render([{ trade: completeTrade({ notes: "Waited for the retest.", hasScreenshot: false }) }]);
     expect(doc.pageOf("TRADE 01 / 01")).toBe(1);
-    expect(doc.pageOf("TRADE 01 / 01 — TRADE DATA (CONTINUED)")).toBeNull();
+    expect(doc.pageOf("TRADE 01 / 01 — TRADE DATA (CONTINUED)")).toBe(2);
   });
 
   it("renders — for fields that exist but were never recorded", async () => {
@@ -313,11 +315,11 @@ describe("screenshot evidence pages", () => {
     expect(doc.images).toHaveLength(1);
     const image = doc.images[0];
     expect(image.format).toBe("PNG");
-    expect(image.page).toBe(2);
+    expect(image.page).toBe(3);
     expect(image.width / image.height).toBeCloseTo(1600 / 900, 2);
     expect(image.x).toBeGreaterThanOrEqual(PDF_PAGE.margin);
     expect(image.y + image.height).toBeLessThanOrEqual(PDF_PAGE.height - 12);
-    expect(doc.pageOf("Screenshot evidence")).toBe(2);
+    expect(doc.pageOf("Screenshot evidence")).toBe(3);
     expect(doc.violations).toEqual([]);
   });
 
@@ -383,7 +385,7 @@ describe("screenshot evidence pages", () => {
       { trade: completeTrade({ id: 3, tradeDate: "2026-08-06T09:00:00.000Z", screenshotUrl: "https://files.test/c.webp", hasScreenshot: true }) },
     ], { fetchImage: async url => ({ dataUrl: `data:image/x;base64,${PNG_1PX}`, format: formats[url] }) });
     expect(doc.images.map(image => image.format)).toEqual(["PNG", "JPEG", "WEBP"]);
-    expect(doc.pagesWithImage()).toEqual([2, 4, 6]);
+    expect(doc.pagesWithImage()).toEqual([3, 6, 9]);
     expect(doc.violations).toEqual([]);
   });
 });
@@ -407,7 +409,7 @@ describe("report structure", () => {
       { trade: completeTrade({ id: 2, tradeDate: "2026-08-05T09:00:00.000Z", pnl: "-40.00", result: "LOSS", session: "London", direction: "SELL", hasScreenshot: false }) },
       { trade: completeTrade({ id: 3, tradeDate: "2026-08-06T09:00:00.000Z", pnl: "0.00", result: "BREAK_EVEN", session: "New York", direction: "BUY", hasScreenshot: false }) },
     ]);
-    expect([doc.pageOf("Performance overview"), doc.pageOf("Process & behaviour"), doc.pageOf("Psychology & mistakes"), doc.pageOf("Review summary")]).toEqual([7, 8, 9, 10]);
+    expect([doc.pageOf("Performance overview"), doc.pageOf("Process & behaviour"), doc.pageOf("Psychology & mistakes"), doc.pageOf("Review summary")]).toEqual([10, 11, 12, 13]);
     const written = doc.written();
     ["NET P&L", "WIN RATE", "PROFIT FACTOR", "EXPECTANCY", "TOTAL R", "MAX DRAWDOWN"].forEach(label => expect(written).toContain(label));
     ["SESSION PERFORMANCE", "DIRECTION PERFORMANCE", "TIMEFRAME PERFORMANCE", "SETUP PERFORMANCE", "DAILY PERFORMANCE"].forEach(label => expect(written).toContain(label));
@@ -527,7 +529,7 @@ describe("report structure", () => {
     }
   });
 
-  it("keeps the reference 9-trade report to exactly two pages per trade plus the analysis", async () => {
+  it("keeps the reference 9-trade report to exactly three pages per trade plus the analysis", async () => {
     const sessions = ["New York", "London", "Asian", "Pre-London", "New York", "London", "New York", "Asian", "London"];
     const outcomes = ["WIN", "LOSS", "BREAK_EVEN", "WIN", "LOSS", "WIN", "WIN", "LOSS", "WIN"];
     const pnls = ["70.90", "-48.20", "0.00", "134.10", "-52.30", "88.75", "210.40", "-40.00", "61.25"];
@@ -541,14 +543,14 @@ describe("report structure", () => {
       }), runningBalance: null,
     }));
     const doc = await render(reference);
-    expect([doc.pageOf("TRADE 01 / 09"), doc.pageOf("TRADE 05 / 09"), doc.pageOf("TRADE 09 / 09")]).toEqual([1, 9, 17]);
-    expect(doc.pagesWithImage()).toEqual([2, 4, 6, 8, 10, 12, 14, 16, 18]);
+    expect([doc.pageOf("TRADE 01 / 09"), doc.pageOf("TRADE 05 / 09"), doc.pageOf("TRADE 09 / 09")]).toEqual([1, 13, 25]);
+    expect(doc.pagesWithImage()).toEqual([3, 6, 9, 12, 15, 18, 21, 24, 27]);
     const total = doc.getNumberOfPages();
-    // 18 trade pages, then only the analysis pages: never the three-to-four pages
-    // per trade this report replaced.
-    expect(total).toBeGreaterThanOrEqual(20);
-    expect(total).toBeLessThanOrEqual(24);
-    expect(doc.pageOf("Performance overview")).toBe(19);
+    // 27 trade pages (3 per trade: 2 data + 1 screenshot), then only the
+    // analysis pages.
+    expect(total).toBeGreaterThanOrEqual(29);
+    expect(total).toBeLessThanOrEqual(33);
+    expect(doc.pageOf("Performance overview")).toBe(28);
     expect(doc.violations).toEqual([]);
     expect(doc.overlaps()).toEqual([]);
     // No page is left blank, and no page runs past the content area.
@@ -658,7 +660,7 @@ describe("image preparation", () => {
     expect(image.dataUrl.startsWith("data:image/png;base64,")).toBe(true);
   });
 
-  it("produces a real jsPDF document whose page count is exactly two pages per trade plus the analysis", async () => {
+  it("produces a real jsPDF document whose page count is exactly three pages per trade plus the analysis", async () => {
     const { jsPDF } = await import("jspdf");
     // The real writer, with real Helvetica metrics: this is the acceptance case the
     // reference report describes — nine trades, eighteen trade pages, then analysis.
@@ -688,10 +690,11 @@ describe("image preparation", () => {
       fetchImage: async () => ({ dataUrl: `data:image/png;base64,${PNG_1PX}`, format: "PNG" }),
     });
     const bytes = new Uint8Array(doc.output("arraybuffer") as ArrayBuffer);
-    // 18 trade pages. One trade carries a 26-paragraph entry and correctly takes a
-    // labelled continuation page, so the document is 19-21 pages plus the analysis.
-    expect(result.pages).toBeGreaterThanOrEqual(22);
-    expect(result.pages).toBeLessThanOrEqual(25);
+    // 27 trade pages (3 per trade). One trade carries a 26-paragraph entry and
+    // correctly takes a labelled continuation page, so the document is 28-30
+    // pages plus the analysis.
+    expect(result.pages).toBeGreaterThanOrEqual(31);
+    expect(result.pages).toBeLessThanOrEqual(34);
     expect(Array.from(bytes.slice(0, 4))).toEqual([0x25, 0x50, 0x44, 0x46]);
     expect(bytes.byteLength).toBeGreaterThan(20_000);
     expect(doc.internal.pageSize.getWidth()).toBeCloseTo(297, 0);

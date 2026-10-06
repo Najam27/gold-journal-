@@ -33,6 +33,7 @@ import { formatActualR, formatDate, formatMoney, formatRr, results, toNumber } f
 import { buildRunningBalances } from "@/lib/tradeLedger";
 import { PNL_RESULT_EPSILON } from "@shared/tradeOutcome";
 import { formatPips, tradePips } from "@shared/pipMath";
+import { formatBiasCompact, normalizeBiasTimeframes } from "@shared/biasTimeframes";
 import { LIVE_MODE, type TradeModeConfig } from "@/lib/tradeModeConfig";
 import { copyTradeCardPng, createTradeCardPng, downloadTradeCardPng, shareTradeCardPng } from "@/lib/tradeCardPng";
 import { toast } from "sonner";
@@ -259,7 +260,7 @@ function BaseTradeLogWithViewer({ mode = LIVE_MODE, stats, trades, allTrades, pa
                       <td className="data-text">{formatDate(trade.tradeDate)}</td>
                       <td>{trade.session}</td>
                       <td><span className={`side-badge ${String(trade.direction || "").toLowerCase()}`}>{trade.direction}</span></td>
-                      <td><span className="context-pill">{trade.biasAlignment || "—"}</span></td>
+                      <td><span className="context-pill">{formatBiasCompact(normalizeBiasTimeframes((trade as any).biasTimeframes)) ?? "—"}</span></td>
                       <td>{trade.level || "—"}</td>
                       <td>{trade.setupQuality || "—"}</td>
                       <td>{trade.executionType || "—"}</td>

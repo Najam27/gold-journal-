@@ -4,9 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { formatActualR, formatRr, results } from "@/lib/gold";
+import { formatActualR, results } from "@/lib/gold";
 import { deriveTradeResult } from "@shared/tradeOutcome";
 import { formatPips, tradePips } from "@shared/pipMath";
+import { BIAS_SIDES, BIAS_TIMEFRAMES } from "@shared/biasTimeframes";
+import { deriveRiskDistances, formatDerivedRr } from "@shared/riskDerivation";
 import { LIVE_MODE, type TradeModeConfig } from "@/lib/tradeModeConfig";
 import {
   MISTAKE_CATEGORY_LABELS,
@@ -450,6 +452,46 @@ function ScreenshotEvidence({ screenshot, setScreenshot, editing, removeScreensh
   );
 }
 
+/** Multi-timeframe Bias: five fixed rows, Bull/Bear toggle each. Market context only. */
+function BiasSection({ form, setForm }: any) {
+  const setSide = (tf: string, side: string) =>
+    setForm({ ...form, bias: { ...form.bias, [tf]: form.bias?.[tf] === side ? "" : side } });
+  return (
+    <div className="bias-grid" role="group" aria-label="Multi-timeframe bias">
+      {(BIAS_TIMEFRAMES as readonly string[]).map(tf => (
+        <div key={tf} className="bias-row">
+          <span className="bias-tf">{tf}</span>
+          <div className="bias-sides">
+            {(BIAS_SIDES as readonly string[]).map(side => (
+              <button
+                key={side}
+                type="button"
+                className={form.bias?.[tf] === side ? "active" : ""}
+                aria-pressed={form.bias?.[tf] === side}
+                onClick={() => setSide(tf, side)}
+              >
+                {side}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+      <span className="field-hint">Market context only — bias never changes direction.</span>
+    </div>
+  );
+}
+
+/** Read-only auto-sourced value with its provenance badge. */
+function AutoField({ value, emptyText = "Not available" }: { value: string; emptyText?: string }) {
+  const hasValue = value !== "" && value !== null && value !== undefined;
+  return (
+    <div className="auto-field">
+      <span className="auto-field-value">{hasValue ? value : emptyText}</span>
+      {hasValue && <span className="auto-badge">Auto-detected</span>}
+    </div>
+  );
+}
+
 export function TradeDialogWithCustomOptions({ mode = LIVE_MODE, open, setOpen, form, setForm, editing, onSave, pending, saveState, saveError, screenshot, setScreenshot, progress, plans, dayTrades, behaviorConfig }: any) {
   const fileRef = useRef<HTMLInputElement>(null);
   // Removal intent belongs to the dialog, because the dialog is the surface that
@@ -497,6 +539,12 @@ export function TradeDialogWithCustomOptions({ mode = LIVE_MODE, open, setOpen, 
     : null;
   const selectDirection = form.direction || "";
   const selectResult = form.result || "";
+  // MT5-linked trades source Entry/SL/TP, monetary risk/reward, and MAE/MFE
+  // from the tracked position: displayed read-only, never typed.
+  const isMt5 = Boolean(form.mt5Ticket);
+  const numOrNull = (v: string) => (v === "" || v == null ? null : Number(v));
+  const derived = deriveRiskDistances(form.direction, numOrNull(form.entryPrice), numOrNull(form.slPrice), numOrNull(form.tpPrice));
+  const derivedRr = formatDerivedRr(derived.rrRatio);
   const store = useTradeOptionStore();
   // The user's own Setup quality scale, best-first, so the live process preview
   // honours renamed grades instead of hardcoding A/A+.
@@ -506,8 +554,21 @@ export function TradeDialogWithCustomOptions({ mode = LIVE_MODE, open, setOpen, 
   return <Dialog open={open} onOpenChange={setOpen}><DialogContent className="trade-dialog"><DialogHeader><DialogTitle>{editing ? "Edit trade" : "New trade"}</DialogTitle><DialogDescription>{editing ? "Update the journal detail and retain the original session." : "Session is detected from Pakistan Standard Time and can be overridden."}</DialogDescription></DialogHeader><p className="trade-custom-help">Every dropdown reads your managed option lists, including the built-in defaults. Use <b>+ Add</b> to save a reusable value, or the ⚙ control to rename, disable, or add options for that field.</p><div className="trade-form">
     <Section title="Trade details"><Field label="Date"><Input type="date" value={form.tradeDate} onChange={event => patch("tradeDate", event.target.value)} /></Field><Field label="Session"><CustomSelect category="Session" value={form.session} onChange={value => patch("session", value)} store={store} onManage={setManageCategory} /></Field><Field label="Direction"><select value={selectDirection} onChange={event => patch("direction", event.target.value)}><option value="" disabled>Select direction</option><option value="BUY">BUY</option><option value="SELL">SELL</option></select></Field><Field label="Result"><select value={selectResult} onChange={event => patch("result", event.target.value)}><option value="" disabled>Select result</option>{results.map(item => <option key={item} value={item}>{item.replace("_", " ")}</option>)}</select><span className="field-hint">Closed-trade outcome follows your P&amp;L automatically.</span></Field></Section>
     <Section title="Strategy"><Field label="Level / confluence"><CustomSelect multi category="Level" value={form.level} onChange={value => patch("level", value)} store={store} onManage={setManageCategory} /></Field><Field label="Timeframe"><CustomSelect category="Timeframe" value={form.timeframe} onChange={value => patch("timeframe", value)} store={store} onManage={setManageCategory} /></Field><Field label="Setup quality"><CustomSelect category="Setup quality" value={form.setupQuality} onChange={value => patch("setupQuality", value)} store={store} onManage={setManageCategory} /></Field><Field label="Confirmation signals"><CustomSelect multi category="Confirmation" value={form.confirmationType} onChange={value => patch("confirmationType", value)} store={store} onManage={setManageCategory} /></Field></Section>
-    <Section title="Execution"><Field label="Execution type"><CustomSelect category="Execution type" value={form.executionType} onChange={value => patch("executionType", value)} store={store} onManage={setManageCategory} /></Field><Field label="Market conditions"><CustomSelect multi category="Market condition" value={form.marketCondition} onChange={value => patch("marketCondition", value)} store={store} onManage={setManageCategory} /></Field><Field label="Direction vs bias"><CustomSelect category="Bias alignment" value={form.biasAlignment} onChange={value => patch("biasAlignment", value)} store={store} onManage={setManageCategory} /></Field><Field label="SL placement"><CustomSelect category="SL placement" value={form.slPlacement} onChange={value => patch("slPlacement", value)} store={store} onManage={setManageCategory} /></Field><Field label="TP placement"><CustomSelect category="TP placement" value={form.tpPlacement} onChange={value => patch("tpPlacement", value)} store={store} onManage={setManageCategory} /></Field><Field label="Patience score (1–5)"><Input type="number" min="1" max="5" value={form.patienceScore} onChange={event => patch("patienceScore", event.target.value)} /></Field><Field label="Plan-following score (1–5)"><ScoreSelector value={form.planFollowScore} onChange={value => patch("planFollowScore", value)} ariaLabel="Plan-following score" /><span className="field-hint">Your rating — the journal computes its own adherence beside it.</span></Field><Field label="Highest unrealized gain $ (MFE)"><Input type="number" min="0" step="0.01" value={form.mfe} placeholder="Best it looked" onChange={event => patch("mfe", event.target.value)} /><span className="field-hint">{form.mt5Ticket ? "Auto-detected from the live floating profit while the position was open." : "How far the trade went in your favor ($). Auto-detected on MT5 trades."}</span></Field><Field label="Highest unrealized loss $ (MAE)"><Input type="number" min="0" step="0.01" value={form.mae} placeholder="Worst heat taken" onChange={event => patch("mae", event.target.value)} /><span className="field-hint">{form.mt5Ticket ? "Auto-detected from the live floating profit while the position was open." : "How far price went against you ($). Auto-detected on MT5 trades."}</span></Field><Field label="Mistake / rule-break tags" className="field-span-full"><MistakeTaxonomy value={form.mistake || ""} onChange={value => patch("mistake", value)} store={store} onManage={setManageCategory} />{overtradingAutoTagged && <span className="field-hint overtrading-notice">⚠️ Overtrading tag auto-applied: this is your 4th+ trade today. It will appear as an overtrading mistake in Analysis and count toward overtrading-day stats. Remove the tag if this trade was planned.</span>}</Field><Field label="Hold quality"><CustomSelect category="Hold quality" value={form.holdQuality} onChange={value => patch("holdQuality", value)} store={store} onManage={setManageCategory} /></Field></Section>
-    <Section title="Risk"><Field label="Planned risk $"><Input type="number" min="0" step="0.01" value={form.risk} onChange={event => patch("risk", event.target.value)} /></Field><Field label="Planned reward $"><Input type="number" min="0" step="0.01" value={form.reward} onChange={event => patch("reward", event.target.value)} /></Field>{isPips ? <Field label="Actual pips (auto)"><Input value={formatPips(pipsPreview)} readOnly aria-readonly="true" /><span className="field-hint">Derived from entry → exit. Not editable.</span></Field> : <Field label="Actual P&L $"><Input type="number" step="0.01" value={form.pnl} placeholder="Realized profit/loss" onChange={event => patchPnl(event.target.value)} /></Field>}<Field label="Entry price"><Input type="number" min="0" step="any" value={form.entryPrice} placeholder="Fill price" onChange={event => patch("entryPrice", event.target.value)} /></Field>{isPips && <Field label="Exit price"><Input type="number" min="0" step="any" value={form.exitPrice} placeholder="Exit price" onChange={event => patch("exitPrice", event.target.value)} /></Field>}<Field label="Stop-loss price"><Input type="number" min="0" step="any" value={form.slPrice} onChange={event => patch("slPrice", event.target.value)} /></Field><Field label="Take-profit price"><Input type="number" min="0" step="any" value={form.tpPrice} onChange={event => patch("tpPrice", event.target.value)} /></Field><div className="rr-live"><span>PLANNED R:R</span><strong className="data-text">{formatRr(form.risk, form.reward)}</strong></div><div className="rr-live"><span>ACTUAL R:R</span><strong className="data-text">{isPips ? "—" : formatActualR(form.risk, form.pnl)}</strong></div></Section>
+    <Section title="Bias"><BiasSection form={form} setForm={setForm} /></Section>
+    <Section title="Execution"><Field label="Execution type"><CustomSelect category="Execution type" value={form.executionType} onChange={value => patch("executionType", value)} store={store} onManage={setManageCategory} /></Field><Field label="Market conditions"><CustomSelect multi category="Market condition" value={form.marketCondition} onChange={value => patch("marketCondition", value)} store={store} onManage={setManageCategory} /></Field><Field label="SL placement"><CustomSelect category="SL placement" value={form.slPlacement} onChange={value => patch("slPlacement", value)} store={store} onManage={setManageCategory} /></Field><Field label="TP placement"><CustomSelect category="TP placement" value={form.tpPlacement} onChange={value => patch("tpPlacement", value)} store={store} onManage={setManageCategory} /></Field><Field label="Patience score (1–5)"><Input type="number" min="1" max="5" value={form.patienceScore} onChange={event => patch("patienceScore", event.target.value)} /></Field><Field label="Plan-following score (1–5)"><ScoreSelector value={form.planFollowScore} onChange={value => patch("planFollowScore", value)} ariaLabel="Plan-following score" /><span className="field-hint">Your rating — the journal computes its own adherence beside it.</span></Field><Field label="Mistake / rule-break tags" className="field-span-full"><MistakeTaxonomy value={form.mistake || ""} onChange={value => patch("mistake", value)} store={store} onManage={setManageCategory} />{overtradingAutoTagged && <span className="field-hint overtrading-notice">⚠️ Overtrading tag auto-applied: this is your 4th+ trade today. It will appear as an overtrading mistake in Analysis and count toward overtrading-day stats. Remove the tag if this trade was planned.</span>}</Field><Field label="Hold quality"><CustomSelect category="Hold quality" value={form.holdQuality} onChange={value => patch("holdQuality", value)} store={store} onManage={setManageCategory} /></Field></Section>
+    <Section title="Risk">
+      <Field label="Entry price">{isMt5 ? <AutoField value={form.entryPrice} /> : <Input type="number" min="0" step="any" value={form.entryPrice} placeholder="Fill price" onChange={event => patch("entryPrice", event.target.value)} />}{isMt5 && !form.entryPrice && <span className="field-hint">Fills from the MT5 position on save.</span>}</Field>
+      {isPips && <Field label="Exit price"><Input type="number" min="0" step="any" value={form.exitPrice} placeholder="Exit price" onChange={event => patch("exitPrice", event.target.value)} /></Field>}
+      <Field label="Stop-loss price">{isMt5 ? <AutoField value={form.slPrice} /> : <Input type="number" min="0" step="any" value={form.slPrice} onChange={event => patch("slPrice", event.target.value)} />}{isMt5 && !form.slPrice && <span className="field-hint">Fills from the MT5 position on save.</span>}</Field>
+      <Field label="Take-profit price">{isMt5 ? <AutoField value={form.tpPrice} /> : <Input type="number" min="0" step="any" value={form.tpPrice} onChange={event => patch("tpPrice", event.target.value)} />}{isMt5 && !form.tpPrice && <span className="field-hint">Fills from the MT5 position on save.</span>}</Field>
+      <Field label="Planned risk $">{isMt5 ? <AutoField value={form.risk} /> : <Input type="number" min="0" step="0.01" value={form.risk} placeholder="Not available" onChange={event => patch("risk", event.target.value)} />}{!isMt5 && !form.risk && <span className="field-hint">Needs position size — not derivable from price alone.</span>}</Field>
+      <Field label="Planned reward $">{isMt5 ? <AutoField value={form.reward} /> : <Input type="number" min="0" step="0.01" value={form.reward} placeholder="Not available" onChange={event => patch("reward", event.target.value)} />}{!isMt5 && !form.reward && <span className="field-hint">Needs position size — not derivable from price alone.</span>}</Field>
+      <div className="rr-live"><span>PLANNED R:R</span><strong className="data-text">{derivedRr ?? "—"}</strong>{derivedRr && <span className="auto-badge">Auto-calculated</span>}</div>
+      <Field label="Highest unrealized loss $ (MAE)">{isMt5 ? <AutoField value={form.mae} /> : <Input type="number" min="0" step="0.01" value={form.mae} placeholder="Worst heat taken" onChange={event => patch("mae", event.target.value)} />}{isMt5 && <span className="field-hint">Tracked from live floating P&L while the position was open.</span>}</Field>
+      <Field label="Highest unrealized gain $ (MFE)">{isMt5 ? <AutoField value={form.mfe} /> : <Input type="number" min="0" step="0.01" value={form.mfe} placeholder="Best it looked" onChange={event => patch("mfe", event.target.value)} />}{isMt5 && <span className="field-hint">Tracked from live floating P&L while the position was open.</span>}</Field>
+      {isPips ? <Field label="Actual pips (auto)"><Input value={formatPips(pipsPreview)} readOnly aria-readonly="true" /><span className="field-hint">Derived from entry → exit. Not editable.</span></Field> : <Field label="Actual P&L $"><Input type="number" step="0.01" value={form.pnl} placeholder="Realized profit/loss" onChange={event => patchPnl(event.target.value)} /></Field>}
+      <div className="rr-live"><span>ACTUAL R:R</span><strong className="data-text">{isPips ? "—" : formatActualR(form.risk, form.pnl)}</strong></div>
+    </Section>
     <PlanLinkSection form={form} patch={patch} context={planContext} />
     <ScreenshotEvidence screenshot={screenshot} setScreenshot={setScreenshot} editing={editing} removeScreenshot={removeStoredScreenshot} setRemoveScreenshot={setRemoveStoredScreenshot} progress={progress} uploading={pending && Boolean(screenshot)} fileRef={fileRef} />
     <Section title="Notes"><Field label="Trade notes" className="field-span-full"><Textarea className="journal-long-text" value={form.notes} rows={6} placeholder="What happened, how you felt, lessons… Write as much as the trade needs. Notes are never truncated." onChange={event => patch("notes", event.target.value)} /></Field></Section>

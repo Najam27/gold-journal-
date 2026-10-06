@@ -46,7 +46,7 @@ const completeTrade = {
   confirmationType: "BOS + displacement",
   executionType: "Manual direct",
   marketCondition: "Trending",
-  biasAlignment: "Counter-trend",
+  biasTimeframes: { D1: "Bull", H4: "Bull", H1: "Bear", M15: null, M5: null },
   slPlacement: "Above swing high",
   tpPlacement: "R multiple",
   holdQuality: "Average",

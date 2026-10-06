@@ -6,6 +6,7 @@ import { getDb } from "./db";
 import { mt5ApiKeyFingerprint, mt5ConnectionReference } from "./mt5Security";
 import { supabaseDataSourceReference } from "./supabaseAdmin";
 import { recordMt5EventFailureAtomic, syncMt5HistoryBatchAtomic, syncMt5OpenBatchAtomic, syncMt5PositionAtomic, touchMt5ConnectionAtomic, updateMt5AccountSummaryAtomic } from "./atomicOperations";
+import { normalizeMae, normalizeMfe } from "@shared/riskDerivation";
 
 async function requireDb() { const db = await getDb(); if (!db) throw new Error("Supabase database is unavailable. Please retry shortly."); return db; }
 
@@ -368,8 +369,9 @@ async function syncMt5PositionToTradeLog(userId: number, accountId: number, posi
     tpPrice: position.tpPrice?.toFixed(6) ?? null,
     // Auto-detected from the floating P&L sampled while the position was
     // open; a manually edited trade keeps whatever the user saved.
-    mfe: position.mfeUsd != null ? position.mfeUsd.toFixed(2) : null,
-    mae: position.maeUsd != null ? position.maeUsd.toFixed(2) : null,
+    // Stored as positive magnitudes (MFE $250, MAE $180), never signed.
+    mfe: normalizeMfe(position.mfeUsd)?.toFixed(2) ?? null,
+    mae: normalizeMae(position.maeUsd)?.toFixed(2) ?? null,
     risk: position.riskUsd.toFixed(2),
     reward: position.rewardUsd.toFixed(2),
     pnl: position.pnl.toFixed(2),

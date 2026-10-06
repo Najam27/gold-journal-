@@ -17,12 +17,13 @@ beforeEach(() => Object.values(imageMocks).forEach(mock => mock.mockReset()));
 
 describe("TradeLogWithViewer", () => {
   it("opens a card with trading detail and screenshot evidence without exposing internal metadata", () => {
-    const trade = { id: 8, userId: 21, accountId: 3, createdAt: new Date("2026-08-12T12:00:00Z"), updatedAt: new Date("2026-08-12T12:30:00Z"), tradeDate: new Date("2026-08-12T12:00:00Z"), session: "London", direction: "BUY", result: "WIN", level: "RBS/TJL1", timeframe: "15m", setupQuality: "A", confirmationType: "BOS", executionType: "Manual Direct", marketCondition: "Bullish", biasAlignment: "Aligned", slPlacement: "Below swing", tpPlacement: "Prior high", mistake: "None", holdQuality: "Good", patienceScore: 4, risk: "20", reward: "105", pnl: "100", emotionBefore: "Calm", emotionDuring: "Focused", emotionAfter: "Disciplined", notes: "Waited for confirmation", screenshotKey: "gold-journal/21/trades/8.png", screenshotName: "entry.png", screenshotUrl: "https://example.test/trade.png" };
+    const trade = { id: 8, userId: 21, accountId: 3, createdAt: new Date("2026-08-12T12:00:00Z"), updatedAt: new Date("2026-08-12T12:30:00Z"), tradeDate: new Date("2026-08-12T12:00:00Z"), session: "London", direction: "BUY", result: "WIN", level: "RBS/TJL1", timeframe: "15m", setupQuality: "A", confirmationType: "BOS", executionType: "Manual Direct", marketCondition: "Bullish", biasAlignment: "Aligned", biasTimeframes: { D1: "Bull", H4: "Bull", H1: "Bull", M15: "Bull", M5: "Bull" }, slPlacement: "Below swing", tpPlacement: "Prior high", mistake: "None", holdQuality: "Good", patienceScore: 4, risk: "20", reward: "105", pnl: "100", emotionBefore: "Calm", emotionDuring: "Focused", emotionAfter: "Disciplined", notes: "Waited for confirmation", screenshotKey: "gold-journal/21/trades/8.png", screenshotName: "entry.png", screenshotUrl: "https://example.test/trade.png" };
     render(<TradeLogWithViewer stats={{ balance: 100, winRate: 100, wins: 1, losses: 0, pnl: 100, total: 1 }} trades={[trade]} allTrades={[trade]} pagination={{ page: 1, pageSize: 12, total: 1, pageCount: 1 }} listLoading={false} account={{ name: "Primary" }} dangerGoals={[]} search="" resultFilter="ALL" setSearch={vi.fn()} setResultFilter={vi.fn()} onPage={vi.fn()} onNew={vi.fn()} onDuplicate={vi.fn()} onEdit={vi.fn()} onDelete={vi.fn()} onCash={vi.fn()} onCsv={vi.fn()} onExcel={vi.fn()} onPdf={vi.fn()} onClear={vi.fn()} />);
     fireEvent.click(screen.getByLabelText(/View trade from/i));
     expect(screen.getByText("Trade card")).toBeTruthy();
     expect(screen.getByText("Waited for confirmation")).toBeTruthy();
-    expect(screen.getAllByText("Aligned").length).toBeGreaterThan(1);
+    expect(screen.getAllByText("Bias").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("D1: Bull \u00b7 H4: Bull \u00b7 H1: Bull \u00b7 M15: Bull \u00b7 M5: Bull").length).toBeGreaterThan(0);
     expect(screen.getByText("Below swing")).toBeTruthy();
     expect(screen.getByText("Good")).toBeTruthy();
     expect(screen.getAllByText("Planned R:R").length).toBeGreaterThan(0);

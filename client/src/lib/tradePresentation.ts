@@ -37,6 +37,8 @@ import { MISTAKE_BY_TAG, PRE_TRADE_GATE_ITEMS, TRADE_CLASSIFICATION_LABELS, TRAD
 import { tagsForCategory, violationTags, type MistakeCategory, type TradeProcessAssessment } from "@shared/psychologyEngine";
 import { formatActualR, formatDate, formatMoney, formatRr, toNumber } from "@/lib/gold";
 import { formatPips, tradePips } from "@shared/pipMath";
+import { formatBiasLines, normalizeBiasTimeframes } from "@shared/biasTimeframes";
+import { formatMagnitude, formatMfe } from "@shared/riskDerivation";
 import { LIVE_MODE, type TradeModeConfig } from "@/lib/tradeModeConfig";
 
 /** Rendered in place of a field that exists but carries no recorded value. */
@@ -365,7 +367,7 @@ export const TRADE_PRESENTATION_FIELD_SPECS: FieldSpec[] = [
   /* 3 — Execution */
   { key: "executionType", label: "Execution type", section: "execution", keys: ["executionType"], value: trade => presentationText(trade.executionType) },
   { key: "marketCondition", label: "Market conditions", section: "execution", keys: ["marketCondition"], value: trade => presentationText(trade.marketCondition) },
-  { key: "biasAlignment", label: "Direction vs bias", section: "execution", keys: ["biasAlignment"], value: trade => presentationText(trade.biasAlignment) },
+  { key: "bias", label: "Bias", section: "execution", keys: ["biasTimeframes"], value: trade => { const lines = formatBiasLines(normalizeBiasTimeframes((trade as any).biasTimeframes)); return lines.length ? lines.join(" \u00b7 ") : PRESENTATION_MISSING; } },
   { key: "slPlacement", label: "SL placement", section: "execution", keys: ["slPlacement"], value: trade => presentationText(trade.slPlacement) },
   { key: "tpPlacement", label: "TP placement", section: "execution", keys: ["tpPlacement"], value: trade => presentationText(trade.tpPlacement) },
   { key: "holdQuality", label: "Hold quality", section: "execution", keys: ["holdQuality"], value: trade => presentationText(trade.holdQuality) },
@@ -379,8 +381,8 @@ export const TRADE_PRESENTATION_FIELD_SPECS: FieldSpec[] = [
   { key: "pnl", label: "Actual P&L", section: "risk", keys: ["pnl"], value: trade => money(trade.pnl), tone: "signed", kpi: true },
   { key: "actualR", label: "Actual R:R", section: "risk", keys: ["risk", "pnl"], value: trade => actualR(trade.risk, trade.pnl), tone: "signed", kpi: true },
   { key: "runningBalance", label: "Running balance", section: "risk", keys: ["runningBalance"], value: (_trade, context) => (context.runningBalance == null ? PRESENTATION_MISSING : formatMoney(context.runningBalance)), tone: "signed" },
-  { key: "mfe", label: "MFE", section: "risk", keys: ["mfe"], value: trade => money(trade.mfe), tone: "signed" },
-  { key: "mae", label: "MAE", section: "risk", keys: ["mae"], value: trade => money(trade.mae), tone: "signed" },
+  { key: "mfe", label: "Highest unrealized gain $ (MFE)", section: "risk", keys: ["mfe"], value: trade => formatMfe(trade.mfe) ?? PRESENTATION_MISSING, tone: "neutral" },
+  { key: "mae", label: "Highest unrealized loss $ (MAE)", section: "risk", keys: ["mae"], value: trade => formatMagnitude(trade.mae) ?? PRESENTATION_MISSING, tone: "neutral" },
   { key: "entryPrice", label: "Entry price", section: "risk", keys: ["entryPrice"], value: trade => price(trade.entryPrice), hideWhenMissing: true },
   { key: "slPrice", label: "Stop-loss price", section: "risk", keys: ["slPrice"], value: trade => price(trade.slPrice), hideWhenMissing: true },
   { key: "tpPrice", label: "Take-profit price", section: "risk", keys: ["tpPrice"], value: trade => price(trade.tpPrice), hideWhenMissing: true },
@@ -433,7 +435,7 @@ export const EDITABLE_TRADE_FIELDS: Array<{ key: string; label: string }> = [
   { key: "confirmationType", label: "Confirmation signals" },
   { key: "executionType", label: "Execution type" },
   { key: "marketCondition", label: "Market conditions" },
-  { key: "biasAlignment", label: "Direction vs bias" },
+  { key: "biasTimeframes", label: "Bias" },
   { key: "slPlacement", label: "SL placement" },
   { key: "tpPlacement", label: "TP placement" },
   { key: "holdQuality", label: "Hold quality" },

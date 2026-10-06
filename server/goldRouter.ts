@@ -28,6 +28,8 @@ import { getPktDateKey, isPktDateKey, pktDateToTimestamp } from "@shared/pktDate
 import { normalizeTradeOptionValue } from "@shared/tradeOptionCategories";
 import { deriveTradeResult } from "@shared/tradeOutcome";
 import { normalizeTradeEnvironment } from "@shared/tradeEnvironment";
+import { BIAS_SIDES, hasBias, normalizeBiasTimeframes } from "@shared/biasTimeframes";
+import { deriveRiskDistances, normalizeMae, normalizeMfe } from "@shared/riskDerivation";
 import { tradePips } from "@shared/pipMath";
 import {
   OPTION_COLUMNS,
@@ -139,6 +141,22 @@ const tradeInput = z.object({
   executionType: freeText,
   marketCondition: freeText,
   biasAlignment: freeText,
+  // Multi-timeframe Bias: five fixed timeframes, each Bull | Bear | null.
+  // Structured jsonb; the legacy biasAlignment text column is preserved for
+  // history and never reinterpreted. Unknown keys/sides are dropped by the
+  // normalizer rather than rejected, so older clients cannot corrupt the shape.
+  biasTimeframes: z
+    .object({
+      D1: z.enum(BIAS_SIDES).nullable(),
+      H4: z.enum(BIAS_SIDES).nullable(),
+      H1: z.enum(BIAS_SIDES).nullable(),
+      M15: z.enum(BIAS_SIDES).nullable(),
+      M5: z.enum(BIAS_SIDES).nullable(),
+    })
+    .partial()
+    .nullable()
+    .optional()
+    .default(null),
   confirmationType: freeText,
   slPlacement: freeText,
   tpPlacement: freeText,
@@ -560,21 +578,38 @@ export const goldRouter = router({
           // later edit or delete has to address.
           if (existing[0]) return { id: existing[0].id, replayed: true, trade: toSafeTrade(existing[0]) };
         }
-        let linkedPosition: { mfeUsd: unknown; maeUsd: unknown } | undefined;
+        let linkedPosition: { mfeUsd: unknown; maeUsd: unknown; openPrice: unknown; slPrice: unknown; tpPrice: unknown; riskUsd: unknown; rewardUsd: unknown } | undefined;
         if (input.mt5Ticket) {
           const ticket = BigInt(input.mt5Ticket);
           // A ticket already linked to a journal trade can never be journaled
           // twice; say so plainly instead of surfacing the unique constraint.
           const alreadyJournaled = await db.select({ id: trades.id }).from(trades).where(and(eq(trades.accountId, input.accountId), eq(trades.mt5Ticket, ticket))).limit(1);
           if (alreadyJournaled[0]) throw new Error("That MT5 ticket is already linked to another journal trade.");
-          const linked = await db.select({ id: mt5LivePositions.id, mfeUsd: mt5LivePositions.mfeUsd, maeUsd: mt5LivePositions.maeUsd }).from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, input.accountId), eq(mt5LivePositions.ticket, ticket), eq(mt5LivePositions.status, "CLOSED"))).limit(1);
+          // The position row is the authoritative source for prices, monetary
+          // risk/reward (EA-computed with real specs), and tracked excursions.
+          const linked = await db.select({ id: mt5LivePositions.id, mfeUsd: mt5LivePositions.mfeUsd, maeUsd: mt5LivePositions.maeUsd, openPrice: mt5LivePositions.openPrice, slPrice: mt5LivePositions.slPrice, tpPrice: mt5LivePositions.tpPrice, riskUsd: mt5LivePositions.riskUsd, rewardUsd: mt5LivePositions.rewardUsd }).from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, input.accountId), eq(mt5LivePositions.ticket, ticket), eq(mt5LivePositions.status, "CLOSED"))).limit(1);
           if (!linked[0]) throw new Error("The selected MT5 ticket is not an unjournaled closed position for this account.");
           linkedPosition = linked[0];
         }
+        // Auto-detection priority: MT5 authoritative data first, then the
+        // user's own input. Nothing is invented: a field the MT5 row does not
+        // carry stays null unless the user typed it.
+        const autoEntry = input.entryPrice ?? (linkedPosition?.openPrice == null ? null : Number(linkedPosition.openPrice));
+        const autoSl = input.slPrice ?? (linkedPosition?.slPrice == null ? null : Number(linkedPosition.slPrice));
+        const autoTp = input.tpPrice ?? (linkedPosition?.tpPrice == null ? null : Number(linkedPosition.tpPrice));
+        const autoRisk = input.risk ?? (linkedPosition?.riskUsd == null ? null : Number(linkedPosition.riskUsd));
+        const autoReward = input.reward ?? (linkedPosition?.rewardUsd == null ? null : Number(linkedPosition.rewardUsd));
         // Excursions auto-detected from the floating P&L sampled while the
         // position was open fill the trade when the user did not type them.
-        const autoMfe = input.mfe ?? (linkedPosition?.mfeUsd == null ? null : Number(linkedPosition.mfeUsd));
-        const autoMae = input.mae ?? (linkedPosition?.maeUsd == null ? null : Number(linkedPosition.maeUsd));
+        // Stored as positive magnitudes: MFE $250, MAE $180 — never -$180.
+        const autoMfe = normalizeMfe(input.mfe ?? (linkedPosition?.mfeUsd == null ? null : Number(linkedPosition.mfeUsd)));
+        const autoMae = normalizeMae(input.mae ?? (linkedPosition?.maeUsd == null ? null : Number(linkedPosition.maeUsd)));
+        // SL/TP must sit on the correct side of entry for the direction.
+        // Validated against the effective (auto-filled) values, not just the
+        // raw input, so an MT5 row with crossed prices is caught too.
+        const priceCheck = deriveRiskDistances(input.direction, autoEntry, autoSl, autoTp);
+        if (autoSl !== null && !priceCheck.slValid) throw new TRPCError({ code: "BAD_REQUEST", message: `Stop-loss ${autoSl} is on the wrong side of entry ${autoEntry} for a ${input.direction} trade.` });
+        if (autoTp !== null && !priceCheck.tpValid) throw new TRPCError({ code: "BAD_REQUEST", message: `Take-profit ${autoTp} is on the wrong side of entry ${autoEntry} for a ${input.direction} trade.` });
         const screenshot = resolveScreenshotForWrite(ctx.user.openId, input.accountId, input);
         // The outcome label is always derived from the signed P&L (OPEN is
         // preserved for open positions). A journal that lets WIN disagree with
@@ -594,13 +629,17 @@ export const goldRouter = router({
             userId: ctx.user.id, accountId: input.accountId, tradeDate: new Date(input.tradeDate), session: input.session,
             direction: input.direction, result: derivedResult, environment: env, level: input.level, timeframe: input.timeframe,
             setupQuality: input.setupQuality, executionType: input.executionType, marketCondition: input.marketCondition,
-            biasAlignment: input.biasAlignment, confirmationType: input.confirmationType, slPlacement: input.slPlacement,
+            biasAlignment: input.biasAlignment, biasTimeframes: (() => {
+            const b = normalizeBiasTimeframes(input.biasTimeframes);
+            return hasBias(b) ? b : null;
+          })(),
+            confirmationType: input.confirmationType, slPlacement: input.slPlacement,
             tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality, patienceScore: input.patienceScore,
             planFollowScore: input.planFollowScore, quickLogged: input.quickLogged ?? false,
-            entryPrice: input.entryPrice?.toFixed(6) ?? null, slPrice: input.slPrice?.toFixed(6) ?? null, tpPrice: input.tpPrice?.toFixed(6) ?? null,
+            entryPrice: autoEntry?.toFixed(6) ?? null, slPrice: autoSl?.toFixed(6) ?? null, tpPrice: autoTp?.toFixed(6) ?? null,
             exitPrice: input.exitPrice?.toFixed(6) ?? null,
             mfe: autoMfe?.toFixed(2) ?? null, mae: autoMae?.toFixed(2) ?? null,
-            risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null, pnl: storedPnl.toFixed(2),
+            risk: autoRisk?.toFixed(2) ?? null, reward: autoReward?.toFixed(2) ?? null, pnl: storedPnl.toFixed(2),
             notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
             planStatus: input.planStatus, planChecklist: input.planChecklist,
             // The trade row and its evidence are committed by this one write, so a
@@ -658,16 +697,35 @@ export const goldRouter = router({
           : null;
         const updateStoredPnl = updateTestingPips ?? input.pnl;
         const derivedResult = deriveTradeResult(updateStoredPnl, input.result);
+        // Auto-detected values are never destroyed by an edit: a null input
+        // preserves the stored value (the dialog always round-trips what it
+        // displays). Explicit new numbers still overwrite. Stored MAE/MFE are
+        // already positive magnitudes, so they are preserved as-is — only
+        // fresh input is normalized.
+        const keepEntry = input.entryPrice ?? (current.entryPrice == null ? null : Number(current.entryPrice));
+        const keepSl = input.slPrice ?? (current.slPrice == null ? null : Number(current.slPrice));
+        const keepTp = input.tpPrice ?? (current.tpPrice == null ? null : Number(current.tpPrice));
+        const keepRisk = input.risk ?? (current.risk == null ? null : Number(current.risk));
+        const keepReward = input.reward ?? (current.reward == null ? null : Number(current.reward));
+        const keepMfe = input.mfe != null ? normalizeMfe(input.mfe) : (current.mfe == null ? null : Number(current.mfe));
+        const keepMae = input.mae != null ? normalizeMae(input.mae) : (current.mae == null ? null : Number(current.mae));
+        const updatePriceCheck = deriveRiskDistances(input.direction, keepEntry, keepSl, keepTp);
+        if (keepSl !== null && !updatePriceCheck.slValid) throw new TRPCError({ code: "BAD_REQUEST", message: `Stop-loss ${keepSl} is on the wrong side of entry ${keepEntry} for a ${input.direction} trade.` });
+        if (keepTp !== null && !updatePriceCheck.tpValid) throw new TRPCError({ code: "BAD_REQUEST", message: `Take-profit ${keepTp} is on the wrong side of entry ${keepEntry} for a ${input.direction} trade.` });
         await db.update(trades).set({
           tradeDate: new Date(input.tradeDate), session: input.session, direction: input.direction, result: derivedResult,
           level: input.level, timeframe: input.timeframe, setupQuality: input.setupQuality, executionType: input.executionType,
-          marketCondition: input.marketCondition, biasAlignment: input.biasAlignment, confirmationType: input.confirmationType,
+          marketCondition: input.marketCondition, biasAlignment: input.biasAlignment, biasTimeframes: (() => {
+            const b = normalizeBiasTimeframes(input.biasTimeframes ?? current.biasTimeframes);
+            return hasBias(b) ? b : null;
+          })(),
+          confirmationType: input.confirmationType,
           slPlacement: input.slPlacement, tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality,
           patienceScore: input.patienceScore, planFollowScore: input.planFollowScore, quickLogged: input.quickLogged ?? false,
-          entryPrice: input.entryPrice?.toFixed(6) ?? null, slPrice: input.slPrice?.toFixed(6) ?? null, tpPrice: input.tpPrice?.toFixed(6) ?? null,
+          entryPrice: keepEntry?.toFixed(6) ?? null, slPrice: keepSl?.toFixed(6) ?? null, tpPrice: keepTp?.toFixed(6) ?? null,
           exitPrice: input.exitPrice?.toFixed(6) ?? null,
-          mfe: input.mfe?.toFixed(2) ?? null, mae: input.mae?.toFixed(2) ?? null,
-          risk: input.risk?.toFixed(2) ?? null, reward: input.reward?.toFixed(2) ?? null,
+          mfe: keepMfe?.toFixed(2) ?? null, mae: keepMae?.toFixed(2) ?? null,
+          risk: keepRisk?.toFixed(2) ?? null, reward: keepReward?.toFixed(2) ?? null,
           pnl: updateStoredPnl.toFixed(2), notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
           planStatus: input.planStatus, planChecklist: input.planChecklist,
           mt5Ticket: nextTicket,

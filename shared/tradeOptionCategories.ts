@@ -106,15 +106,10 @@ export const TRADE_OPTION_CATEGORIES: readonly TradeOptionCategory[] = [
     multi: true,
     field: "marketCondition",
   },
-  {
-    key: "biasAlignment",
-    category: "Bias alignment",
-    label: "Direction vs bias",
-    description: "Whether the trade agreed with your higher-timeframe bias.",
-    defaults: ["Aligned", "Counter-trend", "Neutral"],
-    multi: false,
-    field: "biasAlignment",
-  },
+  // "Bias alignment" ("Direction vs bias") was replaced by the structured
+  // multi-timeframe Bias (D1/H4/H1/M15/M5 Bull/Bear). The registry entry is
+  // retired so no UI binds to it; stored per-user "Bias alignment" option
+  // rows are left untouched in the database.
   {
     key: "confirmation",
     category: "Confirmation",

@@ -22,8 +22,9 @@ describe("Trade Log option registry", () => {
     expect(fields).not.toContain(null);
 
     // Every option-bearing Trade Log field is covered by the registry.
+    // ("Bias alignment" retired: multi-timeframe Bias is a fixed Bull/Bear
+    // structure, not a custom option list.)
     expect(TRADE_FORM_OPTION_CATEGORIES.map(entry => entry.field).sort()).toEqual([
-      "biasAlignment",
       "confirmationType",
       "executionType",
       "holdQuality",

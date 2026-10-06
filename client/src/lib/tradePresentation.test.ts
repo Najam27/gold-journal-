@@ -32,7 +32,7 @@ const completeTrade = {
   confirmationType: "BOS + displacement",
   executionType: "Manual direct",
   marketCondition: "Trending",
-  biasAlignment: "Counter-trend",
+  biasTimeframes: { D1: "Bull", H4: "Bear", H1: "Bull", M15: null, M5: "Bear" },
   slPlacement: "Above swing high",
   tpPlacement: "R multiple",
   holdQuality: "Average",
@@ -118,7 +118,7 @@ describe("canonical trade presentation model", () => {
     expect(presented["Confirmation signals"]).toBe("BOS + displacement");
     expect(presented["Execution type"]).toBe("Manual direct");
     expect(presented["Market conditions"]).toBe("Trending");
-    expect(presented["Direction vs bias"]).toBe("Counter-trend");
+    expect(presented["Bias"]).toBe("D1: Bull \u00b7 H4: Bear \u00b7 H1: Bull \u00b7 M5: Bear");
     expect(presented["SL placement"]).toBe("Above swing high");
     expect(presented["TP placement"]).toBe("R multiple");
     expect(presented["Hold quality"]).toBe("Average");
@@ -129,8 +129,8 @@ describe("canonical trade presentation model", () => {
     expect(presented["Actual P&L"]).toBe("$70.90");
     expect(presented["Actual R:R"]).toBe("1 : 7.09");
     expect(presented["Running balance"]).toBe("$1,270.90");
-    expect(presented["MFE"]).toBe("$80.00");
-    expect(presented["MAE"]).toBe("-$6.00");
+    expect(presented["Highest unrealized gain $ (MFE)"]).toBe("+$80.00");
+    expect(presented["Highest unrealized loss $ (MAE)"]).toBe("$6.00");
     expect(presented["Plan status"]).toBe("PLANNED");
     expect(presented["Planned / unplanned"]).toBe("Planned entry");
     expect(presented["Checklist completion"]).toBe("9 / 10 checks confirmed");
