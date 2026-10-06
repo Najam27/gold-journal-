@@ -3,6 +3,7 @@ import {
   emptyBiasTimeframes,
   formatBiasCompact,
   formatBiasLines,
+  formatBiasTable,
   hasBias,
   normalizeBiasTimeframes,
 } from "./biasTimeframes";
@@ -73,6 +74,18 @@ describe("biasTimeframes", () => {
     expect(formatBiasLines(partial)).toEqual(["D1: Bear", "M5: Bull"]);
     expect(formatBiasCompact(emptyBiasTimeframes())).toBe(null);
     expect(formatBiasLines(emptyBiasTimeframes())).toEqual([]);
+  });
+
+  it("formats an ultra-compact table string with timeframe + arrow", () => {
+    const bias = normalizeBiasTimeframes({
+      D1: "Bull",
+      H4: "Bull",
+      H1: "Bear",
+      M15: null,
+      M5: "Bear",
+    });
+    expect(formatBiasTable(bias)).toBe("D1↑ H4↑ H1↓ M5↓");
+    expect(formatBiasTable(emptyBiasTimeframes())).toBe(null);
   });
 
   it("never reinterprets legacy free-text bias values", () => {

@@ -64,6 +64,17 @@ export function formatBiasCompact(bias: BiasTimeframes): string | null {
 }
 
 /**
+ * Ultra-compact display for the Trade Log table: "D1↑ H4↑ H1↓".
+ * Timeframe + arrow only, in D1 → M5 order. Returns null when nothing is set.
+ */
+export function formatBiasTable(bias: BiasTimeframes): string | null {
+  const parts = BIAS_TIMEFRAMES.filter(tf => bias[tf] !== null).map(
+    tf => `${tf}${bias[tf] === "Bull" ? "↑" : "↓"}`
+  );
+  return parts.length ? parts.join(" ") : null;
+}
+
+/**
  * Full display for View/PDF/Share parity: one "D1: Bull" entry per set
  * timeframe, in D1 → M5 order.
  */
