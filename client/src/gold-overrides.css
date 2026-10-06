@@ -179,8 +179,8 @@
 .bias-grid { display: grid; gap: 6px; grid-column: 1 / -1; }
 .bias-row { display: flex; align-items: center; gap: 12px; }
 .bias-tf { width: 34px; flex: 0 0 auto; color: var(--gj-dim); font-size: 11px; font-weight: 800; letter-spacing: .06em; }
-.bias-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; flex: 1 1 auto; padding: 3px; border-radius: 9px; background: var(--gj-control); }
-.bias-sides button { padding: 7px 4px; border: 0; border-radius: 6px; background: transparent; color: var(--gj-dim); font-size: 11px; font-weight: 700; cursor: pointer; transition: all 160ms var(--ease-out); }
+.bias-sides { display: inline-grid; grid-template-columns: 1fr 1fr; gap: 4px; flex: 0 0 auto; width: auto; max-width: 240px; padding: 3px; border-radius: 9px; background: var(--gj-control); }
+.bias-sides button { padding: 5px 16px; border: 0; border-radius: 6px; background: transparent; color: var(--gj-dim); font-size: 11px; font-weight: 700; cursor: pointer; transition: all 160ms var(--ease-out); white-space: nowrap; }
 .bias-sides button:hover { color: var(--gj-text); }
 .bias-sides button.active { background: linear-gradient(135deg, var(--gj-gold), color-mix(in srgb, var(--gj-gold) 70%, white)); color: #1a1206; font-weight: 800; box-shadow: 0 2px 8px color-mix(in srgb, var(--gj-gold) 40%, transparent); }
 .auto-field { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 8px 12px; border: 1px dashed color-mix(in srgb, var(--gj-gold) 45%, var(--gj-line)); border-radius: 9px; background: color-mix(in srgb, var(--gj-gold) 6%, var(--gj-panel-2)); }

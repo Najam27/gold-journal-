@@ -456,6 +456,8 @@ function ScreenshotEvidence({ screenshot, setScreenshot, editing, removeScreensh
 function BiasSection({ form, setForm }: any) {
   const setSide = (tf: string, side: string) =>
     setForm({ ...form, bias: { ...form.bias, [tf]: form.bias?.[tf] === side ? "" : side } });
+  // Display labels are the full words; stored values stay "Bull"/"Bear".
+  const sideLabel = (side: string) => (side === "Bull" ? "Bullish" : side === "Bear" ? "Bearish" : side);
   return (
     <div className="bias-grid" role="group" aria-label="Multi-timeframe bias">
       {(BIAS_TIMEFRAMES as readonly string[]).map(tf => (
@@ -470,7 +472,7 @@ function BiasSection({ form, setForm }: any) {
                 aria-pressed={form.bias?.[tf] === side}
                 onClick={() => setSide(tf, side)}
               >
-                {side}
+                {sideLabel(side)}
               </button>
             ))}
           </div>
