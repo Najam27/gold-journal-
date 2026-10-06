@@ -4,11 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { formatActualR, results } from "@/lib/gold";
+import { formatActualR, formatRr, results } from "@/lib/gold";
 import { deriveTradeResult } from "@shared/tradeOutcome";
 import { formatPips, tradePips } from "@shared/pipMath";
 import { BIAS_SIDES, BIAS_TIMEFRAMES } from "@shared/biasTimeframes";
-import { deriveRiskDistances, formatDerivedRr } from "@shared/riskDerivation";
 import { LIVE_MODE, type TradeModeConfig } from "@/lib/tradeModeConfig";
 import {
   MISTAKE_CATEGORY_LABELS,
@@ -545,8 +544,7 @@ export function TradeDialogWithCustomOptions({ mode = LIVE_MODE, open, setOpen, 
   // from the tracked position: displayed read-only, never typed.
   const isMt5 = Boolean(form.mt5Ticket);
   const numOrNull = (v: string) => (v === "" || v == null ? null : Number(v));
-  const derived = deriveRiskDistances(form.direction, numOrNull(form.entryPrice), numOrNull(form.slPrice), numOrNull(form.tpPrice));
-  const derivedRr = formatDerivedRr(derived.rrRatio);
+  const plannedRr = formatRr(numOrNull(form.risk), numOrNull(form.reward));
   const store = useTradeOptionStore();
   // The user's own Setup quality scale, best-first, so the live process preview
   // honours renamed grades instead of hardcoding A/A+.
@@ -565,7 +563,7 @@ export function TradeDialogWithCustomOptions({ mode = LIVE_MODE, open, setOpen, 
       <Field label="Take-profit price">{isMt5 ? <AutoField value={form.tpPrice} /> : <Input type="number" min="0" step="any" value={form.tpPrice} onChange={event => patch("tpPrice", event.target.value)} />}{isMt5 && !form.tpPrice && <span className="field-hint">Fills from the MT5 position on save.</span>}</Field>
       <Field label="Planned risk $">{isMt5 ? <AutoField value={form.risk} /> : <Input type="number" min="0" step="0.01" value={form.risk} placeholder="Not available" onChange={event => patch("risk", event.target.value)} />}{!isMt5 && !form.risk && <span className="field-hint">Needs position size — not derivable from price alone.</span>}</Field>
       <Field label="Planned reward $">{isMt5 ? <AutoField value={form.reward} /> : <Input type="number" min="0" step="0.01" value={form.reward} placeholder="Not available" onChange={event => patch("reward", event.target.value)} />}{!isMt5 && !form.reward && <span className="field-hint">Needs position size — not derivable from price alone.</span>}</Field>
-      <div className="rr-live"><span>PLANNED R:R</span><strong className="data-text">{derivedRr ?? "—"}</strong>{derivedRr && <span className="auto-badge">Auto-calculated</span>}</div>
+      <div className="rr-live"><span>PLANNED R:R</span><strong className="data-text">{plannedRr ?? "—"}</strong>{plannedRr && <span className="auto-badge">Auto-calculated</span>}</div>
       <Field label="Highest unrealized loss $ (MAE)">{isMt5 ? <AutoField value={form.mae} /> : <Input type="number" min="0" step="0.01" value={form.mae} placeholder="Worst heat taken" onChange={event => patch("mae", event.target.value)} />}{isMt5 && <span className="field-hint">Tracked from live floating P&L while the position was open.</span>}</Field>
       <Field label="Highest unrealized gain $ (MFE)">{isMt5 ? <AutoField value={form.mfe} /> : <Input type="number" min="0" step="0.01" value={form.mfe} placeholder="Best it looked" onChange={event => patch("mfe", event.target.value)} />}{isMt5 && <span className="field-hint">Tracked from live floating P&L while the position was open.</span>}</Field>
       {isPips ? <Field label="Actual pips (auto)"><Input value={formatPips(pipsPreview)} readOnly aria-readonly="true" /><span className="field-hint">Derived from entry → exit. Not editable.</span></Field> : <Field label="Actual P&L $"><Input type="number" step="0.01" value={form.pnl} placeholder="Realized profit/loss" onChange={event => patchPnl(event.target.value)} /></Field>}
