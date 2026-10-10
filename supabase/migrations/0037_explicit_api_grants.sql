@@ -45,10 +45,11 @@ revoke all on table public.gj_mt5_live_positions from public, anon, authenticate
 grant select, insert, update, delete on table public.gj_mt5_live_positions to service_role;
 revoke all on table public.gj_trader_profiles from public, anon, authenticated;
 grant select, insert, update, delete on table public.gj_trader_profiles to service_role;
-revoke all on table public.gj_ai_provider_settings from public, anon, authenticated;
-grant select, insert, update, delete on table public.gj_ai_provider_settings to service_role;
-revoke all on table public.gj_ai_jobs from public, anon, authenticated;
-grant select, insert, update, delete on table public.gj_ai_jobs to service_role;
+
+-- NOTE: gj_ai_provider_settings and gj_ai_jobs are deliberately absent.
+-- Migration 0028 retired the server-side AI vault and DROPS both tables, so
+-- they do not exist on any properly migrated database — granting on them
+-- would abort this migration with 42P01. The 18 tables above are the live set.
 
 -- Serial-PK sequences, present and future: inserts through
 -- service_role need USAGE + SELECT on every sequence.

@@ -85,7 +85,13 @@ const report = {
         .map(match => (match[1] ?? match[2] ?? match[3] ?? match[4] ?? "").toLowerCase())
         .filter(name => name.length > 0)
     )].sort();
-    return created;
+    // Tables a later migration drops (e.g. 0028 retiring the server AI vault)
+    // are not live tables and must not require grants.
+    const dropped = new Set(
+      [...noComments.matchAll(/drop table(?: if exists)?\s+(?:"public"\."([a-z_0-9]+)"|public\.([a-z_0-9]+)|"([a-z_0-9]+)"|([a-z_0-9]+))/gi)]
+        .map(match => (match[1] ?? match[2] ?? match[3] ?? match[4] ?? "").toLowerCase())
+    );
+    return created.filter(name => !dropped.has(name));
   })(),
   tablesWithoutServiceRoleGrant: (() => {
     const noComments = migrationText.replace(/--[^\n]*/g, "");
@@ -94,7 +100,12 @@ const report = {
         .map(match => (match[1] ?? match[2] ?? match[3] ?? match[4] ?? "").toLowerCase())
         .filter(name => name.length > 0)
     )].sort();
-    return created.filter(
+    const dropped = new Set(
+      [...noComments.matchAll(/drop table(?: if exists)?\s+(?:"public"\."([a-z_0-9]+)"|public\.([a-z_0-9]+)|"([a-z_0-9]+)"|([a-z_0-9]+))/gi)]
+        .map(match => (match[1] ?? match[2] ?? match[3] ?? match[4] ?? "").toLowerCase())
+    );
+    const live = created.filter(name => !dropped.has(name));
+    return live.filter(
       table => !new RegExp(`grant(?=[^;]*\\bselect\\b)(?=[^;]*\\binsert\\b)(?=[^;]*\\bupdate\\b)(?=[^;]*\\bdelete\\b)[^;]*\\bon table public\\.${table} to service_role`, "is").test(migrationText)
     );
   })(),
