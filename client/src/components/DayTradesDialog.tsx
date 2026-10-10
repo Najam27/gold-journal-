@@ -131,8 +131,11 @@ export function DayTradesDialog({ mode = LIVE_MODE, day, summary, plans, behavio
             {rows.map((trade: DayTrade, index: number) => {
               const result = String(trade.result || "OPEN");
               // Testing rows render derived pips; Live rows render the $ P&L.
+              // A null P&L is unknown, never $0.00: the numeric is only for
+              // tone, the raw value goes to the formatter (which renders "—").
               const pips = isPips ? rowPips(trade) : null;
               const tradePnl = isPips ? (pips ?? 0) : toNumber(trade.pnl);
+              const tradePnlDisplay = isPips ? pips : trade.pnl;
               const clock = formatClock(trade.tradeDate);
               const symbol = trade.symbol ? String(trade.symbol) : "";
               const ticket = trade.mt5Ticket ? String(trade.mt5Ticket) : "";
@@ -141,7 +144,7 @@ export function DayTradesDialog({ mode = LIVE_MODE, day, summary, plans, behavio
               const risk = toNumber(trade.risk);
               const subLabel = result === "OPEN" ? "unrealized" : risk > 0 ? `risk ${formatMoney(risk)}` : "";
               return <li key={String(trade.id ?? index)} className="day-trade-row">
-                <button type="button" className="day-trade-main" aria-label={`View ${result.replace("_", " ")} trade at ${clock || "an unrecorded time"}: ${isPips ? formatPips(pips) : formatMoney(tradePnl)}${result === "OPEN" ? " unrealized" : ""}`} onClick={() => setViewedTrade(trade)}>
+                <button type="button" className="day-trade-main" aria-label={`View ${result.replace("_", " ")} trade at ${clock || "an unrecorded time"}: ${isPips ? formatPips(pips) : formatMoney(tradePnlDisplay)}${result === "OPEN" ? " unrealized" : ""}`} onClick={() => setViewedTrade(trade)}>
                   <span className="day-trade-lead">
                     <span className={`side-badge ${String(trade.direction || "").toLowerCase()}`}>{trade.direction || "—"}</span>
                     <span className={`result-badge ${result.toLowerCase()}`}>{result.replace("_", " ")}</span>
@@ -152,7 +155,7 @@ export function DayTradesDialog({ mode = LIVE_MODE, day, summary, plans, behavio
                     {trade.localPending && <small className="day-trade-flag">Pending sync</small>}
                   </span>
                   <span className={`day-trade-pnl data-text ${tradeTone(result, tradePnl)}`}>
-                    <b>{isPips ? formatPips(pips) : formatMoney(tradePnl)}</b>
+                    <b>{isPips ? formatPips(pips) : formatMoney(tradePnlDisplay)}</b>
                     {subLabel && <em>{subLabel}</em>}
                     {risk > 0 && !isPips && <em>{formatActualR(trade.risk, trade.pnl)}</em>}
                   </span>

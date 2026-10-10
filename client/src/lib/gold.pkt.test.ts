@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actualRMultiple, formatActualR, formatRr, getPktDateInput, getPktSession, isFuturePktDate } from "./gold";
+import { actualRMultiple, formatActualR, formatMoney, formatRr, getPktDateInput, getPktSession, isFuturePktDate } from "./gold";
 
 describe("getPktSession", () => {
   it("classifies a manual trade opened at 05:30 PKT as Asian regardless of the browser timezone", () => {
@@ -30,6 +30,25 @@ describe("getPktSession", () => {
     expect(formatActualR(100, 250)).toBe("1 : 2.50");
     expect(formatActualR(0, 100)).toBe("—");
     expect(actualRMultiple(0, 100)).toBeNull();
+  });
+
+  it("never renders a fake zero: missing P&L is —, not 1 : 0.00", () => {
+    expect(actualRMultiple(100, null)).toBeNull();
+    expect(actualRMultiple(100, "")).toBeNull();
+    expect(actualRMultiple(null, 50)).toBeNull();
+    expect(actualRMultiple("", 50)).toBeNull();
+    expect(actualRMultiple("N/A", 50)).toBeNull();
+    expect(formatActualR(100, null)).toBe("—");
+    expect(formatActualR(100, "")).toBe("—");
+  });
+
+  it("renders — for missing money, never $0.00", () => {
+    expect(formatMoney(null)).toBe("—");
+    expect(formatMoney(undefined)).toBe("—");
+    expect(formatMoney("")).toBe("—");
+    expect(formatMoney("N/A")).toBe("—");
+    expect(formatMoney(0)).toBe("$0.00");
+    expect(formatMoney(12.3)).toBe("$12.30");
   });
 
   it("renders — for missing or zero planned risk/reward, never 1 : 0.00", () => {

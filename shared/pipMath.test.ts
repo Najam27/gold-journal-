@@ -52,4 +52,9 @@ describe("formatPips", () => {
     expect(formatPips(undefined)).toBe("—");
     expect(formatPips(NaN)).toBe("—");
   });
+
+  it("never renders -0 pips for a dust-negative result", () => {
+    expect(formatPips(-0.04)).toBe("0 pips");
+    expect(formatPips(-0.0)).toBe("0 pips");
+  });
 });

@@ -54,6 +54,7 @@ export function tradePips(trade: PippableTrade): number | null {
 
 export function formatPips(pips: number | null | undefined): string {
   if (pips == null || !Number.isFinite(pips)) return "—";
-  const rounded = Number(pips.toFixed(1));
+  // Normalize -0: a dust-negative result must not render as "-0 pips".
+  const rounded = Number(pips.toFixed(1)) + 0;
   return `${rounded > 0 ? "+" : ""}${rounded} pips`;
 }

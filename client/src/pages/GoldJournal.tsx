@@ -1121,6 +1121,20 @@ export default function GoldJournal() {
         // the derived pips) must not be carried over from the source trade.
         exitPrice: "",
         patienceScore: source.patienceScore ? String(source.patienceScore) : "",
+        // The stored checklist is an array of {id,label,checked}; the form
+        // carries a pipe-joined string of checked ids (openEdit maps it the
+        // same way). Spreading the raw array made every save throw on
+        // .split — the duplicate could never be saved.
+        planChecklist: Array.isArray(source.planChecklist)
+          ? (source.planChecklist as { id?: string; checked?: boolean }[]).filter(item => item?.checked && item.id).map(item => String(item.id)).join("|")
+          : (typeof source.planChecklist === "string" ? source.planChecklist : ""),
+        // Structured bias lives on the row as biasTimeframes; the form reads
+        // form.bias. Without this mapping every duplicate silently destroyed
+        // the source trade's D1/H4/H1/M15/M5 on save.
+        bias: (() => {
+          const b = normalizeBiasTimeframes(source.biasTimeframes);
+          return { D1: b.D1 ?? "", H4: b.H4 ?? "", H1: b.H1 ?? "", M15: b.M15 ?? "", M5: b.M5 ?? "" };
+        })(),
         // Duplicating a journal trade must NOT carry its MT5 ticket over: the
         // server refuses to journal one ticket twice, so every duplicate of
         // an MT5 trade failed to save. The MT5 Live "journal now" prefill has
@@ -1196,7 +1210,7 @@ export default function GoldJournal() {
    * The dialog reports an explicit "remove the stored screenshot" intent with
    * the save, because only an explicit signal may clear stored evidence.
    */
-  const submitTrade = async (options?: { removeScreenshot?: boolean }) => {
+  const submitTrade = async (options?: { removeScreenshot?: boolean; riskFieldsManual?: boolean }) => {
     if (!account) return;
     // Duplicate-click guard. `createTrade`/`updateTrade` also report `isPending`,
     // but the guard must hold across the screenshot upload as well, which runs
@@ -1286,10 +1300,11 @@ export default function GoldJournal() {
       reward: tradeForm.reward === "" ? null : Number(tradeForm.reward),
       // In Testing Mode the P&L field is pips, derived from entry/exit —
       // never hand-typed. The stored `pnl` number is unit-agnostic ($ Live,
-      // pips Testing); `deriveTradeResult` works on both.
+      // pips Testing); `deriveTradeResult` works on both. An empty P&L stays
+      // null and renders as "—": unknown is never stored as a fake $0.00.
       pnl: tradeEnv === "TESTING"
-        ? (tradePips({ direction: tradeForm.direction, entryPrice: tradeForm.entryPrice === "" ? null : Number(tradeForm.entryPrice), exitPrice: tradeForm.exitPrice === "" ? null : Number(tradeForm.exitPrice) }) ?? 0)
-        : Number(tradeForm.pnl || 0),
+        ? (tradePips({ direction: tradeForm.direction, entryPrice: tradeForm.entryPrice === "" ? null : Number(tradeForm.entryPrice), exitPrice: tradeForm.exitPrice === "" ? null : Number(tradeForm.exitPrice) }) ?? null)
+        : (tradeForm.pnl === "" ? null : Number(tradeForm.pnl)),
       notes: tradeForm.notes,
       emotionBefore: tradeForm.emotionBefore,
       emotionDuring: tradeForm.emotionDuring,
@@ -1297,6 +1312,7 @@ export default function GoldJournal() {
       // "Not evaluated" is only recorded as such; a confirmed checklist is saved with its labels
       // so the engine and the calendar can re-read the same evidence later.
       planStatus: tradeForm.planStatus === "PLANNED" || tradeForm.planStatus === "UNPLANNED" ? tradeForm.planStatus : null,
+      riskFieldsManual: options?.riskFieldsManual ?? false,
       planChecklist: tradeForm.planChecklist
         ? PRE_TRADE_GATE_ITEMS.map(item => ({ id: item.id, label: item.label, checked: tradeForm.planChecklist.split("|").includes(item.id) }))
         : null,
@@ -1463,9 +1479,10 @@ export default function GoldJournal() {
         direction: payload.direction,
         result: "OPEN",
         // Quick-logged rows land in the current environment — never rely on
-        // the server default for writes.
+        // the server default for writes. A fresh quick log is an open trade
+        // with no recorded outcome: null P&L renders as "—", never $0.00.
         environment: tradeEnv,
-        pnl: 0,
+        pnl: null,
         quickLogged: true,
         patienceScore: null,
         risk: null,
@@ -1723,7 +1740,7 @@ export default function GoldJournal() {
                 </Button>
               </div>
             )}
-            {development.cooldown.status !== "CLEAR" && (view === "trades" || view === "goals" || view === "plan") && (
+            {tradeEnv === "LIVE" && development.cooldown.status !== "CLEAR" && (view === "trades" || view === "goals" || view === "plan") && (
               <section className={`behavior-banner ${development.cooldown.status === "SESSION_COMPLETE" ? "complete" : ""}`} role="status">
                 <ShieldAlert size={17} />
                 <p>

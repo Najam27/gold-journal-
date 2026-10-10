@@ -800,8 +800,8 @@ export function AnalysisDashboard({ accountId, mode = LIVE_MODE }: Props) {
           empty="No level × timeframe pair has 2+ closed trades yet."
         />
         <MetricTable title="DIRECTION" rows={analysis.directions} formatUnit={unitMoney} />
-        <MetricTable title="DAY / UTC" rows={analysis.days} formatUnit={unitMoney} />
-        <MetricTable title="HOUR / UTC" rows={analysis.hours} formatUnit={unitMoney} />
+        <MetricTable title="DAY / PKT" rows={analysis.days} formatUnit={unitMoney} />
+        <MetricTable title="HOUR / PKT" rows={analysis.hours} formatUnit={unitMoney} />
       </div>
       <section className="panel">
         <div className="panel-title">
@@ -973,7 +973,7 @@ export function AnalysisDashboard({ accountId, mode = LIVE_MODE }: Props) {
           <p className="analysis-filter-note">
             To unlock this, open any trade and fill{" "}
             <b>Highest unrealized gain $ (MFE)</b> and{" "}
-            <b>Highest unrealized loss $ (MAE)</b> in the Execution section.
+            <b>Highest unrealized loss $ (MAE)</b> in the Risk section.
             Once logged, you'll see your average MFE/MAE and how much of each
             move you kept.
           </p>
@@ -1210,7 +1210,7 @@ export function AnalysisDashboard({ accountId, mode = LIVE_MODE }: Props) {
             <p className="analysis-note">{analysis.exitEfficiency.message}</p>
             <p className="analysis-filter-note">
               Log <b>Highest unrealized gain $ (MFE)</b> and{" "}
-              <b>Highest unrealized loss $ (MAE)</b> in the Execution section
+              <b>Highest unrealized loss $ (MAE)</b> in the Risk section
               of your trades to see how much of each move you kept and how
               much heat you endured.
             </p>

@@ -182,7 +182,13 @@ const tradeInput = z.object({
   mae: money(0).nullable().optional().default(null),
   risk: money(0).nullable(),
   reward: money(0).nullable(),
-  pnl: money(),
+  // Null = outcome not recorded yet (open trade, or the trader left it blank).
+  // Renders as "—", never $0.00.
+  pnl: money().nullable(),
+  // True when the trader hand-typed (or hand-cleared) a Risk-section field in
+  // the dialog this save. Drives the riskSource provenance the MT5 reconcile
+  // respects: manual edits are never overwritten by a later sync.
+  riskFieldsManual: z.boolean().optional().default(false),
   notes: freeText,
   emotionBefore: freeText,
   emotionDuring: freeText,
@@ -623,9 +629,9 @@ export const goldRouter = router({
           if (!linked[0]) throw new Error("The selected MT5 ticket is not an unjournaled closed position for this account.");
           linkedPosition = linked[0];
         }
-        // Auto-detection priority: MT5 authoritative data first, then the
-        // user's own input. Nothing is invented: a field the MT5 row does not
-        // carry stays null unless the user typed it.
+        // Auto-detection priority: explicit user input wins when provided;
+        // MT5 fills whatever the user left empty. Nothing is invented: a
+        // field neither source carries stays null.
         const autoEntry = input.entryPrice ?? (linkedPosition?.openPrice == null ? null : Number(linkedPosition.openPrice));
         const autoSl = input.slPrice ?? (linkedPosition?.slPrice == null ? null : Number(linkedPosition.slPrice));
         const autoTp = input.tpPrice ?? (linkedPosition?.tpPrice == null ? null : Number(linkedPosition.tpPrice));
@@ -645,8 +651,10 @@ export const goldRouter = router({
         // Validated against the effective (auto-filled) values, not just the
         // raw input, so an MT5 row with crossed prices is caught too.
         const priceCheck = deriveRiskDistances(input.direction, autoEntry, autoSl, autoTp);
-        if (autoSl !== null && !priceCheck.slValid) throw new TRPCError({ code: "BAD_REQUEST", message: `Stop-loss ${autoSl} is on the wrong side of entry ${autoEntry} for a ${input.direction} trade.` });
-        if (autoTp !== null && !priceCheck.tpValid) throw new TRPCError({ code: "BAD_REQUEST", message: `Take-profit ${autoTp} is on the wrong side of entry ${autoEntry} for a ${input.direction} trade.` });
+        // Without an entry price there is no frame of reference to validate
+        // SL/TP against: say so plainly instead of "wrong side of entry null".
+        if (autoSl !== null && !priceCheck.slValid) throw new TRPCError({ code: "BAD_REQUEST", message: autoEntry === null ? `Stop-loss ${autoSl} needs an entry price to validate against for a ${input.direction} trade.` : `Stop-loss ${autoSl} is on the wrong side of entry ${autoEntry} for a ${input.direction} trade.` });
+        if (autoTp !== null && !priceCheck.tpValid) throw new TRPCError({ code: "BAD_REQUEST", message: autoEntry === null ? `Take-profit ${autoTp} needs an entry price to validate against for a ${input.direction} trade.` : `Take-profit ${autoTp} is on the wrong side of entry ${autoEntry} for a ${input.direction} trade.` });
         const screenshot = resolveScreenshotForWrite(ctx.user.openId, input.accountId, input);
         // The outcome label is always derived from the signed P&L (OPEN is
         // preserved for open positions). A journal that lets WIN disagree with
@@ -676,7 +684,8 @@ export const goldRouter = router({
             entryPrice: autoEntry?.toFixed(6) ?? null, slPrice: autoSl?.toFixed(6) ?? null, tpPrice: autoTp?.toFixed(6) ?? null,
             exitPrice: input.exitPrice?.toFixed(6) ?? null,
             mfe: autoMfe?.toFixed(2) ?? null, mae: autoMae?.toFixed(2) ?? null,
-            risk: autoRisk?.toFixed(2) ?? null, reward: autoReward?.toFixed(2) ?? null, pnl: storedPnl.toFixed(2),
+            risk: autoRisk?.toFixed(2) ?? null, reward: autoReward?.toFixed(2) ?? null, pnl: storedPnl == null ? null : storedPnl.toFixed(2),
+            riskSource: input.riskFieldsManual ? "manual" : (input.mt5Ticket ? "mt5" : null),
             notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
             planStatus: input.planStatus, planChecklist: input.planChecklist,
             // The trade row and its evidence are committed by this one write, so a
@@ -746,9 +755,10 @@ export const goldRouter = router({
         const keepReward = input.reward ?? (current.reward == null ? null : Number(current.reward));
         const keepMfe = input.mfe != null ? normalizeMfe(input.mfe) : (current.mfe == null ? null : Number(current.mfe));
         const keepMae = input.mae != null ? normalizeMae(input.mae) : (current.mae == null ? null : Number(current.mae));
+        const keepExit = input.exitPrice ?? (current.exitPrice == null ? null : Number(current.exitPrice));
         const updatePriceCheck = deriveRiskDistances(input.direction, keepEntry, keepSl, keepTp);
-        if (keepSl !== null && !updatePriceCheck.slValid) throw new TRPCError({ code: "BAD_REQUEST", message: `Stop-loss ${keepSl} is on the wrong side of entry ${keepEntry} for a ${input.direction} trade.` });
-        if (keepTp !== null && !updatePriceCheck.tpValid) throw new TRPCError({ code: "BAD_REQUEST", message: `Take-profit ${keepTp} is on the wrong side of entry ${keepEntry} for a ${input.direction} trade.` });
+        if (keepSl !== null && !updatePriceCheck.slValid) throw new TRPCError({ code: "BAD_REQUEST", message: keepEntry === null ? `Stop-loss ${keepSl} needs an entry price to validate against for a ${input.direction} trade.` : `Stop-loss ${keepSl} is on the wrong side of entry ${keepEntry} for a ${input.direction} trade.` });
+        if (keepTp !== null && !updatePriceCheck.tpValid) throw new TRPCError({ code: "BAD_REQUEST", message: keepEntry === null ? `Take-profit ${keepTp} needs an entry price to validate against for a ${input.direction} trade.` : `Take-profit ${keepTp} is on the wrong side of entry ${keepEntry} for a ${input.direction} trade.` });
         await db.update(trades).set({
           tradeDate: new Date(input.tradeDate), session: input.session, direction: input.direction, result: derivedResult,
           level: input.level, timeframe: input.timeframe, setupQuality: input.setupQuality, executionType: input.executionType,
@@ -760,12 +770,16 @@ export const goldRouter = router({
           slPlacement: input.slPlacement, tpPlacement: input.tpPlacement, mistake: input.mistake, holdQuality: input.holdQuality,
           patienceScore: input.patienceScore, planFollowScore: input.planFollowScore, quickLogged: input.quickLogged ?? false,
           entryPrice: keepEntry?.toFixed(6) ?? null, slPrice: keepSl?.toFixed(6) ?? null, tpPrice: keepTp?.toFixed(6) ?? null,
-          exitPrice: input.exitPrice?.toFixed(6) ?? null,
+          exitPrice: keepExit?.toFixed(6) ?? null,
           mfe: keepMfe?.toFixed(2) ?? null, mae: keepMae?.toFixed(2) ?? null,
           risk: keepRisk?.toFixed(2) ?? null, reward: keepReward?.toFixed(2) ?? null,
-          pnl: updateStoredPnl.toFixed(2), notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
+          pnl: updateStoredPnl == null ? null : updateStoredPnl.toFixed(2), notes: input.notes, emotionBefore: input.emotionBefore, emotionDuring: input.emotionDuring, emotionAfter: input.emotionAfter,
           planStatus: input.planStatus, planChecklist: input.planChecklist,
           mt5Ticket: nextTicket,
+          // Provenance for the MT5 reconcile: a hand-edited risk section is
+          // never overwritten by a later sync. Absent when the trader did not
+          // touch the Risk fields, so auto-detected values keep tracking MT5.
+          ...(input.riskFieldsManual ? { riskSource: "manual" } : {}),
           // `environment` is deliberately absent from this SET: the
           // discriminator is immutable after create.
           // Omitted entirely when the caller said nothing about the screenshot,
@@ -1157,7 +1171,7 @@ export const goldRouter = router({
     }),
   }),
   skipped: router({
-    create: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), tradeDate: timestampInput, session: z.string().min(1).max(40), level: optionalText(100), timeframe: optionalText(20), direction: z.enum(["BUY", "SELL"]), skipReason: z.string().min(1).max(120), confidence: z.number().int().min(1).max(5), outcome: z.string().trim().min(1).max(80), estimatedMissed: money(), notes: optionalText(3000) })).mutation(async ({ ctx, input }) => {
+    create: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), tradeDate: timestampInput, session: z.string().trim().min(1).max(40), level: optionalText(100), timeframe: optionalText(20), direction: z.enum(["BUY", "SELL"]), skipReason: z.string().trim().min(1).max(120), confidence: z.number().int().min(1).max(5), outcome: z.string().trim().min(1).max(80), estimatedMissed: money(), notes: optionalText(3000) })).mutation(async ({ ctx, input }) => {
       if (isFuturePktTimestamp(input.tradeDate)) throw new TRPCError({ code: "BAD_REQUEST", message: "Future skipped-trade dates are not allowed." });
       await getOwnedAccount(ctx.user.id, input.accountId);
       const db = await dbOrThrow();

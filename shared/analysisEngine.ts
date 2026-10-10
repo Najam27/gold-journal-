@@ -175,6 +175,9 @@ export const COMBO_MIN_SAMPLE = 2;
 export const EDGE_SCORE_WEIGHTS = { sample: 20, expectancy: 25, profitFactor: 15, consistency: 15, drawdown: 15, dataQuality: 10 } as const;
 
 const finite = (value: unknown) => { const n = typeof value === "number" ? value : Number(value ?? 0); return Number.isFinite(n) ? n : 0; };
+// A trade whose P&L was never recorded (null/blank) has an UNKNOWN outcome,
+// not a $0 one: aggregates must exclude it, never score it as break-even.
+const pnlKnown = (trade: { pnl?: unknown }) => trade.pnl !== null && trade.pnl !== undefined && trade.pnl !== "";
 const dateValue = (value: unknown) => { const time = value instanceof Date ? value.getTime() : new Date(value as any).getTime(); return Number.isFinite(time) ? time : 0; };
 const clean = (value: unknown) => String(value ?? "").trim().replace(/\s+/g, " ");
 const keyPart = (value: unknown) => clean(value).toLocaleLowerCase();
@@ -212,6 +215,8 @@ function equityStats(trades: AnalysisTrade[]) {
   let inDrawdown = false; let episodePeak = 0; let episodeTrough = 0; let currentStart = -1; let recoveryStart = -1;
   const episodeDepths: number[] = [];
   for (let index = 0; index < trades.length; index += 1) {
+    // Unknown P&L is a gap in the curve, not a flat step: skip it.
+    if (!pnlKnown(trades[index])) continue;
     equity += finite(trades[index].pnl);
     if (equity >= peak) {
       if (inDrawdown) {
@@ -245,13 +250,13 @@ function streakStats(trades: AnalysisTrade[]) {
 export function metricRow(label: string, trades: AnalysisTrade[]): MetricRow {
   const closed = sortedClosed(trades); const sample = closed.length;
   const wins = closed.filter(t => t.result === "WIN").length; const losses = closed.filter(t => t.result === "LOSS").length; const breakEven = closed.filter(t => t.result === "BREAK_EVEN").length;
-  const pnls = closed.map(t => finite(t.pnl)); const winners = pnls.filter(value => value > 0); const losers = pnls.filter(value => value < 0); const grossProfit = winners.reduce((sum, value) => sum + value, 0); const grossLoss = Math.abs(losers.reduce((sum, value) => sum + value, 0));
-  const rValues = closed.map(t => { const risk = finite(t.risk); return risk > 0 ? finite(t.pnl) / risk : null; }).filter((value): value is number => value !== null && Number.isFinite(value));
+  const pnls = closed.filter(pnlKnown).map(t => finite(t.pnl)); const winners = pnls.filter(value => value > 0); const losers = pnls.filter(value => value < 0); const grossProfit = winners.reduce((sum, value) => sum + value, 0); const grossLoss = Math.abs(losers.reduce((sum, value) => sum + value, 0));
+  const rValues = closed.filter(pnlKnown).map(t => { const risk = finite(t.risk); return risk > 0 ? finite(t.pnl) / risk : null; }).filter((value): value is number => value !== null && Number.isFinite(value));
   const drawdown = equityStats(closed); const interval = wilsonInterval(wins, sample); const completenessFields = ["session", "timeframe", "level", "setupQuality", "direction", "risk", "reward", "notes", "screenshotKey", "result"] as const;
   const completeCells = closed.reduce((sum, trade) => sum + completenessFields.filter(field => clean(trade[field]) !== "" && !(field === "risk" && finite(trade.risk) === 0 && trade.risk == null) && !(field === "reward" && finite(trade.reward) === 0 && trade.reward == null)).length, 0);
   const dataCompleteness = sample ? completeCells / (sample * completenessFields.length) : 0;
   const pf = grossLoss ? grossProfit / grossLoss : grossProfit > 0 ? null : 0;
-  const expectancy = sample ? pnls.reduce((sum, value) => sum + value, 0) / sample : 0;
+  const expectancy = pnls.length ? pnls.reduce((sum, value) => sum + value, 0) / pnls.length : 0;
   const averageR = rValues.length ? rValues.reduce((sum, value) => sum + value, 0) / rValues.length : null;
   const sdR = rValues.length > 1 && averageR !== null ? Math.sqrt(rValues.reduce((sum, value) => sum + (value - averageR) ** 2, 0) / rValues.length) : 0;
   const scale = Math.max(Math.abs(median(pnls)), Math.abs(expectancy), 1);
@@ -275,12 +280,12 @@ function pktParts(date: Date) { return new Intl.DateTimeFormat("en-US", { timeZo
 function groupedDays(trades: AnalysisTrade[]) { return groupBy(sortedClosed(trades).map(trade => { const parts = pktParts(new Date(dateValue(trade.tradeDate))); return { ...trade, day: parts.find(part => part.type === "weekday")?.value ?? "Unknown" }; }), ["day"]); }
 function groupedHours(trades: AnalysisTrade[]) { return groupBy(sortedClosed(trades).map(trade => { const parts = pktParts(new Date(dateValue(trade.tradeDate))); const hour = parts.find(part => part.type === "hour")?.value ?? "00"; return { ...trade, hour: `${hour}:00 PKT` }; }), ["hour"]); }
 function durationMetrics(trades: AnalysisTrade[]) { const values = sortedClosed(trades).map(trade => { const start = dateValue(trade.openTime); const end = dateValue(trade.closeTime); return start && end && end >= start ? (end - start) / 60_000 : null; }).filter((value): value is number => value !== null); const buckets = [[0, 5, "<5 min"], [5, 15, "5–15 min"], [15, 30, "15–30 min"], [30, 60, "30–60 min"], [60, 240, "1–4h"], [240, Infinity, "4h+"]] as const; const bucketRows = buckets.map(([min, max, label]) => metricRow(label, sortedClosed(trades).filter(trade => { const start = dateValue(trade.openTime); const end = dateValue(trade.closeTime); const minutes = start && end && end >= start ? (end - start) / 60_000 : null; return minutes !== null && minutes >= min && minutes < max; }))); return { available: values.length, unavailable: sortedClosed(trades).length - values.length, averageMinutes: values.length ? round(values.reduce((sum, value) => sum + value, 0) / values.length, 2) : null, medianMinutes: values.length ? round(median(values), 2) : null, buckets: bucketRows }; }
-function riskMetrics(trades: AnalysisTrade[]) { const closed = sortedClosed(trades); const risks = closed.map(t => finite(t.risk)).filter(value => value > 0); const meanRisk = risks.length ? risks.reduce((sum, value) => sum + value, 0) / risks.length : 0; const averageForPreviousOutcome = (outcome: "WIN" | "LOSS") => { const values = closed.slice(1).filter((_, index) => closed[index]?.result === outcome).map(trade => finite(trade.risk)).filter(value => value > 0); return values.length ? round(values.reduce((sum, value) => sum + value, 0) / values.length, 2) : null; }; let equity = 0; let peak = 0; const drawdownRisks: number[] = []; for (const trade of closed) { equity += finite(trade.pnl); if (equity > peak) peak = equity; else if (peak > equity) { const risk = finite(trade.risk); if (risk > 0) drawdownRisks.push(risk); } } return { available: risks.length, average: risks.length ? round(meanRisk, 2) : null, median: risks.length ? round(median(risks), 2) : null, consistency: risks.length ? round(1 - Math.min(1, Math.sqrt(risks.reduce((sum, value) => sum + (value - meanRisk) ** 2, 0) / risks.length) / Math.max(1, meanRisk)), 4) : null, afterWins: averageForPreviousOutcome("WIN"), afterLosses: averageForPreviousOutcome("LOSS"), duringDrawdown: drawdownRisks.length ? round(drawdownRisks.reduce((sum, value) => sum + value, 0) / drawdownRisks.length, 2) : null }; }
+function riskMetrics(trades: AnalysisTrade[]) { const closed = sortedClosed(trades); const risks = closed.map(t => finite(t.risk)).filter(value => value > 0); const meanRisk = risks.length ? risks.reduce((sum, value) => sum + value, 0) / risks.length : 0; const averageForPreviousOutcome = (outcome: "WIN" | "LOSS") => { const values = closed.slice(1).filter((_, index) => closed[index]?.result === outcome).map(trade => finite(trade.risk)).filter(value => value > 0); return values.length ? round(values.reduce((sum, value) => sum + value, 0) / values.length, 2) : null; }; let equity = 0; let peak = 0; const drawdownRisks: number[] = []; for (const trade of closed) { if (!pnlKnown(trade)) continue; equity += finite(trade.pnl); if (equity > peak) peak = equity; else if (peak > equity) { const risk = finite(trade.risk); if (risk > 0) drawdownRisks.push(risk); } } return { available: risks.length, average: risks.length ? round(meanRisk, 2) : null, median: risks.length ? round(median(risks), 2) : null, consistency: risks.length ? round(1 - Math.min(1, Math.sqrt(risks.reduce((sum, value) => sum + (value - meanRisk) ** 2, 0) / risks.length) / Math.max(1, meanRisk)), 4) : null, afterWins: averageForPreviousOutcome("WIN"), afterLosses: averageForPreviousOutcome("LOSS"), duringDrawdown: drawdownRisks.length ? round(drawdownRisks.reduce((sum, value) => sum + value, 0) / drawdownRisks.length, 2) : null }; }
 function executionMetrics(trades: AnalysisTrade[]) {
-  const closed = sortedClosed(trades); const rows = closed.map(trade => ({ risk: finite(trade.risk), reward: finite(trade.reward), pnl: finite(trade.pnl) }));
+  const closed = sortedClosed(trades); const rows = closed.map(trade => ({ risk: finite(trade.risk), reward: finite(trade.reward), pnl: finite(trade.pnl), pnlKnown: pnlKnown(trade) }));
   const plannedRs = rows.filter(row => row.risk > 0 && row.reward >= 0).map(row => row.reward / row.risk);
-  const actualRs = rows.filter(row => row.risk > 0).map(row => row.pnl / row.risk);
-  const captureRows = rows.filter(row => row.risk > 0 && row.reward > 0).map(row => ({ plannedR: row.reward / row.risk, actualR: row.pnl / row.risk, capture: row.pnl / row.reward * 100 }));
+  const actualRs = rows.filter(row => row.risk > 0 && row.pnlKnown).map(row => row.pnl / row.risk);
+  const captureRows = rows.filter(row => row.risk > 0 && row.reward > 0 && row.pnlKnown).map(row => ({ plannedR: row.reward / row.risk, actualR: row.pnl / row.risk, capture: row.pnl / row.reward * 100 }));
   return {
     plannedRAvailable: plannedRs.length, actualRAvailable: actualRs.length, targetCaptureAvailable: captureRows.length,
     averagePlannedR: plannedRs.length ? round(plannedRs.reduce((sum, value) => sum + value, 0) / plannedRs.length, 4) : null,
@@ -341,12 +346,14 @@ function exitEfficiencyMetrics(closed: AnalysisTrade[]): AnalysisResult["exitEff
   const withMfe = closed.filter(trade => { const mfe = num(trade.mfe); return mfe != null && mfe > 0; });
   const winners = withMfe.filter(trade => clean(trade.result) === "WIN");
   const captured = winners
+    .filter(trade => num(trade.pnl) != null)
     .map(trade => ({ pnl: num(trade.pnl) ?? 0, mfe: num(trade.mfe) ?? 0 }))
     .filter(item => item.mfe > 0)
     .map(item => (item.pnl / item.mfe) * 100);
   const leftOnTable = winners.reduce((sum, trade) => {
-    const pnl = num(trade.pnl) ?? 0;
+    const pnl = num(trade.pnl);
     const mfe = num(trade.mfe) ?? 0;
+    if (pnl == null) return sum;
     return sum + Math.max(0, mfe - pnl);
   }, 0);
   // R-based exit math. actualR = pnl / risk; mfeR = mfe / risk; the R left on

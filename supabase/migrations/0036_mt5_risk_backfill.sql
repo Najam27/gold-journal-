@@ -6,12 +6,15 @@
 -- Only fills fields that are currently NULL: a value the trader typed or a
 -- previous sync wrote is never overwritten. Excursions are stored on the
 -- trade as positive magnitudes (MFE +$250, MAE $180) while the position row
--- keeps signed extremes, so they are converted here.
+-- keeps signed extremes, so they are converted here. A negative historical
+-- price is corrupt data, not a price: it backfills as NULL (unavailable),
+-- never as a fake $0.00, so the gj_trades_prices_nonnegative check can never
+-- abort this migration.
 update public.gj_trades t
 set
-  "entryPrice" = coalesce(t."entryPrice", p."openPrice"),
-  "slPrice" = coalesce(t."slPrice", p."slPrice"),
-  "tpPrice" = coalesce(t."tpPrice", p."tpPrice"),
+  "entryPrice" = coalesce(t."entryPrice", case when p."openPrice" is null or p."openPrice" < 0 then null else p."openPrice" end),
+  "slPrice" = coalesce(t."slPrice", case when p."slPrice" is null or p."slPrice" < 0 then null else p."slPrice" end),
+  "tpPrice" = coalesce(t."tpPrice", case when p."tpPrice" is null or p."tpPrice" < 0 then null else p."tpPrice" end),
   risk = coalesce(t.risk, nullif(p."riskUsd", 0)),
   reward = coalesce(t.reward, nullif(p."rewardUsd", 0)),
   mfe = coalesce(t.mfe, greatest(p."mfeUsd", 0)),

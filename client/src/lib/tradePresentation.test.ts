@@ -220,5 +220,9 @@ describe("canonical trade presentation model", () => {
     expect(resolveTone({ tone: "signed", value: "-$12.00" })).toBe("negative");
     expect(resolveTone({ tone: "signed", value: "$12.00" })).toBe("positive");
     expect(resolveTone({ tone: "signed", value: PRESENTATION_MISSING })).toBe("neutral");
+    // The 1:X convention carries the sign after the colon: a losing Actual R
+    // must not render in the positive tone.
+    expect(resolveTone({ tone: "signed", value: "1 : -2.50" })).toBe("negative");
+    expect(resolveTone({ tone: "signed", value: "1 : 2.50" })).toBe("positive");
   });
 });

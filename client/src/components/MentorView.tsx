@@ -208,11 +208,16 @@ export function MentorView({ account, behaviorConfig }: { account?: any; behavio
         <div className="ai-action-row">
           <Button
             size="lg"
-            disabled={pending || !account?.id || !aiSettings.configured}
+            disabled={pending || !account?.id || !aiSettings.configured || behaviorEvidence.isError}
             onClick={() => void run()}
           >
             {pending ? "Analyzing in your browser…" : "Analyze my journal"}
           </Button>
+          {behaviorEvidence.isError && (
+            <p className="ai-evidence-error" role="alert">
+              Couldn't load your journal evidence ({behaviorEvidence.error?.message || "unknown error"}). Retry the page — analysis needs that data.
+            </p>
+          )}
           {pending && (
             <Button
               variant="outline"

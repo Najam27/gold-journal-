@@ -570,6 +570,7 @@ export function TradeDialogWithCustomOptions({ mode = LIVE_MODE, open, setOpen, 
   useEffect(() => {
     if (!open || !isMt5 || !mt5Source.data) return;
     const source = mt5Source.data;
+    const touched = manualRiskFields;
     setForm((prev: any) => {
       const next = { ...prev };
       let changed = false;
@@ -578,6 +579,9 @@ export function TradeDialogWithCustomOptions({ mode = LIVE_MODE, open, setOpen, 
         ["risk", source.risk], ["reward", source.reward], ["mfe", source.mfe], ["mae", source.mae],
       ];
       for (const [field, value] of fills) {
+        // A field the trader touched (typed or deliberately cleared) is never
+        // refilled: a window-focus refetch must not undo a clear.
+        if (touched.has(field)) continue;
         if ((next[field] === "" || next[field] == null) && value !== null && value !== undefined) {
           next[field] = String(value);
           changed = true;
@@ -648,7 +652,7 @@ export function TradeDialogWithCustomOptions({ mode = LIVE_MODE, open, setOpen, 
         <p className="plan-save-error" role="alert">Save failed — {saveError}</p>
       ) : null}
       <Button variant="outline" disabled={pending} onClick={() => setOpen(false)}>Cancel</Button>
-      <Button disabled={pending} onClick={() => onSave({ removeScreenshot: removeStoredScreenshot })}>
+      <Button disabled={pending} onClick={() => onSave({ removeScreenshot: removeStoredScreenshot, riskFieldsManual: manualRiskFields.size > 0 })}>
         {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : editing ? "Save changes" : "Save trade"}
       </Button>
     </div>

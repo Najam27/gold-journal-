@@ -838,7 +838,7 @@ export function Mt5LiveView({ account, accounts, onSwitchAccount }: any) {
                   <div>
                     <h4>{position.symbol}</h4>
                     <span
-                      className={`side-badge ${position.direction.toLowerCase()}`}
+                      className={`side-badge ${String(position.direction || "").toLowerCase()}`}
                     >
                       {position.direction}
                     </span>
@@ -947,7 +947,7 @@ export function Mt5LiveView({ account, accounts, onSwitchAccount }: any) {
                       <td>{position.symbol}</td>
                       <td>
                         <span
-                          className={`side-badge ${position.direction.toLowerCase()}`}
+                          className={`side-badge ${String(position.direction || "").toLowerCase()}`}
                         >
                           {position.direction}
                         </span>

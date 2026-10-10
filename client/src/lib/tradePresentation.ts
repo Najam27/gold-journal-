@@ -152,7 +152,12 @@ export function presentationText(value: unknown): string {
 export function resolveTone(field: { tone?: TradeTone; value: string }): TradeTone {
   if (field.tone !== "signed") return field.tone ?? "neutral";
   if (field.value === PRESENTATION_MISSING) return "neutral";
-  return field.value.trim().startsWith("-") ? "negative" : "positive";
+  // The 1:X R convention carries the sign after the colon ("1 : -2.50"), so
+  // the sign of the LAST number in the string decides — not the first char.
+  const cleaned = field.value.replace(/[$,\s]/g, "");
+  const matches = cleaned.match(/-?\d+(\.\d+)?/g);
+  const last = matches?.[matches.length - 1] ?? "";
+  return last.startsWith("-") ? "negative" : "positive";
 }
 
 function isBlank(value: unknown): boolean {

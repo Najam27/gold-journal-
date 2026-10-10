@@ -26,7 +26,11 @@ export function isFuturePktDate(value: string, now: Date | string | number = new
 }
 
 export function formatMoney(value: number | string | null | undefined) {
-  const numeric = Number(value ?? 0);
+  // Unavailable stays unavailable: null/blank/non-numeric renders "—",
+  // never a fake $0.00. A real 0 still renders $0.00.
+  if (value === null || value === undefined || (typeof value === "string" && value.trim() === "")) return "—";
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "—";
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(numeric);
 }
 
@@ -41,6 +45,9 @@ export function formatRr(risk: number | string | null | undefined, reward: numbe
 }
 
 export function actualRMultiple(risk: number | string | null | undefined, pnl: number | string | null | undefined) {
+  // Blank/missing inputs are "unavailable", not zero: Number("") and
+  // Number(null) are both 0, which used to render the banned "1 : 0.00".
+  if (risk === null || risk === undefined || risk === "" || pnl === null || pnl === undefined || pnl === "") return null;
   const riskValue = Number(risk);
   const pnlValue = Number(pnl);
   if (!Number.isFinite(riskValue) || !Number.isFinite(pnlValue) || riskValue <= 0) return null;

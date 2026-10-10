@@ -173,10 +173,10 @@ function BaseTradeLogWithViewer({ mode = LIVE_MODE, stats, trades, allTrades, pa
         </header>
         <div>
           {mt5LivePositions.map((position: any) => (
-            <article key={position.ticket} className={toNumber(position.floatingPnl) >= 0 ? "profit" : "loss"}>
+            <article key={position.ticket} className={position.floatingPnl == null ? "" : toNumber(position.floatingPnl) >= 0 ? "profit" : "loss"}>
               <strong>{position.symbol}</strong>
               <span className={`side-badge ${String(position.direction || "").toLowerCase()}`}>{position.direction}</span>
-              <b className={`data-text ${toNumber(position.floatingPnl) >= 0 ? "positive" : "negative"}`}>{formatMoney(position.floatingPnl)}</b>
+              <b className={`data-text ${position.floatingPnl == null ? "" : toNumber(position.floatingPnl) >= 0 ? "positive" : "negative"}`}>{formatMoney(position.floatingPnl)}</b>
             </article>
           ))}
         </div>

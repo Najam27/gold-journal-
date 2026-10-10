@@ -46,6 +46,10 @@ export function QuickTradeDialog({
     setSlPrice("");
     setTpPrice("");
     setScreenshotFile(null);
+    // Without this, removing a screenshot and re-attaching the SAME file
+    // fires no onChange (the input still holds it) — the attach silently
+    // does nothing.
+    if (fileRef.current) fileRef.current.value = "";
   };
 
   const save = async () => {
@@ -62,10 +66,12 @@ export function QuickTradeDialog({
     reset();
   };
 
-  const price = (value: string) => /^\d*\.?\d*$/.test(value);
+  // At least one digit required: the old /^\d*\.?\d*$/ also accepted a lone
+  // ".", which Number() turns into NaN and the server rejects.
+  const price = (value: string) => /^(\d+\.?\d*|\.\d+)?$/.test(value);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={next => { if (!next) reset(); onOpenChange(next); }}>
       <DialogContent className="trade-dialog quick-dialog">
         <DialogHeader>
           <DialogTitle>

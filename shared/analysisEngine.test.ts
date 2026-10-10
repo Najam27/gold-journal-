@@ -12,6 +12,18 @@ describe("deterministic analysis engine", () => {
     expect(row.losses).toBe(1);
   });
 
+  it("excludes unknown-P&L trades from money aggregates instead of scoring them 0", () => {
+    const row = metricRow("all", [trade({ pnl: 10 }), trade({ result: "LOSS", pnl: null }), trade({ result: "WIN", pnl: null })]);
+    // Result counts still classify the trade (a WIN is a win); the money math
+    // only sees the one priced trade.
+    expect(row.sample).toBe(3);
+    expect(row.wins).toBe(2);
+    expect(row.losses).toBe(1);
+    expect(row.netPnl).toBe(10);
+    expect(row.expectancy).toBe(10);
+    expect(row.grossLoss).toBe(0);
+  });
+
   it("handles zero-loss, zero-win, and break-even samples without Infinity", () => {
     expect(metricRow("wins", [trade(), trade({ pnl: 5 })]).profitFactor).toBeNull();
     expect(metricRow("break-even", [trade({ result: "BREAK_EVEN", pnl: 0 })]).profitFactor).toBe(0);

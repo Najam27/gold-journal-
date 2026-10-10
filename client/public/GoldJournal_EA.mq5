@@ -188,6 +188,10 @@ string JsonEscape(string value) {
    StringReplace(value, "\r", "\\r");
    StringReplace(value, "\n", "\\n");
    StringReplace(value, "\t", "\\t");
+// Any other control char (< 0x20, e.g. \b \f in a broker server name) would
+// otherwise pass through raw and produce invalid JSON the server rejects.
+   StringReplace(value, "\b", "\\b");
+   StringReplace(value, "\f", "\\f");
    return value;
 }
 

@@ -80,9 +80,9 @@ async function readTextLimited(request: Request, limit: number): Promise<{ ok: t
 }
 
 async function handleMt5Ingest(request: Request, env: WorkerEnv): Promise<Response> {
-  if (request.method !== "POST") return json(405, { ok: false, code: "METHOD_NOT_ALLOWED" });
+  if (request.method !== "POST") return json(405, { ok: false, code: "METHOD_NOT_ALLOWED" }, apiHeaders(env));
   const read = await readTextLimited(request, MT5_BODY_LIMIT_BYTES);
-  if (!read.ok) return read.response;
+  if (!read.ok) return decorateResponse(read.response, apiHeaders(env));
   const outcome = await ingestMt5Text(read.text);
   return json(outcome.status, outcome.body, apiHeaders(env));
 }
@@ -154,7 +154,10 @@ async function serveStaticAssets(request: Request, env: WorkerEnv): Promise<Resp
   if (url.pathname.startsWith("/assets/")) return response;
   const fallbackRequest = new Request(`${url.origin}/index.html`, request);
   const fallback = await env.ASSETS.fetch(fallbackRequest);
-  if (fallback.status === 200) return new Response(fallback.body, { status: 200, headers: fallback.headers });
+  // The app shell gets the same security + no-store headers as the API: a
+  // heuristically-cached index.html would otherwise serve a stale bundle's
+  // chunk manifest after a deploy.
+  if (fallback.status === 200) return decorateResponse(fallback, apiHeaders(env));
   return response;
 }
 

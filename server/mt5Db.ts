@@ -87,13 +87,18 @@ function safePosition(position: typeof mt5LivePositions.$inferSelect, journaledT
 
 export function isMt5PositionAfterJournalReset(
   resetAt: Date | string | null | undefined,
-  position: { status: "OPEN" | "CLOSED"; openTime: Date; closeTime?: Date | null },
+  position: { status: "OPEN" | "CLOSED"; openTime: Date | string; closeTime?: Date | string | null },
 ) {
   if (!resetAt) return true;
   const resetAtMilliseconds = resetAt instanceof Date ? resetAt.getTime() : Date.parse(resetAt);
   if (!Number.isFinite(resetAtMilliseconds)) return true;
-  const effectiveTime = position.status === "CLOSED" ? (position.closeTime ?? position.openTime) : position.openTime;
-  return effectiveTime.getTime() > resetAtMilliseconds;
+  // PostgREST returns timestamptz columns as ISO strings; the sync layer used
+  // to receive real Date objects from a direct Postgres driver. Coerce here so
+  // a journal-data reset can never crash reconciliation with a TypeError.
+  const effectiveRaw = position.status === "CLOSED" ? (position.closeTime ?? position.openTime) : position.openTime;
+  const effectiveTime = effectiveRaw instanceof Date ? effectiveRaw.getTime() : Date.parse(effectiveRaw);
+  if (!Number.isFinite(effectiveTime)) return true;
+  return effectiveTime > resetAtMilliseconds;
 }
 
 async function getJournalDataResetAt(database: any, accountId: number) {
@@ -341,7 +346,7 @@ type LiveBase = { ticket: bigint; symbol: string; direction: "BUY" | "SELL"; lot
 
 type SyncedMt5Position = LiveBase & { pnl: number; result: "WIN" | "LOSS" | "BREAK_EVEN" | "OPEN"; tradeTime: Date; closeTime?: Date | null; mfeUsd?: number | null; maeUsd?: number | null };
 
-async function syncMt5PositionToTradeLog(userId: number, accountId: number, position: SyncedMt5Position, database?: any) {
+async function syncMt5PositionToTradeLog(userId: number, accountId: number, position: SyncedMt5Position, database?: any, options: { preserveRiskFields?: boolean } = {}) {
   const db = database ?? await requireDb();
   const record = {
     userId,
@@ -384,6 +389,7 @@ async function syncMt5PositionToTradeLog(userId: number, accountId: number, posi
     emotionDuring: "",
     emotionAfter: "",
     mt5Ticket: position.ticket,
+    riskSource: "mt5",
   };
   // Insert-or-update keeps the RPC-created Trade Log row consistent with the
   // authoritative terminal row while never overwriting manual journal context.
@@ -392,8 +398,16 @@ async function syncMt5PositionToTradeLog(userId: number, accountId: number, posi
   const query = db.insert(trades).values(record) as any;
   // While the position is still open its excursions keep moving, so the
   // journal row tracks them; once closed, the terminal values stay and a
-  // manual edit is never overwritten by a later sync.
-  const set = { tradeDate: record.tradeDate, session: record.session, direction: record.direction, result: record.result, risk: record.risk, reward: record.reward, pnl: record.pnl, openTime: record.openTime, closeTime: record.closeTime, entryPrice: record.entryPrice, slPrice: record.slPrice, tpPrice: record.tpPrice, ...(record.result === "OPEN" ? { mfe: record.mfe, mae: record.mae } : {}) };
+  // manual edit is never overwritten by a later sync. When the trader has
+  // hand-edited the risk fields (riskSource = 'manual', set by trades.update),
+  // the conflict SET leaves entry/SL/TP/risk/reward alone: manual wins.
+  const { preserveRiskFields } = options;
+  const set = {
+    tradeDate: record.tradeDate, session: record.session, direction: record.direction, result: record.result,
+    pnl: record.pnl, openTime: record.openTime, closeTime: record.closeTime,
+    ...(preserveRiskFields ? {} : { entryPrice: record.entryPrice, slPrice: record.slPrice, tpPrice: record.tpPrice, risk: record.risk, reward: record.reward }),
+    ...(record.result === "OPEN" ? { mfe: record.mfe, mae: record.mae } : {}),
+  };
   if (typeof query.onConflictDoUpdate === "function") await query.onConflictDoUpdate({ target: [trades.accountId, trades.mt5Ticket], set });
   else await query.onDuplicateKeyUpdate({ set });
 }
@@ -423,20 +437,29 @@ export async function syncStoredMt5PositionsToTradeLog(userId: number, accountId
   // equalities can only ever match when exactly one position is stored, silently
   // disabling the pre-filter and re-upserting every position on every poll.
   const ticketChunks = chunkMt5TicketFilters(positions.map(position => position.ticket.toString()));
-  const journaledRows = await Promise.all(ticketChunks.map(chunk => db.select({ mt5Ticket: trades.mt5Ticket, result: trades.result, pnl: trades.pnl }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId), or(...chunk.map(ticket => eq(trades.mt5Ticket, BigInt(ticket))))))));
+  const journaledRows = await Promise.all(ticketChunks.map(chunk => db.select({ mt5Ticket: trades.mt5Ticket, result: trades.result, pnl: trades.pnl, riskSource: trades.riskSource }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, accountId), or(...chunk.map(ticket => eq(trades.mt5Ticket, BigInt(ticket))))))));
   const journaled = journaledRows.flat();
   const journaledByTicket = new Map(journaled.map(row => [row.mt5Ticket?.toString(), row]));
   const needsJournal = positions.filter(position => {
-    if (!isMt5PositionAfterJournalReset(resetAt, position as { status: "OPEN" | "CLOSED"; openTime: Date; closeTime?: Date | null })) return false;
+    if (!isMt5PositionAfterJournalReset(resetAt, position as { status: "OPEN" | "CLOSED"; openTime: Date | string; closeTime?: Date | string | null })) return false;
     const existing = journaledByTicket.get(position.ticket.toString());
     if (!existing) return true;
-    if (existing.result !== position.status) return true;
+    // Trade outcome enum (WIN/LOSS/BREAK_EVEN/OPEN) vs position status enum
+    // (OPEN/CLOSED): comparing them directly is always true for closed
+    // trades and re-upserted every position on every poll. Only the
+    // OPEN→CLOSED transition needs a re-journal; pnl drift is handled below.
+    if (existing.result === "OPEN" && position.status === "CLOSED") return true;
     if (position.status === "CLOSED") return Number(existing.pnl ?? 0) !== Number(position.realizedPnl ?? 0);
     return Number(existing.pnl ?? 0) !== Number(position.floatingPnl ?? 0);
   });
   const limit = Math.min(Math.max(1, Math.trunc(options.limit ?? MT5_RECONCILE_BATCH_LIMIT)), MT5_RECONCILE_BATCH_MAX);
   let synchronized = 0;
   for (const position of needsJournal.slice(0, limit)) {
+    const existing = journaledByTicket.get(position.ticket.toString());
+    // PostgREST returns timestamptz as ISO strings; Intl.DateTimeFormat
+    // throws RangeError on a string, so coerce to Date at this boundary.
+    const openTime = position.openTime instanceof Date ? position.openTime : new Date(position.openTime);
+    const closeTime = position.closeTime == null ? null : (position.closeTime instanceof Date ? position.closeTime : new Date(position.closeTime));
     await syncMt5PositionToTradeLog(userId, accountId, {
       ticket: position.ticket,
       symbol: position.symbol,
@@ -448,14 +471,14 @@ export async function syncStoredMt5PositionsToTradeLog(userId: number, accountId
       riskUsd: Number(position.riskUsd),
       rewardUsd: Number(position.rewardUsd),
       rrRatio: Number(position.rrRatio),
-      openTime: position.openTime,
+      openTime,
       pnl: position.status === "OPEN" ? Number(position.floatingPnl) : Number(position.realizedPnl),
       result: position.status === "OPEN" ? "OPEN" : ((position.result as "WIN" | "LOSS" | "BREAK_EVEN" | null) ?? "BREAK_EVEN"),
-      tradeTime: position.status === "OPEN" ? position.openTime : (position.closeTime ?? position.openTime),
-      closeTime: position.status === "OPEN" ? null : position.closeTime,
+      tradeTime: position.status === "OPEN" ? openTime : (closeTime ?? openTime),
+      closeTime: position.status === "OPEN" ? null : closeTime,
       mfeUsd: position.mfeUsd == null ? null : Number(position.mfeUsd),
       maeUsd: position.maeUsd == null ? null : Number(position.maeUsd),
-    });
+    }, { preserveRiskFields: existing?.riskSource === "manual" });
     synchronized += 1;
   }
   return { synchronized, remaining: Math.max(0, needsJournal.length - synchronized) };
