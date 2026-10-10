@@ -689,7 +689,9 @@ export default function GoldJournal() {
     ),
     // The Trade Log only surfaces MT5 open positions as a secondary panel, so
     // it does not need the 2.5 s live cadence that the MT5 Live view runs.
-    refetchInterval: view === "mt5" ? 2_500 : view === "trades" ? 10_000 : false,
+    // 30 s keeps the strip fresh without re-rendering the page six times a
+    // minute mid-scroll.
+    refetchInterval: view === "mt5" ? 2_500 : view === "trades" ? 30_000 : false,
     refetchOnWindowFocus: true,
     staleTime: 2_000,
   });
@@ -1387,10 +1389,13 @@ export default function GoldJournal() {
       } else {
         await createTrade.mutateAsync(tradePayload as any);
       }
-      // The backend confirmed the row. Refetch every account-scoped read —
-      // trades.list, the journal payload, analysis, MT5 and notifications — so
-      // the Trade Log shows the freshly stored server record.
-      await refreshCurrentAccount(utils);
+      // The backend confirmed the row. Kick off a background refresh of every
+      // account-scoped read — trades.list, the journal payload, analysis, MT5
+      // and notifications — WITHOUT awaiting it. Awaiting the full journal
+      // refetch here (500 + 2,000 trade rows) made every save feel stuck; the
+      // list refreshes in the background and the dialog can confirm "Saved"
+      // immediately.
+      void refreshCurrentAccount(utils);
       setUploadProgress(100);
       // "Saved" is only ever shown after the backend confirmed the row. It stays
       // on screen briefly so the outcome is visible, and the duplicate-click

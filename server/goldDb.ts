@@ -77,7 +77,26 @@ export async function getJournal(userId: number, accountId?: number, resolvedAcc
   const [accountList, tradeList, goalTradeList, movementList, goalList, planList, profileList] = await Promise.all([
     trace.stage("accounts", () => db.select().from(accounts).where(eq(accounts.userId, userId)).orderBy(desc(accounts.createdAt)).limit(1_000)),
     trace.stage("trades", () => db.select().from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, activeAccount.id), eq(trades.environment, environment))).orderBy(desc(trades.tradeDate)).limit(500)),
-    trace.stage("goal trades", () => db.select().from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, activeAccount.id), eq(trades.environment, environment), gte(trades.tradeDate, goalWindowStart))).orderBy(desc(trades.tradeDate)).limit(2_000)),
+    // Goal assessment only reads a dozen scalar fields (see GoalTrade in
+    // client/src/lib/traderGoals.ts). Fetching full rows — notes, emotions,
+    // checklists, bias JSON — made every journal.get poll transfer megabytes,
+    // stalling scroll and saves. toSafeTrade still derives hasScreenshot from
+    // screenshotKey as usual.
+    trace.stage("goal trades", () => db.select({
+      id: trades.id,
+      tradeDate: trades.tradeDate,
+      pnl: trades.pnl,
+      result: trades.result,
+      risk: trades.risk,
+      reward: trades.reward,
+      patienceScore: trades.patienceScore,
+      setupQuality: trades.setupQuality,
+      mistake: trades.mistake,
+      session: trades.session,
+      timeframe: trades.timeframe,
+      level: trades.level,
+      screenshotKey: trades.screenshotKey,
+    }).from(trades).where(and(eq(trades.userId, userId), eq(trades.accountId, activeAccount.id), eq(trades.environment, environment), gte(trades.tradeDate, goalWindowStart))).orderBy(desc(trades.tradeDate)).limit(2_000)),
     trace.stage("cash", () => db.select().from(cashMovements).where(and(eq(cashMovements.userId, userId), eq(cashMovements.accountId, activeAccount.id))).orderBy(desc(cashMovements.movementDate)).limit(200)),
     trace.stage("goals", () => db.select().from(goals).where(and(eq(goals.userId, userId), eq(goals.accountId, activeAccount.id), eq(goals.isCustom, true))).orderBy(goals.period, goals.createdAt).limit(200)),
     trace.stage("plans", () => db.select().from(dailyPlans).where(and(eq(dailyPlans.userId, userId), eq(dailyPlans.accountId, activeAccount.id))).orderBy(desc(dailyPlans.planDate)).limit(500)),
