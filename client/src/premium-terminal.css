@@ -782,7 +782,35 @@ select option:disabled { color: var(--text-disabled); }
 .edge-table-wrap,
 .pnl-week-calendar,
 .mt5-table-wrap { scrollbar-color: color-mix(in srgb, var(--tone) 40%, var(--border)) transparent; scrollbar-width: thin; }
-.trade-table { min-width: 980px; border-collapse: separate; border-spacing: 0; }
+.trade-table-wrap { overflow-x: visible; }
+/* Trade Log table: fits the panel like the P&L calendar — no horizontal
+   scroll. The 14 columns share the available width (fixed layout) and text
+   wraps instead of forcing a 980px minimum. The Actions column keeps a fixed
+   width for its five icon buttons. */
+.trade-table { min-width: 0; width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
+.trade-table th, .trade-table td { white-space: normal; overflow-wrap: break-word; }
+.trade-table th:nth-child(1), .trade-table td:nth-child(1) { width: 3%; }
+.trade-table th:nth-child(2), .trade-table td:nth-child(2) { width: 8%; }
+.trade-table th:nth-child(3), .trade-table td:nth-child(3) { width: 7%; }
+.trade-table th:nth-child(4), .trade-table td:nth-child(4) { width: 6%; }
+.trade-table th:nth-child(5), .trade-table td:nth-child(5) { width: 8%; }
+.trade-table th:nth-child(6), .trade-table td:nth-child(6) { width: 7%; }
+.trade-table th:nth-child(7), .trade-table td:nth-child(7) { width: 6%; }
+.trade-table th:nth-child(8), .trade-table td:nth-child(8) { width: 7%; }
+.trade-table th:nth-child(9), .trade-table td:nth-child(9) { width: 8%; }
+.trade-table th:nth-child(10), .trade-table td:nth-child(10) { width: 7%; }
+.trade-table th:nth-child(11), .trade-table td:nth-child(11) { width: 7%; }
+.trade-table th:nth-child(12), .trade-table td:nth-child(12) { width: 9%; }
+.trade-table th:nth-child(13), .trade-table td:nth-child(13) { width: 7%; }
+.trade-table th:nth-child(14), .trade-table td:nth-child(14) { width: 148px; }
+.trade-table .row-actions { white-space: nowrap; }
+/* Narrow screens: fourteen columns cannot fit a phone — the wrapper scrolls
+   horizontally there (standard pattern) instead of crushing the table. */
+@media (max-width: 760px) {
+  .trade-table-wrap { overflow-x: auto; }
+  table.trade-table { min-width: 860px; table-layout: auto; }
+  .trade-table th:nth-child(n), .trade-table td:nth-child(n) { width: auto; }
+}
 .trade-table th {
   position: sticky;
   top: 0;
