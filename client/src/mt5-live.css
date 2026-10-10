@@ -77,16 +77,7 @@
 
 .mt5-position-card { border-left: 4px solid var(--gj-success); }.mt5-position-card.loss { border-left-color: var(--gj-danger); }.mt5-position-card header strong { font-size: 1.25rem; }
 .mt5-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: .45rem; margin: 1rem 0; }.mt5-metrics span { padding: .5rem; border-radius: 8px; background: var(--gj-subtle); color: var(--gj-muted); font-size: .68rem; }.mt5-metrics b { display: block; margin-top: .2rem; color: var(--gj-text); font-family: var(--gj-mono); }.mt5-position-card footer { flex-wrap: wrap; color: var(--gj-muted); font: 600 .7rem var(--gj-mono); }
-.mt5-closed-section { padding: 1rem; }.mt5-table-wrap { overflow-x: visible; }
-/* MT5 tables: fit the panel like the P&L calendar — no horizontal scroll.
-   Columns share the available width; text wraps instead of forcing 900px. */
-.mt5-table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; }
-.mt5-table th, .mt5-table td { white-space: normal; overflow-wrap: break-word; }
-/* Narrow screens: the wrapper scrolls horizontally instead of crushing columns. */
-@media (max-width: 760px) {
-  .mt5-table-wrap { overflow-x: auto; }
-  table.mt5-table { min-width: 760px; table-layout: auto; }
-}.mt5-table th { padding: .55rem; color: var(--gj-muted); text-align: left; font-size: .65rem; letter-spacing: .07em; }.mt5-table td { padding: .68rem .55rem; border-top: 1px solid var(--gj-border); font-size: .75rem; }.mt5-journaled { color: var(--gj-success); }.mt5-no-closed { margin: 0; font-size: .82rem; }
+.mt5-closed-section { padding: 1rem; }.mt5-table-wrap { overflow: auto; }.mt5-table { width: 100%; min-width: 900px; border-collapse: collapse; }.mt5-table th { padding: .55rem; color: var(--gj-muted); text-align: left; font-size: .65rem; letter-spacing: .07em; }.mt5-table td { padding: .68rem .55rem; border-top: 1px solid var(--gj-border); font-size: .75rem; white-space: nowrap; }.mt5-journaled { color: var(--gj-success); }.mt5-no-closed { margin: 0; font-size: .82rem; }
 .mt5-add-form { display: grid; gap: .9rem; padding: .4rem 0 1rem; }.mt5-add-form label { display: grid; gap: .35rem; font-size: .78rem; font-weight: 700; }.mt5-add-form select { min-height: 38px; padding: 0 .65rem; border: 1px solid var(--gj-border); border-radius: 8px; background: var(--gj-subtle); color: var(--gj-text); }
 .mt5-account-panel { padding: 1rem; }.mt5-account-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem; }.mt5-account-metric { padding: .8rem; border: 1px solid var(--gj-border); border-radius: 12px; background: var(--gj-subtle); }.mt5-account-metric > span { display: block; color: var(--gj-muted); font-size: .68rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }.mt5-account-metric strong { display: block; margin: .35rem 0 .15rem; font-size: 1rem; }.mt5-account-metric small { color: var(--gj-muted); font-size: .68rem; }.mt5-account-metric.gold strong { color: var(--gj-gold); }.mt5-account-metric.profit strong { color: var(--gj-success); }.mt5-account-metric.loss strong { color: var(--gj-danger); }.mt5-account-detail,.mt5-history-status,.mt5-health-detail { margin: .7rem 0 0; color: var(--gj-muted); font-size: .75rem; }.mt5-health-detail { padding: .55rem .65rem; border-left: 3px solid var(--warning); border-radius: 8px; background: color-mix(in srgb, var(--warning) 9%, var(--gj-subtle)); }
 
