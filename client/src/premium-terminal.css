@@ -784,6 +784,7 @@ select option:disabled { color: var(--text-disabled); }
 .mt5-table-wrap { scrollbar-color: color-mix(in srgb, var(--tone) 40%, var(--border)) transparent; scrollbar-width: thin; }
 .trade-table-wrap { overflow-x: auto; }
 .trade-table { min-width: 980px; border-collapse: separate; border-spacing: 0; }
+.trade-table th, .trade-table td { white-space: nowrap; }
 .trade-table th {
   position: sticky;
   top: 0;
