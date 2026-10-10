@@ -109,4 +109,17 @@ describe("MT5 sync hardening contract", () => {
     expect(ingestSource).toContain("code: \"UNSUPPORTED_VERSION\"");
     expect(ingestSource).toContain("code: \"BATCH_TOO_LARGE\"");
   });
+
+  it("guards Data API grants: every migrated table needs an explicit service_role grant", () => {
+    // Oct-30 Supabase trap: without an explicit GRANT a new public table is
+    // invisible to the Data API, including for service_role. The audit fails
+    // if any table the migration history creates lacks one.
+    expect(auditScript).toContain("0037_explicit_api_grants.sql");
+    expect(auditScript).toContain("tablesWithoutServiceRoleGrant");
+    const grantMigration = read("supabase/migrations/0037_explicit_api_grants.sql");
+    for (const table of ["gj_trades", "gj_mt5_live_positions", "gj_weekly_reviews", "gj_ai_jobs", "users"]) {
+      expect(grantMigration).toContain(`grant select, insert, update, delete on table public.${table} to service_role;`);
+    }
+    expect(grantMigration).toContain("grant usage, select on all sequences in schema public to service_role;");
+  });
 });
