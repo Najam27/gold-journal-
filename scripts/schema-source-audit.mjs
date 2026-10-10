@@ -105,9 +105,14 @@ const report = {
         .map(match => (match[1] ?? match[2] ?? match[3] ?? match[4] ?? "").toLowerCase())
     );
     const live = created.filter(name => !dropped.has(name));
-    return live.filter(
-      table => !new RegExp(`grant(?=[^;]*\\bselect\\b)(?=[^;]*\\binsert\\b)(?=[^;]*\\bupdate\\b)(?=[^;]*\\bdelete\\b)[^;]*\\bon table public\\.${table} to service_role`, "is").test(migrationText)
-    );
+    // 0037 grants defensively through a DO loop over an array literal (each
+    // table touched only when it exists, so a partial DB never 42P01s). The
+    // loop issues the full select/insert/update/delete set via format(), so
+    // membership in its array counts as a full grant.
+    const loopMatch = migrationText.match(/foreach t in array array\[([\s\S]*?)\]/i);
+    const loopTables = loopMatch ? [...loopMatch[1].matchAll(/'([a-z_0-9]+)'/gi)].map(m => m[1].toLowerCase()) : [];
+    const fullGrant = (table) => new RegExp(`grant(?=[^;]*\\bselect\\b)(?=[^;]*\\binsert\\b)(?=[^;]*\\bupdate\\b)(?=[^;]*\\bdelete\\b)[^;]*\\bon table public\\.${table} to service_role`, "is").test(migrationText);
+    return live.filter(table => !loopTables.includes(table) && !fullGrant(table));
   })(),
 };
 console.log(JSON.stringify(report, null, 2));

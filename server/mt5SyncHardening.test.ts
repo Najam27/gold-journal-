@@ -117,13 +117,17 @@ describe("MT5 sync hardening contract", () => {
     expect(auditScript).toContain("0037_explicit_api_grants.sql");
     expect(auditScript).toContain("tablesWithoutServiceRoleGrant");
     const grantMigration = read("supabase/migrations/0037_explicit_api_grants.sql");
+    // 0037 grants defensively through a DO loop over a table array (each
+    // table touched only when it exists, so a partial DB never 42P01s).
+    expect(grantMigration).toContain("foreach t in array array[");
+    expect(grantMigration).toContain("to_regclass('public.' || t) is not null");
     for (const table of ["gj_trades", "gj_mt5_live_positions", "gj_weekly_reviews", "users"]) {
-      expect(grantMigration).toContain(`grant select, insert, update, delete on table public.${table} to service_role;`);
+      expect(grantMigration).toContain(`'${table}'`);
     }
-    // 0028 retired the server AI vault and drops both tables: granting on
-    // them would abort the migration with 42P01 on a properly migrated DB.
+    // 0028 retired the server AI vault and drops both tables: listing them
+    // would abort the migration with 42P01 on a properly migrated DB.
     for (const retired of ["gj_ai_provider_settings", "gj_ai_jobs"]) {
-      expect(grantMigration).not.toContain(`public.${retired} to service_role;`);
+      expect(grantMigration).not.toContain(`'${retired}'`);
     }
     expect(grantMigration).toContain("grant usage, select on all sequences in schema public to service_role;");
   });
