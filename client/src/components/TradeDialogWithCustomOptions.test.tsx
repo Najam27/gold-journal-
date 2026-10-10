@@ -3,8 +3,8 @@ import React from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ add: vi.fn(), invalidate: vi.fn() }));
-vi.mock("@/lib/trpc", () => ({ trpc: { optionLists: { list: { useQuery: () => ({ data: [{ id: 1, category: "Level", value: "Saved level", active: true }] }) }, add: { useMutation: () => ({ mutateAsync: mocks.add, isPending: false }) } }, useUtils: () => ({ optionLists: { list: { invalidate: mocks.invalidate } } }) } }));
+const mocks = vi.hoisted(() => ({ add: vi.fn(), invalidate: vi.fn(), mt5SourceData: { current: null as any }, mt5SourceLoading: { current: false } }));
+vi.mock("@/lib/trpc", () => ({ trpc: { optionLists: { list: { useQuery: () => ({ data: [{ id: 1, category: "Level", value: "Saved level", active: true }] }) }, add: { useMutation: () => ({ mutateAsync: mocks.add, isPending: false }) } }, trades: { mt5Source: { useQuery: () => ({ data: mocks.mt5SourceData.current, isLoading: mocks.mt5SourceLoading.current }) } }, useUtils: () => ({ optionLists: { list: { invalidate: mocks.invalidate } } }) } }));
 vi.mock("@/components/ui/button", () => ({ Button: ({ children, ...props }: any) => <button {...props}>{children}</button> }));
 vi.mock("@/components/ui/input", () => ({ Input: (props: any) => <input {...props} /> }));
 vi.mock("@/components/ui/textarea", () => ({ Textarea: (props: any) => <textarea {...props} /> }));
@@ -115,5 +115,48 @@ describe("TradeDialogWithCustomOptions", () => {
     expect(screen.getByText("Actual pips (auto)")).toBeTruthy();
     expect(screen.getByText("Exit price")).toBeTruthy();
     expect(screen.queryByText("Actual P&L $")).toBeNull();
+  });
+
+  it("renders editable MT5 risk fields with Auto-detected badges; typing flips to Manual", () => {
+    mocks.mt5SourceData.current = null;
+    mocks.mt5SourceLoading.current = false;
+    const form = { tradeDate: "2026-08-12", session: "London", direction: "BUY", result: "WIN", mt5Ticket: "987654321", entryPrice: "", slPrice: "", tpPrice: "", risk: "46.4", reward: "", mae: "", mfe: "", pnl: "-48.6", mistake: "", level: "", timeframe: "" };
+    const setForm = vi.fn();
+    render(<TradeDialogWithCustomOptions open setOpen={vi.fn()} form={form} setForm={setForm} editing={{ id: 9 }} accountId={12} onSave={vi.fn()} pending={false} screenshot={undefined} setScreenshot={vi.fn()} progress={0} />);
+    // Risk fields are editable inputs, not read-only text.
+    const riskInput = screen.getAllByLabelText("Planned risk $").find(el => el.tagName === "INPUT") as HTMLInputElement;
+    expect(riskInput).toBeTruthy();
+    expect(riskInput.value).toBe("46.4");
+    const entryInput = screen.getAllByLabelText("Entry price").find(el => el.tagName === "INPUT") as HTMLInputElement;
+    expect(entryInput).toBeTruthy();
+    expect(entryInput.tagName).toBe("INPUT");
+    // The untouched auto value carries the Auto-detected badge…
+    expect(screen.getAllByText("Auto-detected").length).toBeGreaterThan(0);
+    // …which flips to Manual the moment the trader types (and wins on save).
+    fireEvent.change(riskInput, { target: { value: "50" } });
+    expect(setForm).toHaveBeenCalledWith(expect.objectContaining({ risk: "50" }));
+    expect(screen.getAllByText("Manual").length).toBeGreaterThan(0);
+  });
+
+  it("backfills empty MT5 risk fields from the linked position on open", () => {
+    mocks.mt5SourceData.current = { entryPrice: 2650.5, slPrice: null, tpPrice: null, risk: 46.4, reward: null, mfe: 250, mae: 180 };
+    mocks.mt5SourceLoading.current = false;
+    const form = { tradeDate: "2026-08-12", session: "London", direction: "BUY", result: "WIN", mt5Ticket: "987654321", entryPrice: "", slPrice: "", tpPrice: "", risk: "", reward: "", mae: "", mfe: "", pnl: "-48.6", mistake: "", level: "", timeframe: "" };
+    const setForm = vi.fn();
+    render(<TradeDialogWithCustomOptions open setOpen={vi.fn()} form={form} setForm={setForm} editing={{ id: 9 }} accountId={12} onSave={vi.fn()} pending={false} screenshot={undefined} setScreenshot={vi.fn()} progress={0} />);
+    // The backfill runs as a functional setForm: only empty fields move.
+    const updater = setForm.mock.calls.map(call => call[0]).find(arg => typeof arg === "function");
+    expect(updater).toBeTruthy();
+    const next = updater(form);
+    expect(next.entryPrice).toBe("2650.5");
+    expect(next.risk).toBe("46.4");
+    expect(next.mfe).toBe("250");
+    expect(next.mae).toBe("180");
+    // Nulls in the source never overwrite: fields stay empty, never "null".
+    expect(next.slPrice).toBe("");
+    expect(next.reward).toBe("");
+    // A field the form already has keeps its value.
+    const withRisk = updater({ ...form, risk: "99" });
+    expect(withRisk.risk).toBe("99");
   });
 });

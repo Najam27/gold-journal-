@@ -6,7 +6,7 @@ import { getDb } from "./db";
 import { mt5ApiKeyFingerprint, mt5ConnectionReference } from "./mt5Security";
 import { supabaseDataSourceReference } from "./supabaseAdmin";
 import { recordMt5EventFailureAtomic, syncMt5HistoryBatchAtomic, syncMt5OpenBatchAtomic, syncMt5PositionAtomic, touchMt5ConnectionAtomic, updateMt5AccountSummaryAtomic } from "./atomicOperations";
-import { normalizeMae, normalizeMfe } from "@shared/riskDerivation";
+import { normalizeMae, normalizeMfe, normalizeMt5Money } from "@shared/riskDerivation";
 
 async function requireDb() { const db = await getDb(); if (!db) throw new Error("Supabase database is unavailable. Please retry shortly."); return db; }
 
@@ -372,8 +372,10 @@ async function syncMt5PositionToTradeLog(userId: number, accountId: number, posi
     // Stored as positive magnitudes (MFE $250, MAE $180), never signed.
     mfe: normalizeMfe(position.mfeUsd)?.toFixed(2) ?? null,
     mae: normalizeMae(position.maeUsd)?.toFixed(2) ?? null,
-    risk: position.riskUsd.toFixed(2),
-    reward: position.rewardUsd.toFixed(2),
+    // The EA sends 0 for risk/reward when it could not compute them (no
+    // SL/TP): 0 is "unavailable", never a stored $0.00.
+    risk: normalizeMt5Money(position.riskUsd)?.toFixed(2) ?? null,
+    reward: normalizeMt5Money(position.rewardUsd)?.toFixed(2) ?? null,
     pnl: position.pnl.toFixed(2),
     openTime: position.openTime,
     closeTime: position.closeTime ?? null,

@@ -6,6 +6,7 @@ import {
   formatMfe,
   normalizeMae,
   normalizeMfe,
+  normalizeMt5Money,
 } from "./riskDerivation";
 
 describe("deriveRiskDistances", () => {
@@ -94,5 +95,21 @@ describe("MAE/MFE normalization", () => {
     expect(normalizeMfe(250)).toBe(250);
     expect(normalizeMae(-180)).toBe(180);
     expect(normalizeMfe(250)).not.toBe(100);
+  });
+});
+
+describe("MT5 money normalization", () => {
+  it("treats the EA's 0 as unavailable, never a detected $0.00", () => {
+    expect(normalizeMt5Money(0)).toBe(null);
+    expect(normalizeMt5Money("0.00")).toBe(null);
+    expect(normalizeMt5Money(null)).toBe(null);
+    expect(normalizeMt5Money(undefined)).toBe(null);
+    expect(normalizeMt5Money("")).toBe(null);
+    expect(normalizeMt5Money("abc")).toBe(null);
+  });
+
+  it("passes real detected values through untouched", () => {
+    expect(normalizeMt5Money(46.4)).toBe(46.4);
+    expect(normalizeMt5Money("120.00")).toBe(120);
   });
 });

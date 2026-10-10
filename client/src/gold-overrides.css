@@ -186,3 +186,8 @@
 .auto-field { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 8px 12px; border: 1px dashed color-mix(in srgb, var(--gj-gold) 45%, var(--gj-line)); border-radius: 9px; background: color-mix(in srgb, var(--gj-gold) 6%, var(--gj-panel-2)); }
 .auto-field-value { color: var(--gj-text); font-size: 13px; font-weight: 600; }
 .auto-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--gj-gold) 18%, transparent); color: var(--gj-gold); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+/* Editable MT5 risk fields: the input fills the dashed auto box. */
+.auto-field.risk-editable { min-width: 0; padding: 4px 4px 4px 12px; gap: 6px; }
+.trade-dialog .auto-field.risk-editable input { flex: 1 1 0%; min-width: 0; width: auto; border: none !important; background: transparent !important; box-shadow: none !important; padding: 4px 0; font-weight: 600; }
+.auto-field.risk-editable .auto-badge { flex-shrink: 0; }
+.auto-badge.manual { background: color-mix(in srgb, var(--gj-text) 12%, transparent); color: var(--gj-dim); }

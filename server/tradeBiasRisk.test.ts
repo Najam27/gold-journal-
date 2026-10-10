@@ -279,4 +279,51 @@ describe("risk auto-detection", () => {
     expect(stored.mae).toBe(null);
     expect(stored.mfe).toBe(null);
   });
+
+  it("10. EA fake-zero risk/reward (no SL/TP) stores null, never 0.00", async () => {
+    const seed: Record<string, Row[]> = {
+      gj_accounts: [accountRow(ACCOUNT)],
+      gj_trades: [],
+      gj_mt5_live_positions: [mt5PositionRow({ slPrice: null, tpPrice: null, riskUsd: "0.00", rewardUsd: "0.00", mfeUsd: null, maeUsd: null })],
+    };
+    mocks.database.current = new FakeSupabase(seed);
+    const created = await caller().trades.create(
+      baseTrade({ mt5Ticket: "987654321", clientMutationId: "risk-fake-zero-0013" }) as any
+    );
+    const stored = dbRows().find(row => row.id === created.id)!;
+    // The EA's 0 is "unavailable": stored as null, never as a detected $0.00.
+    expect(stored.risk).toBe(null);
+    expect(stored.reward).toBe(null);
+    expect(stored.slPrice).toBe(null);
+    expect(stored.tpPrice).toBe(null);
+    expect(stored.mfe).toBe(null);
+    expect(stored.mae).toBe(null);
+    // Entry still auto-fills from the position's open price.
+    expect(Number(stored.entryPrice)).toBeCloseTo(2650.5, 4);
+  });
+
+  it("11. trades.mt5Source returns the normalized linked position, null when absent", async () => {
+    seedDatabase(true);
+    const created = await caller().trades.create(
+      baseTrade({ mt5Ticket: "987654321", clientMutationId: "risk-source-0014xx" }) as any
+    );
+    const source = await caller().trades.mt5Source({ accountId: ACCOUNT, tradeId: created.id, environment: "LIVE" });
+    expect(source).not.toBe(null);
+    expect(Number(source!.entryPrice)).toBeCloseTo(2650.5, 4);
+    expect(Number(source!.slPrice)).toBeCloseTo(2640, 4);
+    expect(Number(source!.risk)).toBeCloseTo(120, 2);
+    expect(Number(source!.reward)).toBeCloseTo(240, 2);
+    // Excursions arrive as positive magnitudes, matching the trade convention.
+    expect(Number(source!.mfe)).toBeCloseTo(250, 2);
+    expect(Number(source!.mae)).toBeCloseTo(180, 2);
+    // Unknown trade → null, not an error.
+    const missing = await caller().trades.mt5Source({ accountId: ACCOUNT, tradeId: 424242, environment: "LIVE" });
+    expect(missing).toBe(null);
+    // Manual (ticket-less) trade → null.
+    const manual = await caller().trades.create(
+      baseTrade({ entryPrice: 2650, clientMutationId: "risk-source-0015xx" }) as any
+    );
+    const manualSource = await caller().trades.mt5Source({ accountId: ACCOUNT, tradeId: manual.id, environment: "LIVE" });
+    expect(manualSource).toBe(null);
+  });
 });

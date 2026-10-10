@@ -31,4 +31,15 @@ describe("getPktSession", () => {
     expect(formatActualR(0, 100)).toBe("—");
     expect(actualRMultiple(0, 100)).toBeNull();
   });
+
+  it("renders — for missing or zero planned risk/reward, never 1 : 0.00", () => {
+    expect(formatRr(46.4, 0)).toBe("—");
+    expect(formatRr(46.4, null)).toBe("—");
+    expect(formatRr(46.4, undefined)).toBe("—");
+    expect(formatRr(46.4, "")).toBe("—");
+    expect(formatRr(null, 100)).toBe("—");
+    expect(formatRr("", "")).toBe("—");
+    expect(formatRr(0, 100)).toBe("—");
+    expect(formatRr(46.4, 92.8)).toBe("1 : 2.00");
+  });
 });

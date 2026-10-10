@@ -121,3 +121,15 @@ export function formatMfe(value: unknown): string | null {
   const formatted = formatMagnitude(value);
   return formatted ? `+${formatted}` : null;
 }
+
+/**
+ * EA-sourced money (riskUsd/rewardUsd): the EA sends 0 when it could not
+ * compute the value (no SL/TP on the position). A $0 planned risk/reward is
+ * meaningless, so 0 normalizes to null (unavailable) — it is never stored or
+ * displayed as a detected $0.00.
+ */
+export function normalizeMt5Money(value: unknown): number | null {
+  const n = toNum(value);
+  if (n === null || n === 0) return null;
+  return n;
+}

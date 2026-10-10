@@ -29,7 +29,7 @@ import { normalizeTradeOptionValue } from "@shared/tradeOptionCategories";
 import { deriveTradeResult } from "@shared/tradeOutcome";
 import { normalizeTradeEnvironment } from "@shared/tradeEnvironment";
 import { BIAS_SIDES, hasBias, normalizeBiasTimeframes } from "@shared/biasTimeframes";
-import { deriveRiskDistances, normalizeMae, normalizeMfe } from "@shared/riskDerivation";
+import { deriveRiskDistances, normalizeMae, normalizeMfe, normalizeMt5Money } from "@shared/riskDerivation";
 import { tradePips } from "@shared/pipMath";
 import {
   OPTION_COLUMNS,
@@ -561,6 +561,38 @@ export const goldRouter = router({
       const hydratedRows = await hydrateSignedScreenshots(rows, storageGetSignedUrl);
       return { trades: hydratedRows.map(toSafeTrade), total, page, pageSize: input.pageSize, pageCount };
     }),
+    // Read-only source-of-truth for the Risk section: the MT5 position row
+    // behind a linked trade, normalized exactly like the write paths (0
+    // risk/reward is "unavailable", excursions are positive magnitudes). The
+    // Edit dialog uses this to backfill trades that were journaled before
+    // prices were written onto the trade row, and to label values that came
+    // from the terminal versus the trader's own edits.
+    mt5Source: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), tradeId: z.number().int().positive().optional(), ticket: z.string().trim().min(1).optional(), environment: z.enum(["LIVE", "TESTING"]).optional().default("LIVE") })).query(async ({ ctx, input }) => {
+      const env = normalizeTradeEnvironment(input.environment);
+      if (env === "TESTING") return null;
+      await getOwnedAccount(ctx.user.id, input.accountId);
+      const db = await dbOrThrow();
+      let ticket: string | null = input.ticket ?? null;
+      if (!ticket && input.tradeId) {
+        const trade = (await db.select({ mt5Ticket: trades.mt5Ticket, accountId: trades.accountId }).from(trades).where(and(eq(trades.id, input.tradeId), eq(trades.userId, ctx.user.id), eq(trades.environment, env))).limit(1))[0];
+        if (!trade?.mt5Ticket || trade.accountId !== input.accountId) return null;
+        ticket = trade.mt5Ticket.toString();
+      }
+      if (!ticket) return null;
+      let ticketBig: bigint;
+      try { ticketBig = BigInt(ticket); } catch { return null; }
+      const row = (await db.select({ openPrice: mt5LivePositions.openPrice, slPrice: mt5LivePositions.slPrice, tpPrice: mt5LivePositions.tpPrice, riskUsd: mt5LivePositions.riskUsd, rewardUsd: mt5LivePositions.rewardUsd, mfeUsd: mt5LivePositions.mfeUsd, maeUsd: mt5LivePositions.maeUsd }).from(mt5LivePositions).where(and(eq(mt5LivePositions.accountId, input.accountId), eq(mt5LivePositions.ticket, ticketBig))).limit(1))[0];
+      if (!row) return null;
+      return {
+        entryPrice: row.openPrice == null ? null : Number(row.openPrice),
+        slPrice: row.slPrice == null ? null : Number(row.slPrice),
+        tpPrice: row.tpPrice == null ? null : Number(row.tpPrice),
+        risk: normalizeMt5Money(row.riskUsd == null ? null : Number(row.riskUsd)),
+        reward: normalizeMt5Money(row.rewardUsd == null ? null : Number(row.rewardUsd)),
+        mfe: normalizeMfe(row.mfeUsd == null ? null : Number(row.mfeUsd)),
+        mae: normalizeMae(row.maeUsd == null ? null : Number(row.maeUsd)),
+      };
+    }),
     create: protectedProcedure.input(tradeInput).mutation(async ({ ctx, input }) => {
       return withPersistenceDiagnostics({ stage: "trade.create", userId: ctx.user.id, accountId: input.accountId, mutationId: input.clientMutationId }, async () => {
         if (isFuturePktTimestamp(input.tradeDate)) throw new TRPCError({ code: "BAD_REQUEST", message: "Future trade dates are not allowed." });
@@ -597,8 +629,13 @@ export const goldRouter = router({
         const autoEntry = input.entryPrice ?? (linkedPosition?.openPrice == null ? null : Number(linkedPosition.openPrice));
         const autoSl = input.slPrice ?? (linkedPosition?.slPrice == null ? null : Number(linkedPosition.slPrice));
         const autoTp = input.tpPrice ?? (linkedPosition?.tpPrice == null ? null : Number(linkedPosition.tpPrice));
-        const autoRisk = input.risk ?? (linkedPosition?.riskUsd == null ? null : Number(linkedPosition.riskUsd));
-        const autoReward = input.reward ?? (linkedPosition?.rewardUsd == null ? null : Number(linkedPosition.rewardUsd));
+        // The EA sends 0 for risk/reward when it could not compute them (no
+        // SL/TP on the position): 0 is "unavailable", never a detected $0.00.
+        // Explicit user input still wins over the MT5 value.
+        const mt5Risk = normalizeMt5Money(linkedPosition?.riskUsd == null ? null : Number(linkedPosition.riskUsd));
+        const mt5Reward = normalizeMt5Money(linkedPosition?.rewardUsd == null ? null : Number(linkedPosition.rewardUsd));
+        const autoRisk = input.risk ?? mt5Risk;
+        const autoReward = input.reward ?? mt5Reward;
         // Excursions auto-detected from the floating P&L sampled while the
         // position was open fill the trade when the user did not type them.
         // Stored as positive magnitudes: MFE $250, MAE $180 — never -$180.

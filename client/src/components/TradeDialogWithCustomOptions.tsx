@@ -482,18 +482,28 @@ function BiasSection({ form, setForm }: any) {
   );
 }
 
-/** Read-only auto-sourced value with its provenance badge. */
-function AutoField({ value, emptyText = "Not available" }: { value: string; emptyText?: string }) {
+/**
+ * Risk field for MT5-linked trades: always editable, pre-filled from the
+ * terminal. A value the trader has not touched shows "Auto-detected"; the
+ * moment they type, the badge flips to "Manual" — and the manual value wins
+ * on save. Clearing a field back to empty preserves the stored value.
+ */
+function RiskField({ field, label, value, placeholder, manual, hint, onChange }: {
+  field: string; label: string; value: string; placeholder: string; manual: boolean; hint?: React.ReactNode; onChange: (field: string, value: string) => void;
+}) {
   const hasValue = value !== "" && value !== null && value !== undefined;
   return (
-    <div className="auto-field">
-      <span className="auto-field-value">{hasValue ? value : emptyText}</span>
-      {hasValue && <span className="auto-badge">Auto-detected</span>}
-    </div>
+    <Field label={label}>
+      <div className="auto-field risk-editable">
+        <Input type="number" min="0" step="any" value={value ?? ""} placeholder={placeholder} aria-label={label} onChange={event => onChange(field, event.target.value)} />
+        {hasValue && <span className={`auto-badge${manual ? " manual" : ""}`}>{manual ? "Manual" : "Auto-detected"}</span>}
+      </div>
+      {hint}
+    </Field>
   );
 }
 
-export function TradeDialogWithCustomOptions({ mode = LIVE_MODE, open, setOpen, form, setForm, editing, onSave, pending, saveState, saveError, screenshot, setScreenshot, progress, plans, dayTrades, behaviorConfig }: any) {
+export function TradeDialogWithCustomOptions({ mode = LIVE_MODE, open, setOpen, form, setForm, editing, onSave, pending, saveState, saveError, screenshot, setScreenshot, progress, plans, dayTrades, behaviorConfig, accountId }: any) {
   const fileRef = useRef<HTMLInputElement>(null);
   // Removal intent belongs to the dialog, because the dialog is the surface that
   // knows which image is currently stored and whether the user asked to drop it.
@@ -540,9 +550,46 @@ export function TradeDialogWithCustomOptions({ mode = LIVE_MODE, open, setOpen, 
     : null;
   const selectDirection = form.direction || "";
   const selectResult = form.result || "";
-  // MT5-linked trades source Entry/SL/TP, monetary risk/reward, and MAE/MFE
-  // from the tracked position: displayed read-only, never typed.
+  // MT5-linked trades pre-fill Entry/SL/TP, monetary risk/reward, and MAE/MFE
+  // from the tracked position, but every field stays editable: an explicit
+  // edit flips the badge to "Manual" and always wins on save.
   const isMt5 = Boolean(form.mt5Ticket);
+  const [manualRiskFields, setManualRiskFields] = useState<Set<string>>(new Set());
+  useEffect(() => { setManualRiskFields(new Set()); }, [open, editing?.id]);
+  const patchRisk = (field: string, value: string) => {
+    patch(field, value);
+    setManualRiskFields(prev => { const next = new Set(prev); next.add(field); return next; });
+  };
+  // Backfill-on-open: trades journaled before prices were written onto the
+  // trade row pull the missing Risk fields from the linked MT5 position.
+  // Only empty fields are filled — stored and typed values are never moved.
+  const mt5Source = trpc.trades.mt5Source.useQuery(
+    { accountId: accountId ?? 0, tradeId: editing?.id, ticket: form.mt5Ticket || undefined, environment: mode.environment },
+    { enabled: Boolean(open && isMt5 && accountId) }
+  );
+  useEffect(() => {
+    if (!open || !isMt5 || !mt5Source.data) return;
+    const source = mt5Source.data;
+    setForm((prev: any) => {
+      const next = { ...prev };
+      let changed = false;
+      const fills: Array<[string, number | null]> = [
+        ["entryPrice", source.entryPrice], ["slPrice", source.slPrice], ["tpPrice", source.tpPrice],
+        ["risk", source.risk], ["reward", source.reward], ["mfe", source.mfe], ["mae", source.mae],
+      ];
+      for (const [field, value] of fills) {
+        if ((next[field] === "" || next[field] == null) && value !== null && value !== undefined) {
+          next[field] = String(value);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    // Runs when the source payload lands; filling only touches empty fields,
+    // so it cannot fight the trader's typing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, isMt5, mt5Source.data]);
+  const mt5EmptyHint = <span className="field-hint">{mt5Source.isLoading ? "Checking the MT5 position…" : "Not detected — type it manually."}</span>;
   const numOrNull = (v: string) => (v === "" || v == null ? null : Number(v));
   const plannedRr = formatRr(numOrNull(form.risk), numOrNull(form.reward));
   const store = useTradeOptionStore();
@@ -557,15 +604,29 @@ export function TradeDialogWithCustomOptions({ mode = LIVE_MODE, open, setOpen, 
     <Section title="Bias"><BiasSection form={form} setForm={setForm} /></Section>
     <Section title="Execution"><Field label="Execution type"><CustomSelect category="Execution type" value={form.executionType} onChange={value => patch("executionType", value)} store={store} onManage={setManageCategory} /></Field><Field label="Market conditions"><CustomSelect multi category="Market condition" value={form.marketCondition} onChange={value => patch("marketCondition", value)} store={store} onManage={setManageCategory} /></Field><Field label="SL placement"><CustomSelect category="SL placement" value={form.slPlacement} onChange={value => patch("slPlacement", value)} store={store} onManage={setManageCategory} /></Field><Field label="TP placement"><CustomSelect category="TP placement" value={form.tpPlacement} onChange={value => patch("tpPlacement", value)} store={store} onManage={setManageCategory} /></Field><Field label="Patience score (1–5)"><Input type="number" min="1" max="5" value={form.patienceScore} onChange={event => patch("patienceScore", event.target.value)} /></Field><Field label="Plan-following score (1–5)"><ScoreSelector value={form.planFollowScore} onChange={value => patch("planFollowScore", value)} ariaLabel="Plan-following score" /><span className="field-hint">Your rating — the journal computes its own adherence beside it.</span></Field><Field label="Mistake / rule-break tags" className="field-span-full"><MistakeTaxonomy value={form.mistake || ""} onChange={value => patch("mistake", value)} store={store} onManage={setManageCategory} />{overtradingAutoTagged && <span className="field-hint overtrading-notice">⚠️ Overtrading tag auto-applied: this is your 4th+ trade today. It will appear as an overtrading mistake in Analysis and count toward overtrading-day stats. Remove the tag if this trade was planned.</span>}</Field><Field label="Hold quality"><CustomSelect category="Hold quality" value={form.holdQuality} onChange={value => patch("holdQuality", value)} store={store} onManage={setManageCategory} /></Field></Section>
     <Section title="Risk">
-      <Field label="Entry price">{isMt5 ? <AutoField value={form.entryPrice} /> : <Input type="number" min="0" step="any" value={form.entryPrice} placeholder="Fill price" onChange={event => patch("entryPrice", event.target.value)} />}{isMt5 && !form.entryPrice && <span className="field-hint">Fills from the MT5 position on save.</span>}</Field>
+      {isMt5
+        ? <RiskField field="entryPrice" label="Entry price" value={form.entryPrice} placeholder="Fill price" manual={manualRiskFields.has("entryPrice")} onChange={patchRisk} hint={!form.entryPrice && mt5EmptyHint} />
+        : <Field label="Entry price"><Input type="number" min="0" step="any" value={form.entryPrice} placeholder="Fill price" onChange={event => patch("entryPrice", event.target.value)} /></Field>}
       {isPips && <Field label="Exit price"><Input type="number" min="0" step="any" value={form.exitPrice} placeholder="Exit price" onChange={event => patch("exitPrice", event.target.value)} /></Field>}
-      <Field label="Stop-loss price">{isMt5 ? <AutoField value={form.slPrice} /> : <Input type="number" min="0" step="any" value={form.slPrice} onChange={event => patch("slPrice", event.target.value)} />}{isMt5 && !form.slPrice && <span className="field-hint">Fills from the MT5 position on save.</span>}</Field>
-      <Field label="Take-profit price">{isMt5 ? <AutoField value={form.tpPrice} /> : <Input type="number" min="0" step="any" value={form.tpPrice} onChange={event => patch("tpPrice", event.target.value)} />}{isMt5 && !form.tpPrice && <span className="field-hint">Fills from the MT5 position on save.</span>}</Field>
-      <Field label="Planned risk $">{isMt5 ? <AutoField value={form.risk} /> : <Input type="number" min="0" step="0.01" value={form.risk} placeholder="Not available" onChange={event => patch("risk", event.target.value)} />}{!isMt5 && !form.risk && <span className="field-hint">Needs position size — not derivable from price alone.</span>}</Field>
-      <Field label="Planned reward $">{isMt5 ? <AutoField value={form.reward} /> : <Input type="number" min="0" step="0.01" value={form.reward} placeholder="Not available" onChange={event => patch("reward", event.target.value)} />}{!isMt5 && !form.reward && <span className="field-hint">Needs position size — not derivable from price alone.</span>}</Field>
-      <div className="rr-live"><span>PLANNED R:R</span><strong className="data-text">{plannedRr ?? "—"}</strong>{plannedRr && <span className="auto-badge">Auto-calculated</span>}</div>
-      <Field label="Highest unrealized loss $ (MAE)">{isMt5 ? <AutoField value={form.mae} /> : <Input type="number" min="0" step="0.01" value={form.mae} placeholder="Worst heat taken" onChange={event => patch("mae", event.target.value)} />}{isMt5 && <span className="field-hint">Tracked from live floating P&L while the position was open.</span>}</Field>
-      <Field label="Highest unrealized gain $ (MFE)">{isMt5 ? <AutoField value={form.mfe} /> : <Input type="number" min="0" step="0.01" value={form.mfe} placeholder="Best it looked" onChange={event => patch("mfe", event.target.value)} />}{isMt5 && <span className="field-hint">Tracked from live floating P&L while the position was open.</span>}</Field>
+      {isMt5
+        ? <RiskField field="slPrice" label="Stop-loss price" value={form.slPrice} placeholder="Stop-loss price" manual={manualRiskFields.has("slPrice")} onChange={patchRisk} hint={!form.slPrice && mt5EmptyHint} />
+        : <Field label="Stop-loss price"><Input type="number" min="0" step="any" value={form.slPrice} onChange={event => patch("slPrice", event.target.value)} /></Field>}
+      {isMt5
+        ? <RiskField field="tpPrice" label="Take-profit price" value={form.tpPrice} placeholder="Take-profit price" manual={manualRiskFields.has("tpPrice")} onChange={patchRisk} hint={!form.tpPrice && mt5EmptyHint} />
+        : <Field label="Take-profit price"><Input type="number" min="0" step="any" value={form.tpPrice} onChange={event => patch("tpPrice", event.target.value)} /></Field>}
+      {isMt5
+        ? <RiskField field="risk" label="Planned risk $" value={form.risk} placeholder="Not available" manual={manualRiskFields.has("risk")} onChange={patchRisk} hint={!form.risk && mt5EmptyHint} />
+        : <Field label="Planned risk $"><Input type="number" min="0" step="0.01" value={form.risk} placeholder="Not available" onChange={event => patch("risk", event.target.value)} />{!form.risk && <span className="field-hint">Needs position size — not derivable from price alone.</span>}</Field>}
+      {isMt5
+        ? <RiskField field="reward" label="Planned reward $" value={form.reward} placeholder="Not available" manual={manualRiskFields.has("reward")} onChange={patchRisk} hint={!form.reward && mt5EmptyHint} />
+        : <Field label="Planned reward $"><Input type="number" min="0" step="0.01" value={form.reward} placeholder="Not available" onChange={event => patch("reward", event.target.value)} />{!form.reward && <span className="field-hint">Needs position size — not derivable from price alone.</span>}</Field>}
+      <div className="rr-live"><span>PLANNED R:R</span><strong className="data-text">{plannedRr}</strong>{plannedRr !== "—" && <span className="auto-badge">Auto-calculated</span>}</div>
+      {isMt5
+        ? <RiskField field="mae" label="Highest unrealized loss $ (MAE)" value={form.mae} placeholder="Worst heat taken" manual={manualRiskFields.has("mae")} onChange={patchRisk} hint={<span className="field-hint">Tracked from live floating P&L while the position was open.</span>} />
+        : <Field label="Highest unrealized loss $ (MAE)"><Input type="number" min="0" step="0.01" value={form.mae} placeholder="Worst heat taken" onChange={event => patch("mae", event.target.value)} /></Field>}
+      {isMt5
+        ? <RiskField field="mfe" label="Highest unrealized gain $ (MFE)" value={form.mfe} placeholder="Best it looked" manual={manualRiskFields.has("mfe")} onChange={patchRisk} hint={<span className="field-hint">Tracked from live floating P&L while the position was open.</span>} />
+        : <Field label="Highest unrealized gain $ (MFE)"><Input type="number" min="0" step="0.01" value={form.mfe} placeholder="Best it looked" onChange={event => patch("mfe", event.target.value)} /></Field>}
       {isPips ? <Field label="Actual pips (auto)"><Input value={formatPips(pipsPreview)} readOnly aria-readonly="true" /><span className="field-hint">Derived from entry → exit. Not editable.</span></Field> : <Field label="Actual P&L $"><Input type="number" step="0.01" value={form.pnl} placeholder="Realized profit/loss" onChange={event => patchPnl(event.target.value)} /></Field>}
       <div className="rr-live"><span>ACTUAL R:R</span><strong className="data-text">{isPips ? "—" : formatActualR(form.risk, form.pnl)}</strong></div>
     </Section>

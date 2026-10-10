@@ -2008,6 +2008,7 @@ export default function GoldJournal() {
         form={tradeForm}
         setForm={setTradeForm}
         editing={editing}
+        accountId={account?.id}
         onSave={submitTrade}
         // Idle -> Saving… -> Saved / Save failed, for the whole attempt
         // (the screenshot upload included). A second click is disabled.

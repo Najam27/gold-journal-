@@ -31,9 +31,12 @@ export function formatMoney(value: number | string | null | undefined) {
 }
 
 export function formatRr(risk: number | string | null | undefined, reward: number | string | null | undefined) {
+  // Unavailable stays unavailable: a null/blank/zero risk or reward renders
+  // "—", never "1 : 0.00".
+  if (risk === null || risk === undefined || risk === "" || reward === null || reward === undefined || reward === "") return "—";
   const riskValue = Number(risk);
   const rewardValue = Number(reward);
-  if (!Number.isFinite(riskValue) || !Number.isFinite(rewardValue) || riskValue <= 0) return "—";
+  if (!Number.isFinite(riskValue) || !Number.isFinite(rewardValue) || riskValue <= 0 || rewardValue <= 0) return "—";
   return `1 : ${(rewardValue / riskValue).toFixed(2)}`;
 }
 
