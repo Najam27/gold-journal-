@@ -750,6 +750,11 @@ img, video, canvas { max-width: 100%; }
 
 @media (max-width: 760px) {
   .gj-main { padding-bottom: 14rem; }
+  /* Collapse the wide 2-column grids — the rule above would otherwise keep
+     them side-by-side on phones, crushing panels into vertical text strips. */
+  .analysis-grid,
+  .mentor-grid,
+  .mt5-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ===========================================================================
