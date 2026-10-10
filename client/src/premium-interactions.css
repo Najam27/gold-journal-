@@ -748,10 +748,15 @@ img, video, canvas { max-width: 100%; }
 /* A metric is one token: it never breaks mid-number to fit a card. */
 .stat-card strong.data-text { white-space: nowrap; }
 
+@media (max-width: 1120px) {
+  /* Collapse the wide 2-column grids on tablets too — the 2-column rule
+     above would otherwise override index.css's 1120px breakpoint. */
+  .analysis-grid,
+  .mentor-grid,
+  .mt5-grid { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 760px) {
   .gj-main { padding-bottom: 14rem; }
-  /* Collapse the wide 2-column grids — the rule above would otherwise keep
-     them side-by-side on phones, crushing panels into vertical text strips. */
   .analysis-grid,
   .mentor-grid,
   .mt5-grid { grid-template-columns: minmax(0, 1fr); }
