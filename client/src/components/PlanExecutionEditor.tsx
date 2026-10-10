@@ -18,6 +18,7 @@ import { formatMoney, formatDate, getPktDateInput, sessions } from "@/lib/gold";
 import { addPktDays, formatPktMonth, pktDateToTimestamp } from "@shared/pktDate";
 import { BEHAVIORAL_OBJECTIVES, EMOTIONAL_STATES, PSYCHOLOGY_TRIGGERS, calculateTradingReadiness } from "@/lib/psychology";
 import { trpc } from "@/lib/trpc";
+import { friendlyValidationMessage } from "@/lib/apiErrors";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { checkRuleChange, type RuleChangeCheck } from "@/lib/ruleChangeGuard";
 import {
@@ -361,7 +362,7 @@ export function PlanExecutionEditor({ account, plans = [], trades = [], behavior
       setNotice({ tone: "info", text: message });
       toast.success(message);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The plan could not be saved. Your inputs are still here—please try again.";
+      const message = friendlyValidationMessage(error, error instanceof Error ? error.message : "The plan could not be saved. Your inputs are still here—please try again.");
       setNotice({ tone: "error", text: message });
       toast.error(message);
     }

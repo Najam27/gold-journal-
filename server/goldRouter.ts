@@ -59,6 +59,10 @@ export function isUniqueViolation(error: unknown): boolean {
   return typeof candidate.message === "string" && /duplicate key|unique constraint/i.test(candidate.message);
 }
 const optionalText = (max = 5000) => z.string().trim().max(max).optional().default("");
+// Plan/execution scores: 1-5 when the trader rates, null when untouched.
+// Stored rows from older builds can hold 0 — accept it and normalize to null
+// on write so a legacy 0 never blocks a save with a "too_small" rejection.
+const planScore = z.number().int().min(0).max(5).nullable().optional().default(null);
 // Free-form journal text.
 //
 // The trade journal stores whatever the trader actually wrote — a long mistake
@@ -113,7 +117,7 @@ const analysisCompareInput = z.object({ accountId: z.number().int().positive(), 
 // planning payload and the behavioural payload stay separately validatable
 // while remaining one plan record.
 const lossFloorMetrics = new Set(["daily_loss", "weekly_drawdown"]);
-const goalInput = z.object({ accountId: z.number().int().positive(), name: z.string().trim().min(1).max(120), description: optionalText(500), period: z.enum(["DAILY", "WEEKLY", "MONTHLY"]), metric: z.string().trim().min(1).max(80), comparison: z.enum(["GTE", "LTE"]), target: money(-1_000_000), notify: z.boolean().default(true), active: z.boolean().default(true) }).superRefine((value, ctx) => {
+const goalInput = z.object({ accountId: z.number().int().positive(), name: z.string().trim().min(1).max(120), description: freeText, period: z.enum(["DAILY", "WEEKLY", "MONTHLY"]), metric: z.string().trim().min(1).max(80), comparison: z.enum(["GTE", "LTE"]), target: money(-1_000_000), notify: z.boolean().default(true), active: z.boolean().default(true) }).superRefine((value, ctx) => {
   if (lossFloorMetrics.has(value.metric) && value.target >= 0) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["target"], message: "Loss controls use a negative P&L floor, for example -100." });
   if (!lossFloorMetrics.has(value.metric) && value.target < 0) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["target"], message: "Only loss-floor controls can use a negative threshold." });
 });
@@ -403,7 +407,7 @@ export const goldRouter = router({
     }),
     history: protectedProcedure.input(accountIdInput.extend({ limit: z.number().int().min(1).max(50).default(20) })).query(async ({ ctx, input }) => { await getOwnedAccount(ctx.user.id, input.accountId); return listAiReports(ctx.user.id, input.accountId, input.limit); }),
     experiments: protectedProcedure.input(accountIdInput.extend({ limit: z.number().int().min(1).max(100).default(50) })).query(async ({ ctx, input }) => { await getOwnedAccount(ctx.user.id, input.accountId); return listAiExperiments(ctx.user.id, input.accountId, input.limit); }),
-    updateExperiment: protectedProcedure.input(accountIdInput.extend({ experimentId: z.number().int().positive(), status: z.enum(["PLANNED", "RUNNING", "COMPLETED", "CANCELLED"]), outcome: optionalText(2_000).nullable() })).mutation(({ ctx, input }) => updateAiExperiment(ctx.user.id, input.accountId, input.experimentId, input.status, input.outcome)),
+    updateExperiment: protectedProcedure.input(accountIdInput.extend({ experimentId: z.number().int().positive(), status: z.enum(["PLANNED", "RUNNING", "COMPLETED", "CANCELLED"]), outcome: freeText.nullable() })).mutation(({ ctx, input }) => updateAiExperiment(ctx.user.id, input.accountId, input.experimentId, input.status, input.outcome)),
     compare: protectedProcedure.input(analysisCompareInput).query(async ({ ctx, input }) => {
       const [current, previous] = await Promise.all([getAccountAnalysis(ctx.user.id, input.accountId, input.current), getAccountAnalysis(ctx.user.id, input.accountId, input.previous)]);
       return { current, previous, delta: compareAnalysis(current, previous) };
@@ -918,7 +922,7 @@ export const goldRouter = router({
     // Direct persistence, like trades: the browser sends the movement and the
     // backend INSERTs it. `clientMutationId` stays supported for server-side
     // idempotency, and the browser no longer queues anything locally.
-    create: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), movementDate: timestampInput, type: z.enum(["DEPOSIT", "WITHDRAW"]), amount: money(0.01), note: optionalText(1000), clientMutationId: clientMutationIdInput })).mutation(async ({ ctx, input }) => {
+    create: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), movementDate: timestampInput, type: z.enum(["DEPOSIT", "WITHDRAW"]), amount: money(0.01), note: freeText, clientMutationId: clientMutationIdInput })).mutation(async ({ ctx, input }) => {
       await getOwnedAccount(ctx.user.id, input.accountId);
       const db = await dbOrThrow();
       if (input.clientMutationId) {
@@ -978,8 +982,8 @@ export const goldRouter = router({
       weekStart: timestampInput,
       weekEnd: timestampInput,
       statsSnapshot: z.record(z.string(), z.unknown()).nullable().optional().default(null),
-      lesson: optionalText(5_000).nullable(),
-      ruleForNextWeek: optionalText(1_000).nullable(),
+      lesson: freeText.nullable(),
+      ruleForNextWeek: freeText.nullable(),
     }).superRefine((value, ctx) => {
       if (value.weekEnd <= value.weekStart) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "The review week must end after it starts." });
     })).mutation(async ({ ctx, input }) => {
@@ -1047,7 +1051,7 @@ export const goldRouter = router({
         behaviorConfig: (row?.behaviorConfig ?? null) as Record<string, number | null> | null,
       };
     }),
-    save: protectedProcedure.input(z.object({ identityStatement: optionalText(400), disciplineWeights: disciplineWeightsInput.nullable().optional().default(null), behaviorConfig: behaviorConfigInput.nullable().optional().default(null) })).mutation(async ({ ctx, input }) => {
+    save: protectedProcedure.input(z.object({ identityStatement: freeText, disciplineWeights: disciplineWeightsInput.nullable().optional().default(null), behaviorConfig: behaviorConfigInput.nullable().optional().default(null) })).mutation(async ({ ctx, input }) => {
       const db = await dbOrThrow();
       const values = { userId: ctx.user.id, identityStatement: input.identityStatement, disciplineWeights: input.disciplineWeights, behaviorConfig: input.behaviorConfig };
       await db.insert(traderProfiles).values(values).onConflictDoUpdate({ target: traderProfiles.userId, set: { identityStatement: input.identityStatement, disciplineWeights: input.disciplineWeights, behaviorConfig: input.behaviorConfig, updatedAt: new Date() } });
@@ -1171,7 +1175,7 @@ export const goldRouter = router({
     }),
   }),
   skipped: router({
-    create: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), tradeDate: timestampInput, session: z.string().trim().min(1).max(40), level: optionalText(100), timeframe: optionalText(20), direction: z.enum(["BUY", "SELL"]), skipReason: z.string().trim().min(1).max(120), confidence: z.number().int().min(1).max(5), outcome: z.string().trim().min(1).max(80), estimatedMissed: money(), notes: optionalText(3000) })).mutation(async ({ ctx, input }) => {
+    create: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), tradeDate: timestampInput, session: z.string().trim().min(1).max(40), level: optionalText(100), timeframe: optionalText(20), direction: z.enum(["BUY", "SELL"]), skipReason: z.string().trim().min(1).max(120), confidence: z.number().int().min(1).max(5), outcome: z.string().trim().min(1).max(80), estimatedMissed: money(), notes: freeText })).mutation(async ({ ctx, input }) => {
       if (isFuturePktTimestamp(input.tradeDate)) throw new TRPCError({ code: "BAD_REQUEST", message: "Future skipped-trade dates are not allowed." });
       await getOwnedAccount(ctx.user.id, input.accountId);
       const db = await dbOrThrow();
@@ -1182,10 +1186,10 @@ export const goldRouter = router({
   // The daily plan router. Planning fields, the pre-session check-in, the
   // post-session review, and copy provenance are one record.
   plans: router({
-    save: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), planDate: timestampInput, preBias: optionalText(40), marketContext: optionalText(3000), keyLevels: optionalText(3000), sessionFocus: z.array(z.string().trim().max(120)).max(9), eventRisk: optionalText(1500), longScenario: optionalText(3000), shortScenario: optionalText(3000), noTradeCondition: optionalText(2000), invalidationLevel: optionalText(1000), riskLimit: optionalText(40), maxTrades: z.number().int().min(1).max(99).nullable(), sizingPlan: optionalText(2000), planNotes: optionalText(5000), rulesPlanned: z.array(z.object({ id: z.string().trim().min(1).max(80), text: z.string().trim().max(500), checked: z.boolean() })).max(30), emotionalState: z.enum(["", "Calm", "Neutral", "Anxious", "Frustrated", "Overconfident", "Tired"]).optional().default(""), energyLevel: z.number().int().min(1).max(5).nullable().optional().default(null), focusLevel: z.number().int().min(1).max(5).nullable().optional().default(null), confidenceLevel: z.number().int().min(1).max(5).nullable().optional().default(null), stressLevel: z.number().int().min(1).max(5).nullable().optional().default(null), behavioralFocus: optionalText(80), psychologyRisk: optionalText(1000), emotionStart: z.array(z.string().trim().max(80)).max(20), emotionEnd: z.array(z.string().trim().max(80)).max(20), executionScore: z.number().int().min(1).max(5).nullable(), rulesFollowed: z.array(z.object({ id: z.string().trim().min(1).max(80), yes: z.boolean() })).max(30), whatWentWell: optionalText(5000), whatWentWrong: optionalText(5000), executionNotes: optionalText(5000), planDeviation: optionalText(5000), lessons: optionalText(2000), tomorrowFocus: optionalText(2000), overallRating: z.number().int().min(1).max(5).nullable() })).mutation(async ({ ctx, input }) => {
+    save: protectedProcedure.input(z.object({ accountId: z.number().int().positive(), planDate: timestampInput, preBias: freeText, marketContext: freeText, keyLevels: freeText, sessionFocus: z.array(z.string().trim().max(120)).max(9), eventRisk: freeText, longScenario: freeText, shortScenario: freeText, noTradeCondition: freeText, invalidationLevel: freeText, riskLimit: freeText, maxTrades: z.number().int().min(1).max(99).nullable(), sizingPlan: freeText, planNotes: freeText, rulesPlanned: z.array(z.object({ id: z.string().trim().min(1).max(80), text: z.string().trim(), checked: z.boolean() })).max(30), emotionalState: z.enum(["", "Calm", "Neutral", "Anxious", "Frustrated", "Overconfident", "Tired"]).optional().default(""), energyLevel: planScore, focusLevel: planScore, confidenceLevel: planScore, stressLevel: planScore, behavioralFocus: freeText, psychologyRisk: freeText, emotionStart: z.array(z.string().trim().max(80)).max(20), emotionEnd: z.array(z.string().trim().max(80)).max(20), executionScore: planScore, rulesFollowed: z.array(z.object({ id: z.string().trim().min(1).max(80), yes: z.boolean() })).max(30), whatWentWell: freeText, whatWentWrong: freeText, executionNotes: freeText, planDeviation: freeText, lessons: freeText, tomorrowFocus: freeText, overallRating: planScore })).mutation(async ({ ctx, input }) => {
       await getOwnedAccount(ctx.user.id, input.accountId);
       const db = await dbOrThrow();
-      const record = { userId: ctx.user.id, accountId: input.accountId, planDate: canonicalPktPlanDate(input.planDate), preBias: input.preBias, marketContext: input.marketContext, keyLevels: input.keyLevels, sessionFocus: input.sessionFocus, eventRisk: input.eventRisk, longScenario: input.longScenario, shortScenario: input.shortScenario, noTradeCondition: input.noTradeCondition, invalidationLevel: input.invalidationLevel, riskLimit: input.riskLimit, maxTrades: input.maxTrades, sizingPlan: input.sizingPlan, planNotes: input.planNotes, rulesPlanned: input.rulesPlanned, emotionalState: input.emotionalState || null, energyLevel: input.energyLevel, focusLevel: input.focusLevel, confidenceLevel: input.confidenceLevel, stressLevel: input.stressLevel, behavioralFocus: input.behavioralFocus, psychologyRisk: input.psychologyRisk, emotionStart: input.emotionStart.join("|"), emotionEnd: input.emotionEnd.join("|"), executionScore: input.executionScore, rulesFollowed: input.rulesFollowed, whatWentWell: input.whatWentWell, whatWentWrong: input.whatWentWrong, executionNotes: input.executionNotes, planDeviation: input.planDeviation, lessons: input.lessons, tomorrowFocus: input.tomorrowFocus, overallRating: input.overallRating };
+      const record = { userId: ctx.user.id, accountId: input.accountId, planDate: canonicalPktPlanDate(input.planDate), preBias: input.preBias, marketContext: input.marketContext, keyLevels: input.keyLevels, sessionFocus: input.sessionFocus, eventRisk: input.eventRisk, longScenario: input.longScenario, shortScenario: input.shortScenario, noTradeCondition: input.noTradeCondition, invalidationLevel: input.invalidationLevel, riskLimit: input.riskLimit, maxTrades: input.maxTrades, sizingPlan: input.sizingPlan, planNotes: input.planNotes, rulesPlanned: input.rulesPlanned, emotionalState: input.emotionalState || null, energyLevel: input.energyLevel || null, focusLevel: input.focusLevel || null, confidenceLevel: input.confidenceLevel || null, stressLevel: input.stressLevel || null, behavioralFocus: input.behavioralFocus, psychologyRisk: input.psychologyRisk, emotionStart: input.emotionStart.join("|"), emotionEnd: input.emotionEnd.join("|"), executionScore: input.executionScore || null, rulesFollowed: input.rulesFollowed, whatWentWell: input.whatWentWell, whatWentWrong: input.whatWentWrong, executionNotes: input.executionNotes, planDeviation: input.planDeviation, lessons: input.lessons, tomorrowFocus: input.tomorrowFocus, overallRating: input.overallRating || null };
       await db.insert(dailyPlans).values(record).onConflictDoUpdate({ target: [dailyPlans.userId, dailyPlans.accountId, dailyPlans.planDate], set: record });
       return { success: true };
     }),

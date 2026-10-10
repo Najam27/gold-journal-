@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { API_ERROR_COPY, apiErrorCategory, classifyApiError, createCorrelationId, logApiFailure, tagApiError } from "./apiErrors";
+import { API_ERROR_COPY, apiErrorCategory, classifyApiError, createCorrelationId, friendlyValidationMessage, logApiFailure, tagApiError } from "./apiErrors";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -63,5 +63,28 @@ describe("api error classification", () => {
     expect(apiErrorCategory(error)).toBe("DATABASE_ERROR");
     tagApiError(error, "SERVER_ERROR");
     expect(apiErrorCategory(error)).toBe("DATABASE_ERROR");
+  });
+});
+
+describe("friendlyValidationMessage", () => {
+  it("translates the raw Zod issue JSON from a plan save into plain language", () => {
+    const zodJson = JSON.stringify([
+      { origin: "number", code: "too_small", minimum: 1, inclusive: true, path: ["energyLevel"], message: "Too small: expected number to be >=1" },
+      { origin: "number", code: "too_small", minimum: 1, inclusive: true, path: ["focusLevel"], message: "Too small: expected number to be >=1" },
+      { origin: "number", code: "too_small", minimum: 1, inclusive: true, path: ["stressLevel"], message: "Too small: expected number to be >=1" },
+      { origin: "number", code: "too_small", minimum: 1, inclusive: true, path: ["executionScore"], message: "Too small: expected number to be >=1" },
+      { origin: "number", code: "too_small", minimum: 1, inclusive: true, path: ["overallRating"], message: "Too small: expected number to be >=1" },
+    ]);
+    const message = friendlyValidationMessage(new Error(zodJson), "fallback");
+    expect(message).not.toContain("\"origin\"");
+    expect(message).not.toContain("too_small");
+    expect(message).toContain("Energy");
+    expect(message).toContain("Focus");
+    expect(message).toContain("2 more");
+  });
+
+  it("falls back for non-Zod errors", () => {
+    expect(friendlyValidationMessage(new Error("plain failure"), "fallback")).toBe("fallback");
+    expect(friendlyValidationMessage(new Error("not json ["), "fallback")).toBe("fallback");
   });
 });

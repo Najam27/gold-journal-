@@ -173,6 +173,52 @@ export function createCorrelationId() {
 }
 
 /**
+ * Human-friendly validation messages.
+ *
+ * tRPC surfaces Zod failures as a raw JSON array of issues
+ * (`[{"origin":"number","code":"too_small",...}]`), which is meaningless to a
+ * trader. This converts the common shapes into plain language. Anything it
+ * does not recognize falls back to the caller's message.
+ */
+const VALIDATION_FIELD_LABELS: Record<string, string> = {
+  energyLevel: "Energy",
+  focusLevel: "Focus",
+  confidenceLevel: "Confidence",
+  stressLevel: "Stress",
+  executionScore: "Execution score",
+  overallRating: "Overall rating",
+  maxTrades: "Maximum trades",
+  planDate: "Plan date",
+  preBias: "Working bias",
+  marketContext: "Market context",
+  keyLevels: "Key levels",
+  eventRisk: "Event risk",
+  sessionFocus: "Session focus",
+};
+
+export function friendlyValidationMessage(error: unknown, fallback: string): string {
+  const raw = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("[")) return fallback;
+  let issues: Array<{ code?: string; path?: unknown; message?: string }>;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (!Array.isArray(parsed) || parsed.length === 0) return fallback;
+    issues = parsed;
+  } catch {
+    return fallback;
+  }
+  const parts = issues.slice(0, 3).map(issue => {
+    const path = Array.isArray(issue.path) ? issue.path.map(String).join(".") : "";
+    const label = VALIDATION_FIELD_LABELS[path] ?? (path ? path.replace(/([A-Z])/g, " $1").trim() : "A field");
+    const detail = typeof issue.message === "string" && issue.message ? issue.message.replace(/^Too small: expected /, "").replace(/^Too big: expected /, "") : "invalid value";
+    return `${label} — ${detail}`;
+  });
+  const more = issues.length > 3 ? ` (${issues.length - 3} more)` : "";
+  return `Couldn't save: ${parts.join("; ")}${more}. Your inputs are still here.`;
+}
+
+/**
  * One structured line per failed request. Keys, tokens, and bodies never appear:
  * only the request path, the account, the duration, the status, and the
  * server-provided error code.
