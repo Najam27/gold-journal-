@@ -885,6 +885,12 @@ select option:disabled { color: var(--text-disabled); }
 .week-summary-card.loss { border-color: color-mix(in srgb, var(--accent-coral) 34%, var(--border)); background: linear-gradient(160deg, color-mix(in srgb, var(--accent-coral) 12%, var(--surface-panel)), var(--surface-panel)); }
 .week-summary-card.loss strong { color: var(--accent-coral); }
 .pnl-day-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+/* Short viewports: the whole calendar page fits without scrolling. */
+@media (max-height: 850px) {
+  .pnl-day-card { min-height: 52px; }
+  .pnl-week-row { padding: 2px 14px; }
+  .pnl-week-calendar { padding: 12px; }
+}
 .pnl-day-card {
   position: relative;
   min-height: 58px;
